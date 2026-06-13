@@ -94,9 +94,12 @@ function buildOdysseusEnv() {
   env.AUTH_ENABLED = "false";
   env.ODYSSEUS_DATA_DIR = path.join(ODYSSEUS_DIR, "data");
 
-  // Route Odysseus tool /api/shell/exec calls to the Express API server
-  env.ODYSSEUS_SHELL_BASE = `http://127.0.0.1:${API_PORT}`;
-  // Shared token so Express accepts Odysseus's internal header
+  // Route ONLY Odysseus tool /api/shell/exec calls to the Express API server.
+  // ODYSSEUS_INTERNAL_BASE is NOT set here — it must stay pointing at Odysseus
+  // itself (127.0.0.1:7000) so cookbook/model/state internal calls keep working.
+  env.ODYSSEUS_SHELL_EXEC_BASE = `http://127.0.0.1:${API_PORT}`;
+  // Shared CSRF token. Odysseus sends it as X-Odysseus-Internal-Token;
+  // Express accepts it via requireShellToken / requireVmToken middleware.
   env.ODYSSEUS_BRIDGE_TOKEN = BRIDGE_TOKEN;
 
   // Map Replit AI Anthropic key if present

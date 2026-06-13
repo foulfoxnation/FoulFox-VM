@@ -20,21 +20,19 @@ if [ -z "$OPENAI_MODEL" ]; then
   export OPENAI_MODEL="claude-sonnet-4-5"
 fi
 
-# ── Odysseus → Express API server bridge ──────────────────────────────────────
-# When running alongside the Windows Odysseus Express API server, route Odysseus's
-# internal API calls (shell/exec, cookbook, etc.) to the Express server instead of
-# looping back to itself. This allows Odysseus tools to execute shell commands via
-# the Express shell/exec endpoint which manages VM SSH/serial session routing.
+# ── Odysseus → Express API server shell/exec bridge ───────────────────────────
+# IMPORTANT: Do NOT set ODYSSEUS_INTERNAL_BASE here. That variable is used
+# by ALL Odysseus internal tool calls (/api/cookbook, /api/model, etc.) and
+# must continue to point at Odysseus itself (127.0.0.1:7000).
 #
-# ODYSSEUS_SHELL_BASE is set by Electron main.cjs (or by the user manually).
-# If set, use it as ODYSSEUS_INTERNAL_BASE so tool_implementations.py routes
-# /api/shell/exec calls to the Express server.
-if [ -n "$ODYSSEUS_SHELL_BASE" ] && [ -z "$ODYSSEUS_INTERNAL_BASE" ]; then
-  export ODYSSEUS_INTERNAL_BASE="$ODYSSEUS_SHELL_BASE"
-fi
-
-# Pass the shared internal token to Odysseus so its _internal_headers() includes
-# X-Odysseus-Internal-Token, which the Express server accepts for shell/VM auth.
+# ODYSSEUS_SHELL_EXEC_BASE is a dedicated override for /api/shell/exec only.
+# tool_implementations.py reads it via _SHELL_EXEC_BASE to route shell commands
+# to the Express API server while leaving all other internal calls on Odysseus.
+#
+# ODYSSEUS_SHELL_EXEC_BASE is set by Electron main.cjs (or manually).
+# ODYSSEUS_BRIDGE_TOKEN carries the shared CSRF token the Express server accepts
+# via X-Odysseus-Internal-Token (the header Odysseus adds to all internal calls
+# through ODYSSEUS_INTERNAL_TOKEN).
 if [ -n "$ODYSSEUS_BRIDGE_TOKEN" ] && [ -z "$ODYSSEUS_INTERNAL_TOKEN" ]; then
   export ODYSSEUS_INTERNAL_TOKEN="$ODYSSEUS_BRIDGE_TOKEN"
 fi

@@ -50,9 +50,11 @@ router.post("/odysseus/lifecycle/start", async (_req: Request, res: Response) =>
     PORT: String(ODYSSEUS_PORT),
     AUTH_ENABLED: "false",
     ODYSSEUS_DATA_DIR: path.join(ODYSSEUS_DIR, "data"),
-    // Route Odysseus internal tool calls (shell/exec) to this API server.
-    // ODYSSEUS_INTERNAL_TOKEN is pre-seeded by Electron (shared with SHELL_SESSION_TOKEN).
-    ODYSSEUS_SHELL_BASE: `http://127.0.0.1:${process.env.PORT ?? "8080"}`,
+    // Route ONLY shell/exec tool calls to this Express API server.
+    // Do NOT set ODYSSEUS_INTERNAL_BASE — that would break cookbook/model/state
+    // calls which must stay on Odysseus itself.
+    ODYSSEUS_SHELL_EXEC_BASE: `http://127.0.0.1:${process.env.PORT ?? "8080"}`,
+    // Share the CSRF bridge token so Express accepts Odysseus's internal header.
     ...(process.env.ODYSSEUS_INTERNAL_TOKEN
       ? { ODYSSEUS_BRIDGE_TOKEN: process.env.ODYSSEUS_INTERNAL_TOKEN }
       : {}),

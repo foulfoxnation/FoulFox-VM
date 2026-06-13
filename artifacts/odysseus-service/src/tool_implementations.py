@@ -1934,6 +1934,15 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
 # core.constants.internal_api_base().
 _INTERNAL_BASE = internal_api_base()
 
+# Shell-exec override: when running alongside the Windows Odysseus + Unity
+# Electron app, /api/shell/exec is served by the Express API server (not by
+# Odysseus itself). Set ODYSSEUS_SHELL_EXEC_BASE to point only shell/exec calls
+# there while all other internal calls (_INTERNAL_BASE) stay on Odysseus.
+_SHELL_EXEC_BASE: str = (
+    os.environ.get("ODYSSEUS_SHELL_EXEC_BASE", "").rstrip("/")
+    or _INTERNAL_BASE
+)
+
 
 def _internal_headers(owner: Optional[str] = None) -> Dict[str, str]:
     from core.middleware import INTERNAL_TOOL_HEADER, INTERNAL_TOOL_TOKEN
@@ -2842,7 +2851,7 @@ async def _cookbook_kill_session(session_id: str, *, remote_host: str = "",
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(f"{_INTERNAL_BASE}/api/shell/exec",
+            resp = await client.post(f"{_SHELL_EXEC_BASE}/api/shell/exec",
                                      json={"command": cmd}, headers=headers)
         if resp.status_code >= 400:
             return {"error": f"shell/exec returned HTTP {resp.status_code}: {resp.text[:200]}", "exit_code": 1}
@@ -2964,7 +2973,7 @@ async def do_tail_serve_output(content: str, owner: Optional[str] = None) -> Dic
         host_label = "local"
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.post(f"{_INTERNAL_BASE}/api/shell/exec",
+            resp = await client.post(f"{_SHELL_EXEC_BASE}/api/shell/exec",
                                      json={"command": cmd}, headers=headers)
         if resp.status_code >= 400:
             return {"error": f"shell/exec returned HTTP {resp.status_code}: {resp.text[:200]}", "exit_code": 1}
@@ -3132,7 +3141,7 @@ async def do_adopt_served_model(content: str, owner: Optional[str] = None) -> Di
         check = f"tmux has-session -t {shlex.quote(sess)} 2>&1"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(f"{_INTERNAL_BASE}/api/shell/exec",
+            r = await client.post(f"{_SHELL_EXEC_BASE}/api/shell/exec",
                                   json={"command": check}, headers=headers)
             data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
         if r.status_code >= 400 or (data.get("exit_code") not in (None, 0)):
