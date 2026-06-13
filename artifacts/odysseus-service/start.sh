@@ -1,32 +1,44 @@
 #!/usr/bin/env bash
-# Odysseus startup wrapper — sets up a local Python venv on first launch,
-# exports Replit AI credentials, and configures the Express API bridge.
+# Odysseus startup wrapper — selects a Python interpreter, exports Replit AI
+# credentials, and configures the Express API bridge.
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# ── Python venv bootstrap ─────────────────────────────────────────────────────
-# Creates a venv and installs requirements on first run so the packaged Electron
-# distributable is self-contained without bundling a pre-built Python environment.
-# Requires Python 3.9+ to be available on the host system.
-VENV_DIR="$SCRIPT_DIR/.venv"
-PY_BIN="${ODYSSEUS_PYTHON:-python3}"
-
-if [ ! -f "$VENV_DIR/bin/activate" ]; then
-  echo "[odysseus] Creating Python venv at $VENV_DIR ..."
-  "$PY_BIN" -m venv "$VENV_DIR"
+# ── Python interpreter selection ──────────────────────────────────────────────
+# Replit workspace (dev): use the system `python3`; its dependencies are managed
+#   in the workspace .pythonlibs. Creating a venv here would hide those packages.
+# Packaged / standalone build: create a self-contained venv on first launch and
+#   install requirements into it so the distributable needs no pre-built env.
+PY="python3"
+if [ -n "$REPL_ID" ] || [ -n "$REPLIT_DEV_DOMAIN" ]; then
+  # Replit workspace: bind to 0.0.0.0 so the workflow port detector sees the
+  # service. Port 7000 is not a registered artifact, so it stays internal to the
+  # container and is only reached through the Express API server proxy.
+  export HOST="${HOST:-0.0.0.0}"
+else
+  VENV_DIR="$SCRIPT_DIR/.venv"
+  PY_BOOT="${ODYSSEUS_PYTHON:-python3}"
+  if [ ! -f "$VENV_DIR/bin/activate" ]; then
+    echo "[odysseus] Creating Python venv at $VENV_DIR ..."
+    "$PY_BOOT" -m venv "$VENV_DIR"
+  fi
+  # shellcheck disable=SC1091
+  source "$VENV_DIR/bin/activate"
+  if [ -f "$SCRIPT_DIR/requirements.txt" ]; then
+    pip install --quiet --upgrade pip
+    pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
+  fi
+  PY="python"
 fi
 
-# shellcheck disable=SC1091
-source "$VENV_DIR/bin/activate"
-
-# Install / upgrade requirements whenever the venv is present but potentially stale.
-# --quiet keeps logs clean; pip's own dependency resolver avoids redundant work.
-if [ -f "$SCRIPT_DIR/requirements.txt" ]; then
-  pip install --quiet --upgrade pip
-  pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
-fi
+# ── Self-contained local datastore ────────────────────────────────────────────
+# Odysseus is a self-contained desktop agent: it keeps all of its state in its
+# own local SQLite store (DATA_DIR/app.db). Unset any inherited DATABASE_URL
+# (e.g. the workspace Postgres used by the Express API server) so Odysseus does
+# not try to share that database or require a Postgres driver.
+unset DATABASE_URL
 
 # Map Replit AI Anthropic integration key to OpenAI-compat OPENAI_API_KEY
 if [ -n "$AI_INTEGRATIONS_ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
@@ -53,7 +65,7 @@ if [ -n "$ODYSSEUS_BRIDGE_TOKEN" ] && [ -z "$ODYSSEUS_INTERNAL_TOKEN" ]; then
   export ODYSSEUS_INTERNAL_TOKEN="$ODYSSEUS_BRIDGE_TOKEN"
 fi
 
-exec python -m uvicorn app:app \
+exec "$PY" -m uvicorn app:app \
   --host "${HOST:-127.0.0.1}" \
   --port "${PORT:-7000}" \
   --log-level info

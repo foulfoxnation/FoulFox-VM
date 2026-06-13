@@ -41,8 +41,8 @@ export function VmControls() {
   };
 
   return (
-    <div className="flex items-center gap-4 border-b bg-muted/40 p-2 px-4 shadow-sm" data-testid="vm-controls">
-      <div className="flex items-center gap-2 border-r pr-4 mr-2">
+    <div className="flex items-center gap-3" data-testid="vm-controls">
+      <div className="flex items-center gap-2 border-r pr-3">
         <Badge 
           variant={isRunning ? "default" : status?.state === "error" ? "destructive" : "secondary"}
           className="uppercase tracking-wider text-[10px] font-bold"

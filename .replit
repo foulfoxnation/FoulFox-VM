@@ -41,6 +41,10 @@ path = "scripts/post-merge.sh"
 timeoutMs = 20000
 
 [[ports]]
+localPort = 7000
+externalPort = 3001
+
+[[ports]]
 localPort = 8080
 externalPort = 8080
 exposeLocalhost = true
@@ -55,3 +59,4 @@ externalPort = 3000
 
 [nix]
 channel = "stable-25_05"
+packages = ["cargo", "libiconv", "libxcrypt", "openssl", "pkg-config", "rustc"]
