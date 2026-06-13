@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SettingsModal } from "@/components/SettingsModal";
+import { SetupWizard } from "@/components/SetupWizard";
 import { SnapshotModal } from "@/components/SnapshotModal";
 import { VmControls } from "@/components/VmControls";
 import { Terminal, type TerminalHandle } from "@/components/Terminal";
@@ -54,6 +55,7 @@ export default function Home() {
 
   return (
     <div className="flex h-screen w-full flex-col bg-background text-foreground overflow-hidden">
+      <SetupWizard />
       <div className="flex items-center justify-between gap-4 border-b bg-card px-4 py-2 shadow-sm z-10">
         <div className="flex items-center gap-3 shrink-0">
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground font-bold">

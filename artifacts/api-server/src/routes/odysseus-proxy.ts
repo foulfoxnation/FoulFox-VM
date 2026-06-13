@@ -155,18 +155,37 @@ router.all("/odysseus{/*path}", (req: Request, res: Response) => {
     }
   });
 
-  if (req.body && Object.keys(req.body).length > 0) {
-    const body = JSON.stringify(req.body);
-    proxyReq.setHeader("content-type", "application/json");
+  // express.json()/urlencoded() (see app.ts) drain the request stream into
+  // req.body for JSON / form content-types. For those we MUST re-serialize the
+  // parsed body — piping the already-consumed stream never ends and hangs the
+  // upstream forever (e.g. an empty `{}` POST or a no-body DELETE). For all
+  // other content-types (multipart uploads, raw, or no body / GET) the stream
+  // is untouched, so we pipe it straight through.
+  const ct = String(req.headers["content-type"] || "").toLowerCase();
+  const streamConsumed =
+    ct.includes("application/json") ||
+    ct.includes("application/x-www-form-urlencoded");
+
+  if (streamConsumed) {
+    let body = "";
+    if (req.body && Object.keys(req.body).length > 0) {
+      body = ct.includes("application/x-www-form-urlencoded")
+        ? new URLSearchParams(req.body as Record<string, string>).toString()
+        : JSON.stringify(req.body);
+    }
+    proxyReq.setHeader(
+      "content-type",
+      ct.includes("application/x-www-form-urlencoded")
+        ? "application/x-www-form-urlencoded"
+        : "application/json",
+    );
     proxyReq.setHeader("content-length", Buffer.byteLength(body));
-    proxyReq.write(body);
+    if (body) proxyReq.write(body);
+    proxyReq.end();
   } else {
     req.pipe(proxyReq);
     req.resume();
-    return;
   }
-
-  proxyReq.end();
 });
 
 // Check if Odysseus is alive

@@ -540,6 +540,200 @@ class CrewMember(TimestampMixin, Base):
                            backref=backref("crew_member", uselist=False))
 
 
+class AgentSuite(TimestampMixin, Base):
+    """A named group of role-based agents (Windows / Game / Architect).
+
+    The suite is the unit the setup wizard provisions. Each role is realized
+    as a CrewMember (executable persona) linked via AgentSuiteMember. Per-agent
+    model/endpoint live on the CrewMember itself, so a suite can be all-Claude
+    or mixed-model — and re-provisioned onto any model later.
+    """
+    __tablename__ = "agent_suites"
+
+    id             = Column(String, primary_key=True, index=True)
+    owner          = Column(String, nullable=True, index=True)
+    name           = Column(String, nullable=False, default="Odysseus Suite")
+    is_active      = Column(Boolean, default=True)
+    setup_complete = Column(Boolean, default=False)
+
+    members = relationship("AgentSuiteMember", back_populates="suite",
+                           cascade="all, delete-orphan")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "owner": self.owner,
+            "name": self.name,
+            "is_active": self.is_active,
+            "setup_complete": self.setup_complete,
+            "members": [m.to_dict() for m in self.members],
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class AgentSuiteMember(TimestampMixin, Base):
+    """Maps a role within a suite to its executable CrewMember + pinned session."""
+    __tablename__ = "agent_suite_members"
+
+    id             = Column(String, primary_key=True, index=True)
+    suite_id       = Column(String, ForeignKey("agent_suites.id", ondelete="CASCADE"),
+                            nullable=False, index=True)
+    role           = Column(String, nullable=False)   # "windows" | "game" | "architect"
+    crew_member_id = Column(String, ForeignKey("crew_members.id", ondelete="SET NULL"),
+                            nullable=True)
+    session_id     = Column(String, ForeignKey("sessions.id", ondelete="SET NULL"),
+                            nullable=True)
+
+    suite = relationship("AgentSuite", back_populates="members")
+
+    __table_args__ = (
+        Index("ix_agent_suite_members_role", "suite_id", "role", unique=True),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "suite_id": self.suite_id,
+            "role": self.role,
+            "crew_member_id": self.crew_member_id,
+            "session_id": self.session_id,
+        }
+
+
+class AgentLesson(TimestampMixin, Base):
+    """A single domain 'lesson / guide rail' for a role's knowledge base.
+
+    Stored in SQLite so keyword retrieval works even when no vector store
+    (Chroma/fastembed) is installed. `is_active=False` is used for
+    review-derived drafts pending approval, so they don't poison guide rails.
+    """
+    __tablename__ = "agent_lessons"
+
+    id        = Column(String, primary_key=True, index=True)
+    owner     = Column(String, nullable=True, index=True)
+    role      = Column(String, nullable=False, index=True)  # windows|game|architect|shared
+    title     = Column(String, nullable=False, default="")
+    text      = Column(Text, nullable=False)
+    tags      = Column(Text, nullable=True)                 # JSON array of keywords
+    source    = Column(String, nullable=False, default="seed")  # seed|manual|review
+    is_active = Column(Boolean, default=True)
+
+    __table_args__ = (
+        Index("ix_agent_lessons_lookup", "owner", "role", "is_active"),
+    )
+
+    def to_dict(self):
+        import json as _json
+        try:
+            tags = _json.loads(self.tags) if self.tags else []
+        except Exception:
+            tags = []
+        return {
+            "id": self.id,
+            "owner": self.owner,
+            "role": self.role,
+            "title": self.title,
+            "text": self.text,
+            "tags": tags,
+            "source": self.source,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class AgentSuiteRun(TimestampMixin, Base):
+    """One Architect-gated review loop (P5): a worker role (windows|game)
+    attempts an objective, the Architect reviews each attempt, and the run ends
+    when the Architect PASSes (-> snapshot on P6) or iterations are exhausted.
+    """
+    __tablename__ = "agent_suite_runs"
+
+    id             = Column(String, primary_key=True, index=True)
+    owner          = Column(String, nullable=True, index=True)
+    suite_id       = Column(String, ForeignKey("agent_suites.id", ondelete="CASCADE"),
+                            nullable=True, index=True)
+    role           = Column(String, nullable=False)   # worker role: windows|game
+    objective      = Column(Text, nullable=False)
+    # pending | running | passed | failed | error
+    status         = Column(String, nullable=False, default="pending")
+    iterations     = Column(Integer, default=0)
+    max_iterations = Column(Integer, default=4)
+    final_verdict  = Column(Text, nullable=True)      # JSON of last parsed verdict
+    snapshot_name  = Column(String, nullable=True)    # set on pass by P6
+    snapshot_error = Column(Text, nullable=True)       # why snapshot-on-pass was skipped/failed (non-fatal)
+    error          = Column(Text, nullable=True)
+
+    review_iterations = relationship(
+        "AgentReviewIteration", back_populates="run",
+        cascade="all, delete-orphan", order_by="AgentReviewIteration.idx")
+
+    def to_dict(self, include_iterations=False):
+        import json as _json
+        try:
+            verdict = _json.loads(self.final_verdict) if self.final_verdict else None
+        except Exception:
+            verdict = None
+        d = {
+            "id": self.id,
+            "owner": self.owner,
+            "suite_id": self.suite_id,
+            "role": self.role,
+            "objective": self.objective,
+            "status": self.status,
+            "iterations": self.iterations,
+            "max_iterations": self.max_iterations,
+            "final_verdict": verdict,
+            "snapshot_name": self.snapshot_name,
+            "snapshot_error": self.snapshot_error,
+            "error": self.error,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+        if include_iterations:
+            d["review_iterations"] = [it.to_dict() for it in self.review_iterations]
+        return d
+
+
+class AgentReviewIteration(TimestampMixin, Base):
+    """One worker attempt + Architect verdict within a run (P5)."""
+    __tablename__ = "agent_review_iterations"
+
+    id            = Column(String, primary_key=True, index=True)
+    owner         = Column(String, nullable=True, index=True)
+    run_id        = Column(String, ForeignKey("agent_suite_runs.id", ondelete="CASCADE"),
+                           nullable=False, index=True)
+    idx           = Column(Integer, nullable=False)   # 1-based iteration number
+    worker_output = Column(Text, nullable=True)
+    verdict_raw   = Column(Text, nullable=True)        # raw architect text
+    verdict_json  = Column(Text, nullable=True)        # parsed/normalized verdict JSON
+    passed        = Column(Boolean, default=False)
+
+    run = relationship("AgentSuiteRun", back_populates="review_iterations")
+
+    __table_args__ = (
+        Index("ix_agent_review_iterations_run_idx", "run_id", "idx", unique=True),
+    )
+
+    def to_dict(self):
+        import json as _json
+        try:
+            verdict = _json.loads(self.verdict_json) if self.verdict_json else None
+        except Exception:
+            verdict = None
+        return {
+            "id": self.id,
+            "run_id": self.run_id,
+            "idx": self.idx,
+            "worker_output": self.worker_output,
+            "verdict_raw": self.verdict_raw,
+            "verdict": verdict,
+            "passed": self.passed,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class ScheduledTask(TimestampMixin, Base):
     """A recurring or one-off task — LLM-powered or direct action, time or event triggered."""
     __tablename__ = "scheduled_tasks"
@@ -1723,6 +1917,33 @@ def _migrate_seed_email_account():
 # Any future migrations or schema changes that temporarily violate foreign-key
 # constraints will fail. To perform such operations, foreign_keys must be
 # temporarily disabled around the migration workflow.
+def _migrate_add_snapshot_error_column():
+    """Add snapshot_error to agent_suite_runs (P6). Lets snapshot-on-pass record
+    why it was skipped/failed without failing the (passing) run. Idempotent +
+    guarded. Runs after create_all so the table is guaranteed to exist."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(agent_suite_runs)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if columns and "snapshot_error" not in columns:
+            conn.execute("ALTER TABLE agent_suite_runs ADD COLUMN snapshot_error TEXT")
+            conn.commit()
+            logging.getLogger(__name__).info("Migrated: added 'snapshot_error' on agent_suite_runs")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"snapshot_error migration failed: {e}")
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+
 def init_db():
     """
     Initialize the database by creating all tables.
@@ -1743,6 +1964,7 @@ def init_db():
     _migrate_add_owner_column()
     _migrate_add_document_archived_column()
     _migrate_add_last_message_at_column()
+    _migrate_add_snapshot_error_column()
     _migrate_add_folder_column()
     _migrate_add_token_columns()
     _migrate_add_mode_column()

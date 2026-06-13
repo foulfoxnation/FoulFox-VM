@@ -43,3 +43,15 @@ and 404. The proxy fixes this by (identity-encoding the upstream — it strips
 **Why:** a `<base>` tag does NOT fix root-absolute URLs, and the browser-facing
 prefix (vite/Replit layers) isn't reliably known server-side, so relative +
 client-computed prefix is base-path agnostic.
+
+## Proxy must re-serialize parsed bodies, never pipe a consumed stream
+The api-server applies `express.json()` + `express.urlencoded()` globally before
+the router, so for `application/json` / `application/x-www-form-urlencoded`
+requests the body stream is already drained into `req.body` by the time the
+odysseus proxy runs. **Rule:** for those content-types the proxy must
+re-serialize `req.body` (forwarding an empty body when there's nothing) and call
+`proxyReq.end()`; only pipe the raw stream for content-types express did NOT
+consume (multipart/raw/no-body/GET). **Why:** `req.pipe(proxyReq)` on an
+already-consumed stream never emits `end`, so empty `{}` POSTs and no-body
+DELETEs through the proxy hang forever (HTTP 000 / client timeout) while
+non-empty JSON POSTs and GETs work — a very confusing partial failure.

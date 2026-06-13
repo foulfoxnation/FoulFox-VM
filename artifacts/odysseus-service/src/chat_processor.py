@@ -198,6 +198,36 @@ class ChatProcessor:
                 "role": "system",
                 "content": preset_system_prompt
             })
+
+        # 3-agent-suite guide rails + scoped lessons (P4). When this session
+        # belongs to a suite member (Windows / Game / Architect), inject the
+        # role's guide rails (its persona) — only when no preset already
+        # supplies a system prompt — plus the top-N domain lessons relevant to
+        # the current message. Lessons are *trusted* operating guidance (unlike
+        # RAG / web context), so they go in as a system message rather than an
+        # untrusted-context message. Best-effort: a missing suite or empty
+        # tables must never break an ordinary chat turn.
+        self._last_used_lessons = []
+        try:
+            sess_id = getattr(session, "id", None)
+            if sess_id:
+                from src import agent_suite, agent_lessons
+                role_ctx = agent_suite.get_session_role_context(sess_id)
+                if role_ctx:
+                    if not preset_system_prompt and role_ctx.get("personality"):
+                        preface.append({
+                            "role": "system",
+                            "content": role_ctx["personality"],
+                        })
+                    lessons = agent_lessons.retrieve_lessons(
+                        message, role_ctx["role"], owner=owner, limit=5)
+                    block = agent_lessons.format_lessons_block(lessons)
+                    if block:
+                        preface.append({"role": "system", "content": block})
+                        self._last_used_lessons = lessons
+        except Exception as e:
+            logger.debug("suite lessons injection skipped: %s", e)
+
         preface.append({
             "role": "system",
             "content": UNTRUSTED_CONTEXT_POLICY,
