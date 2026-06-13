@@ -1,0 +1,51 @@
+appId: com.odysseus.unity
+productName: "Windows Odysseus + Unity"
+
+directories:
+  output: dist-electron
+  buildResources: electron/resources
+
+files:
+  - dist/public/**/*
+  - electron/main.cjs
+  - package.json
+
+# The API server dist and Odysseus service are bundled as extraResources
+# so Electron can spawn them at runtime from the installed app path
+extraResources:
+  - from: "../api-server/dist"
+    to: "api-server/dist"
+    filter:
+      - "**/*.mjs"
+      - "**/*.mjs.map"
+  - from: "../../artifacts/odysseus-service"
+    to: "odysseus-service"
+    filter:
+      - "**/*.py"
+      - "start.sh"
+      - "requirements.txt"
+      - "data/.gitkeep"
+      - "!**/__pycache__/**"
+      - "!**/.git/**"
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Development
+  icon: electron/resources/icon.png
+
+win:
+  target:
+    - nsis
+  icon: electron/resources/icon.ico
+
+mac:
+  target:
+    - dmg
+  icon: electron/resources/icon.icns
+  category: public.app-category.developer-tools
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
