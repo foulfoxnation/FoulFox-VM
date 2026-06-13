@@ -180,17 +180,21 @@ router.post("/shell/exec", (req: Request, res: Response) => {
     });
     if (shellHistory.length > 200) shellHistory.pop();
 
-    res.json(ExecShellCommandResponse.parse({ stdout, stderr, exitCode, timedOut }));
+    // Include snake_case aliases alongside camelCase so Odysseus tool_implementations.py
+    // (which checks `exit_code` / `timed_out`) and TypeScript clients (camelCase) both work.
+    const parsed = ExecShellCommandResponse.parse({ stdout, stderr, exitCode, timedOut });
+    res.json({ ...parsed, exit_code: parsed.exitCode, timed_out: parsed.timedOut });
   });
 
   child.on("error", (err) => {
     clearTimeout(timer);
-    res.json(ExecShellCommandResponse.parse({
+    const parsed = ExecShellCommandResponse.parse({
       stdout: "",
       stderr: err.message,
       exitCode: -1,
       timedOut: false,
-    }));
+    });
+    res.json({ ...parsed, exit_code: parsed.exitCode, timed_out: parsed.timedOut });
   });
 });
 
