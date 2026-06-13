@@ -8,6 +8,7 @@ import { OdysseusTab } from "@/components/OdysseusTab";
 import { ShellHistoryPanel } from "@/components/ShellHistoryPanel";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { useShellToken } from "@/hooks/use-shell-token";
+import { apiUrl } from "@/lib/api-url";
 import { Terminal as TermIcon, MonitorDot, Command, Trash2, Send, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -40,7 +41,7 @@ export default function Home() {
     try {
       // POST the terminal transcript to the Odysseus OpenAI-compatible chat endpoint.
       // The proxy at /api/odysseus/ forwards to the Odysseus Python service.
-      const response = await fetch("/api/odysseus/v1/chat/completions", {
+      const response = await fetch(apiUrl("/api/odysseus/v1/chat/completions"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

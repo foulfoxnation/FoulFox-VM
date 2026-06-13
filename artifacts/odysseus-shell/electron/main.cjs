@@ -29,26 +29,26 @@ const ODYSSEUS_PORT = 7000;
 
 const IS_PACKAGED = app.isPackaged;
 
-// Resources root differs between packaged and dev:
-//   packaged → <app>/resources/         (process.resourcesPath)
-//   dev      → <repo>/artifacts/        (4 dirs up from electron/main.cjs)
+// Path layout:
+//   This file:  artifacts/odysseus-shell/electron/main.cjs  (__dirname)
+//   packaged → extraResources land under process.resourcesPath/
+//   dev      → resolve from __dirname up to the artifacts/ directory
+//
+//   __dirname  = artifacts/odysseus-shell/electron
+//   ..         = artifacts/odysseus-shell
+//   ../..      = artifacts/                         ← RESOURCES_ROOT in dev
+//   ../../..   = repo root  (NOT what we want)
+
 const RESOURCES_ROOT = IS_PACKAGED
   ? process.resourcesPath
-  : path.resolve(__dirname, "..", "..", "..");
+  : path.resolve(__dirname, "..", "..");  // = artifacts/
 
-// API server: packaged stores dist/ under resources/api-server/dist/
-const API_DIST = IS_PACKAGED
-  ? path.join(RESOURCES_ROOT, "api-server", "dist", "index.mjs")
-  : path.join(RESOURCES_ROOT, "api-server", "dist", "index.mjs");
+// API server dist (external node-pty is NOT bundled; must be next to dist/)
+const API_DIST = path.join(RESOURCES_ROOT, "api-server", "dist", "index.mjs");
+const API_CWD  = path.join(RESOURCES_ROOT, "api-server");
 
-const API_CWD = IS_PACKAGED
-  ? path.join(RESOURCES_ROOT, "api-server")
-  : path.join(RESOURCES_ROOT, "api-server");
-
-// Odysseus service
-const ODYSSEUS_DIR = IS_PACKAGED
-  ? path.join(RESOURCES_ROOT, "odysseus-service")
-  : path.join(RESOURCES_ROOT, "odysseus-service");
+// Odysseus Python service
+const ODYSSEUS_DIR = path.join(RESOURCES_ROOT, "odysseus-service");
 
 const ODYSSEUS_START = path.join(ODYSSEUS_DIR, "start.sh");
 

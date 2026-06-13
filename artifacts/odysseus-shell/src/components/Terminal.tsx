@@ -3,6 +3,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { useShellToken } from "@/hooks/use-shell-token";
+import { apiWsUrl } from "@/lib/api-url";
 
 export interface TerminalHandle {
   clear: () => void;
@@ -49,12 +50,9 @@ export const Terminal = forwardRef<TerminalHandle>((_, ref) => {
 
     // Include the session token as a query param — WebSocket API doesn't support
     // custom headers, so ?token= is the standard workaround for token auth on WS.
-    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsHost = window.location.protocol === "file:"
-      ? "127.0.0.1:8080"
-      : window.location.host;
+    // apiWsUrl handles both browser (relative) and Electron file:// (absolute) modes.
     const ws = new WebSocket(
-      `${wsProtocol}//${wsHost}/api/shell/ws?token=${encodeURIComponent(shellToken)}`,
+      apiWsUrl(`/api/shell/ws?token=${encodeURIComponent(shellToken)}`),
     );
     wsRef.current = ws;
 

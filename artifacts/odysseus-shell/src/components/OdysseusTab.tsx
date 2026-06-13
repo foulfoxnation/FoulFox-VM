@@ -1,17 +1,19 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, ServerOff } from "lucide-react";
+import { apiUrl } from "@/lib/api-url";
 
 export function OdysseusTab() {
   const { data: status, isLoading } = useQuery({
-    queryKey: ["/api/odysseus-status"],
+    queryKey: ["odysseus-lifecycle-status"],
     queryFn: async () => {
-      const res = await fetch("/api/odysseus-status");
+      const res = await fetch(apiUrl("/api/odysseus/lifecycle/status"));
       if (!res.ok) throw new Error("Status failed");
-      return res.json() as Promise<{ alive: boolean }>;
+      return res.json() as Promise<{ state: string; alive: boolean }>;
     },
     refetchInterval: 5000,
   });
+
+  const isAlive = status?.alive === true;
 
   if (isLoading) {
     return (
@@ -21,7 +23,7 @@ export function OdysseusTab() {
     );
   }
 
-  if (!status?.alive) {
+  if (!isAlive) {
     return (
       <div className="flex h-full w-full flex-col items-center justify-center bg-muted/20 text-muted-foreground" data-testid="odysseus-offline">
         <ServerOff className="mb-4 h-12 w-12" />
@@ -34,10 +36,13 @@ export function OdysseusTab() {
     );
   }
 
+  // When running from file://, the iframe src must be an absolute URL
+  const iframeSrc = apiUrl("/api/odysseus/");
+
   return (
     <div className="h-full w-full" data-testid="odysseus-iframe-container">
       <iframe
-        src="/api/odysseus/"
+        src={iframeSrc}
         className="h-full w-full border-0"
         title="Odysseus Workspace"
         data-testid="odysseus-iframe"
