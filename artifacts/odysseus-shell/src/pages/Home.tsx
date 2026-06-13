@@ -101,6 +101,7 @@ export default function Home() {
           <OdysseusTab
             pendingContext={pendingOdysseusContext}
             onContextConsumed={() => setPendingOdysseusContext(null)}
+            shellToken={shellToken}
           />
         </TabsContent>
 

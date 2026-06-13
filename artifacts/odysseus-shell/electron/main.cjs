@@ -82,6 +82,8 @@ function buildApiEnv() {
     // Also exposed as ODYSSEUS_INTERNAL_TOKEN so the Express middleware
     // accepts Odysseus's X-Odysseus-Internal-Token header
     ODYSSEUS_INTERNAL_TOKEN: BRIDGE_TOKEN,
+    // Tell the lifecycle route where Odysseus lives (overrides __dirname-relative guess)
+    ODYSSEUS_DIR: ODYSSEUS_DIR,
   };
 }
 
@@ -117,9 +119,13 @@ function startApiServer() {
     return;
   }
 
+  // ELECTRON_RUN_AS_NODE=1 makes the Electron executable behave like a plain
+  // Node.js runtime when spawning a script — without it, `process.execPath`
+  // (which points to the packaged app binary, not node) would relaunch the
+  // Electron app instead of executing the server module.
   apiProcess = spawn(process.execPath, [API_DIST], {
     cwd: API_CWD,
-    env: buildApiEnv(),
+    env: { ...buildApiEnv(), ELECTRON_RUN_AS_NODE: "1" },
     stdio: "pipe",
   });
 

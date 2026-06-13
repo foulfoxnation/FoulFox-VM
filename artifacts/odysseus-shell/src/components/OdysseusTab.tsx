@@ -1,19 +1,18 @@
-import { useRef } from "react";
+import { useRef, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, ServerOff } from "lucide-react";
 import { apiUrl } from "@/lib/api-url";
 
-// Expose a method to post terminal context into the Odysseus chat iframe
-export interface OdysseusTabHandle {
-  postTerminalContext: (terminalOutput: string) => void;
-}
-
-interface OdysseusTabProps {
+export interface OdysseusTabProps {
+  /** Terminal output to send to the Odysseus chat as a new message. */
   pendingContext?: string | null;
+  /** Called once the pending context has been delivered. */
   onContextConsumed?: () => void;
+  /** Shell session token required for auth headers. */
+  shellToken?: string | null;
 }
 
-export function OdysseusTab({ pendingContext, onContextConsumed }: OdysseusTabProps) {
+export function OdysseusTab({ pendingContext, onContextConsumed, shellToken }: OdysseusTabProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const { data: status, isLoading } = useQuery({
@@ -28,21 +27,38 @@ export function OdysseusTab({ pendingContext, onContextConsumed }: OdysseusTabPr
 
   const isAlive = status?.alive === true;
 
-  // When the parent provides a pending terminal context, inject it into the
-  // Odysseus iframe via postMessage. Odysseus's frontend handles this message
-  // by pre-filling the chat input and switching to the chat view.
-  const handleIframeLoad = () => {
-    if (pendingContext && iframeRef.current?.contentWindow) {
-      iframeRef.current.contentWindow.postMessage(
-        {
-          type: "odysseus:inject-context",
-          payload: pendingContext.slice(-4000),
-        },
-        "*",
-      );
+  // When the iframe finishes loading and we have pending terminal context,
+  // POST it to Odysseus's native /api/chat endpoint. This creates a real
+  // Odysseus chat session visible in the UI, then reloads the iframe so
+  // the new conversation is shown to the user.
+  const handleIframeLoad = useCallback(async () => {
+    if (!pendingContext) return;
+
+    const message =
+      "I have some terminal output from the Windows VM shell that I'd like you to analyse:\n\n" +
+      "```\n" + pendingContext.slice(-4000) + "\n```\n\n" +
+      "Please identify any errors, explain what happened, and suggest next steps.";
+
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (shellToken) headers["X-Shell-Token"] = shellToken;
+
+      await fetch(apiUrl("/api/odysseus/api/chat"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ message }),
+      });
+
+      // Reload the iframe so the Odysseus UI renders the new chat session.
+      if (iframeRef.current) {
+        iframeRef.current.src = apiUrl("/api/odysseus/");
+      }
+    } catch {
+      // Non-fatal: iframe is already showing the Odysseus UI; user can type manually.
+    } finally {
       onContextConsumed?.();
     }
-  };
+  }, [pendingContext, shellToken, onContextConsumed]);
 
   if (isLoading) {
     return (

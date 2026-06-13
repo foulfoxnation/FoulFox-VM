@@ -7,9 +7,14 @@ import { logger } from "../lib/logger";
 const router: IRouter = Router();
 
 const ODYSSEUS_PORT = parseInt(process.env.ODYSSEUS_PORT || "7000", 10);
+
+// Resolve the Odysseus service directory.
+// Electron passes ODYSSEUS_DIR explicitly via env. The __dirname-relative
+// fallback accounts for the esbuild output landing in dist/ inside api-server:
+//   dist/index.mjs (__dirname=dist) → ../.. → artifacts/ → + odysseus-service
 const ODYSSEUS_DIR = path.resolve(
   process.env.ODYSSEUS_DIR ||
-  path.join(__dirname, "..", "..", "..", "..", "odysseus-service")
+  path.join(__dirname, "..", "..", "odysseus-service")
 );
 
 let odysseusProcess: ChildProcess | null = null;
@@ -45,6 +50,12 @@ router.post("/odysseus/lifecycle/start", async (_req: Request, res: Response) =>
     PORT: String(ODYSSEUS_PORT),
     AUTH_ENABLED: "false",
     ODYSSEUS_DATA_DIR: path.join(ODYSSEUS_DIR, "data"),
+    // Route Odysseus internal tool calls (shell/exec) to this API server.
+    // ODYSSEUS_INTERNAL_TOKEN is pre-seeded by Electron (shared with SHELL_SESSION_TOKEN).
+    ODYSSEUS_SHELL_BASE: `http://127.0.0.1:${process.env.PORT ?? "8080"}`,
+    ...(process.env.ODYSSEUS_INTERNAL_TOKEN
+      ? { ODYSSEUS_BRIDGE_TOKEN: process.env.ODYSSEUS_INTERNAL_TOKEN }
+      : {}),
   };
 
   // Map Replit AI credentials if available
