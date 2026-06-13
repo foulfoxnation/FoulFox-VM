@@ -1934,7 +1934,7 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
 # core.constants.internal_api_base().
 _INTERNAL_BASE = internal_api_base()
 
-# Shell-exec override: when running alongside the Windows Odysseus + Unity
+# Shell-exec override: when running alongside the Odysseus VM
 # Electron app, /api/shell/exec is served by the Express API server (not by
 # Odysseus itself). Set ODYSSEUS_SHELL_EXEC_BASE to point only shell/exec calls
 # there while all other internal calls (_INTERNAL_BASE) stay on Odysseus.

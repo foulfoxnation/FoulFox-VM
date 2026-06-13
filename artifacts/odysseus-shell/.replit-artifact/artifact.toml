@@ -1,6 +1,6 @@
 kind = "web"
 previewPath = "/"
-title = "Windows Odysseus + Unity"
+title = "Odysseus VM"
 version = "1.0.0"
 id = "artifacts/odysseus-shell"
 router = "path"

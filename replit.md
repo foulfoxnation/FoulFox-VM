@@ -1,6 +1,6 @@
-# [Project name]
+# Odysseus VM
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A desktop-first Electron control panel with an Odysseus AI workspace tab and a Shell tab providing an xterm.js terminal plus QEMU/KVM Windows VM management.
 
 ## Run & Operate
 

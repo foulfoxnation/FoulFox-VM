@@ -1,5 +1,5 @@
 /**
- * Electron main process for Windows Odysseus + Unity.
+ * Electron main process for Odysseus VM.
  * Spawns the API server and Odysseus Python service as supervised children,
  * then opens a BrowserWindow loading the bundled frontend.
  *
@@ -194,7 +194,7 @@ async function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    title: "Windows Odysseus + Unity",
+    title: "Odysseus VM",
     backgroundColor: "#09090b",
     webPreferences: {
       nodeIntegration: false,

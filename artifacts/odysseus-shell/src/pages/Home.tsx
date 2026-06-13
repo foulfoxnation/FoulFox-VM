@@ -59,7 +59,7 @@ export default function Home() {
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground font-bold">
             Od
           </div>
-          <h1 className="font-semibold tracking-tight">Windows Odysseus</h1>
+          <h1 className="font-semibold tracking-tight">Odysseus VM</h1>
           <div
             className={`h-2 w-2 rounded-full ${health?.status === "ok" ? "bg-green-500" : "bg-red-500"} ml-2`}
             title="API Status"

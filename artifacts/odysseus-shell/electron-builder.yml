@@ -1,5 +1,5 @@
-appId: com.odysseus.unity
-productName: "Windows Odysseus + Unity"
+appId: com.odysseus.vm
+productName: "Odysseus VM"
 
 directories:
   output: dist-electron

@@ -51,7 +51,7 @@ export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
  * Pass an empty object `{}` to clear all previously registered defaults.
  *
  * Use this for CSRF/session tokens that must be sent on every API call
- * (e.g. `X-Shell-Token` for the Windows Odysseus shell API).
+ * (e.g. `X-Shell-Token` for the Odysseus VM shell API).
  */
 export function setDefaultHeaders(headers: Record<string, string>): void {
   _defaultHeaders = { ...headers };
