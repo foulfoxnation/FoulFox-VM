@@ -1,9 +1,32 @@
 #!/usr/bin/env bash
-# Odysseus startup wrapper — exports Replit AI credentials and Express API bridge config
+# Odysseus startup wrapper — sets up a local Python venv on first launch,
+# exports Replit AI credentials, and configures the Express API bridge.
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+
+# ── Python venv bootstrap ─────────────────────────────────────────────────────
+# Creates a venv and installs requirements on first run so the packaged Electron
+# distributable is self-contained without bundling a pre-built Python environment.
+# Requires Python 3.9+ to be available on the host system.
+VENV_DIR="$SCRIPT_DIR/.venv"
+PY_BIN="${ODYSSEUS_PYTHON:-python3}"
+
+if [ ! -f "$VENV_DIR/bin/activate" ]; then
+  echo "[odysseus] Creating Python venv at $VENV_DIR ..."
+  "$PY_BIN" -m venv "$VENV_DIR"
+fi
+
+# shellcheck disable=SC1091
+source "$VENV_DIR/bin/activate"
+
+# Install / upgrade requirements whenever the venv is present but potentially stale.
+# --quiet keeps logs clean; pip's own dependency resolver avoids redundant work.
+if [ -f "$SCRIPT_DIR/requirements.txt" ]; then
+  pip install --quiet --upgrade pip
+  pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
+fi
 
 # Map Replit AI Anthropic integration key to OpenAI-compat OPENAI_API_KEY
 if [ -n "$AI_INTEGRATIONS_ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
@@ -21,18 +44,11 @@ if [ -z "$OPENAI_MODEL" ]; then
 fi
 
 # ── Odysseus → Express API server shell/exec bridge ───────────────────────────
-# IMPORTANT: Do NOT set ODYSSEUS_INTERNAL_BASE here. That variable is used
-# by ALL Odysseus internal tool calls (/api/cookbook, /api/model, etc.) and
-# must continue to point at Odysseus itself (127.0.0.1:7000).
-#
-# ODYSSEUS_SHELL_EXEC_BASE is a dedicated override for /api/shell/exec only.
-# tool_implementations.py reads it via _SHELL_EXEC_BASE to route shell commands
-# to the Express API server while leaving all other internal calls on Odysseus.
-#
-# ODYSSEUS_SHELL_EXEC_BASE is set by Electron main.cjs (or manually).
-# ODYSSEUS_BRIDGE_TOKEN carries the shared CSRF token the Express server accepts
-# via X-Odysseus-Internal-Token (the header Odysseus adds to all internal calls
-# through ODYSSEUS_INTERNAL_TOKEN).
+# ODYSSEUS_SHELL_EXEC_BASE is a dedicated override so only /api/shell/exec calls
+# are routed to Express; all other internal Odysseus calls (_INTERNAL_BASE:
+# /api/cookbook, /api/model, etc.) continue to resolve to Odysseus itself.
+# ODYSSEUS_BRIDGE_TOKEN is the shared CSRF token forwarded as ODYSSEUS_INTERNAL_TOKEN
+# so Odysseus's _internal_headers() includes X-Odysseus-Internal-Token for auth.
 if [ -n "$ODYSSEUS_BRIDGE_TOKEN" ] && [ -z "$ODYSSEUS_INTERNAL_TOKEN" ]; then
   export ODYSSEUS_INTERNAL_TOKEN="$ODYSSEUS_BRIDGE_TOKEN"
 fi

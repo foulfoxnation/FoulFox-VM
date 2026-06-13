@@ -2,25 +2,28 @@ import { useGetVmStatus, useStartVm, useStopVm, useRestartVm, getGetVmStatusQuer
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Play, Square, RotateCcw, Activity, Clock, Cpu, HardDrive } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+
+// Minimal common interface shared by all three no-argument VM mutation hooks
+type VoidMutation = UseMutationResult<unknown, Error, void, unknown>;
 
 export function VmControls() {
   const { data: status } = useGetVmStatus({ query: { refetchInterval: 3000, queryKey: getGetVmStatusQueryKey() } });
-  const startVm = useStartVm();
-  const stopVm = useStopVm();
-  const restartVm = useRestartVm();
+  const startVm = useStartVm() as VoidMutation;
+  const stopVm = useStopVm() as VoidMutation;
+  const restartVm = useRestartVm() as VoidMutation;
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const handleMutation = (mutation: any, actionName: string) => {
+  const handleMutation = (mutation: VoidMutation, actionName: string) => {
     mutation.mutate(undefined, {
       onSuccess: () => {
         toast({ title: `VM ${actionName} initiated` });
         queryClient.invalidateQueries({ queryKey: getGetVmStatusQueryKey() });
       },
-      onError: (err: any) => {
-        toast({ title: `Failed to ${actionName} VM`, variant: "destructive", description: String(err) });
+      onError: (err: Error) => {
+        toast({ title: `Failed to ${actionName} VM`, variant: "destructive", description: err.message });
       }
     });
   };
