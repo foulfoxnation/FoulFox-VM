@@ -2,6 +2,12 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import { setBaseUrl, setDefaultHeaders } from "@workspace/api-client-react";
+import { startKeepAwake } from "./lib/keep-awake";
+
+// Keep the Vite dev preview from going stale ("white page") during long VM
+// sessions — heartbeats the dev server and holds a screen wake lock. No-op in
+// the packaged Electron build. See ./lib/keep-awake.ts.
+startKeepAwake();
 
 // When running inside Electron (production), the UI is loaded via file://
 // and cannot use relative /api paths. Set the base URL to the loopback

@@ -1,2 +1,3 @@
 - [Python deps install in this repl](python-deps-install.md) — pip/`installLanguagePackages`/`uv add` fail (immutable Nix store); use `uv pip install --target .pythonlibs/...`.
 - [Odysseus embedding](odysseus-embedding.md) — bundled Odysseus FastAPI app (artifacts/odysseus-service) embedded via api-server proxy; uses local SQLite, root-absolute URLs rewritten in proxy.
+- [Vite keep-awake](vite-keep-awake.md) — Replit Vite preview white-pages on long/idle sessions (HMR WS dies under throttling); fix = worker heartbeat + wake lock, no reload.
