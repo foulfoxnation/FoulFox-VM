@@ -66,6 +66,15 @@ export default defineConfig({
     fs: {
       strict: true,
     },
+    // Proxy /api requests to the API server so the frontend dev server
+    // and API server can run on different ports without CORS issues.
+    proxy: {
+      "/api": {
+        target: "http://localhost:8080",
+        changeOrigin: false,
+        ws: true, // also proxy WebSocket upgrades (/api/shell/ws)
+      },
+    },
   },
   preview: {
     port,

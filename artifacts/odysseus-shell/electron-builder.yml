@@ -18,6 +18,10 @@ extraResources:
     filter:
       - "**/*.mjs"
       - "**/*.mjs.map"
+  # node-pty is externalized by build.mjs (native .node binary) so it
+  # must be present alongside the bundled dist at runtime.
+  - from: "../api-server/node_modules/node-pty"
+    to: "api-server/node_modules/node-pty"
   - from: "../../artifacts/odysseus-service"
     to: "odysseus-service"
     filter:
@@ -27,6 +31,10 @@ extraResources:
       - "data/.gitkeep"
       - "!**/__pycache__/**"
       - "!**/.git/**"
+
+# Unpack native addons from the asar archive so they can be loaded with require()
+asarUnpack:
+  - "resources/api-server/node_modules/node-pty/**"
 
 linux:
   target:
