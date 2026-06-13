@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 
 export function VmControls() {
-  const { data: status } = useGetVmStatus({ query: { refetchInterval: 3000 } });
+  const { data: status } = useGetVmStatus({ query: { refetchInterval: 3000, queryKey: getGetVmStatusQueryKey() } });
   const startVm = useStartVm();
   const stopVm = useStopVm();
   const restartVm = useRestartVm();

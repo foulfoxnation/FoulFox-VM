@@ -1,4 +1,4 @@
-import { useGetShellHistory } from "@workspace/api-client-react";
+import { useGetShellHistory, getGetShellHistoryQueryKey } from "@workspace/api-client-react";
 import { format } from "date-fns";
 import { Copy, Terminal as TermIcon, AlertCircle } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -6,7 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 
 export function ShellHistoryPanel() {
-  const { data: history } = useGetShellHistory({ query: { refetchInterval: 5000 } });
+  const { data: history } = useGetShellHistory({ query: { refetchInterval: 5000, queryKey: getGetShellHistoryQueryKey() } });
   const { toast } = useToast();
 
   const handleCopy = (cmd: string) => {

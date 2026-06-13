@@ -243,6 +243,22 @@ export function createShellWss(server: import("http").Server) {
 
   server.on("upgrade", (request: IncomingMessage, socket, head) => {
     if (request.url === "/api/shell/ws") {
+      // Enforce localhost-only for shell WebSocket (same as the REST middleware)
+      const remoteAddr = (socket as import("net").Socket).remoteAddress ?? "";
+      const isLocal =
+        remoteAddr === "127.0.0.1" ||
+        remoteAddr === "::1" ||
+        remoteAddr === "::ffff:127.0.0.1";
+
+      if (!isLocal) {
+        logger.warn({ remoteAddr }, "Rejected non-localhost WebSocket upgrade attempt");
+        (socket as import("net").Socket).write(
+          "HTTP/1.1 403 Forbidden\r\nContent-Length: 9\r\n\r\nForbidden",
+        );
+        socket.destroy();
+        return;
+      }
+
       wss.handleUpgrade(request, socket as any, head, (ws) => {
         wss.emit("connection", ws, request);
       });

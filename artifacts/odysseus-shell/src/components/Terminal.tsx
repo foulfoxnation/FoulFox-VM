@@ -1,24 +1,39 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
-export function Terminal() {
+export interface TerminalHandle {
+  clear: () => void;
+  getLastOutput: () => string;
+}
+
+export const Terminal = forwardRef<TerminalHandle>((_, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  // Circular buffer for last ~8 KB of terminal output (plain text, no ANSI)
+  const outputBufferRef = useRef<string>("");
+
+  useImperativeHandle(ref, () => ({
+    clear: () => {
+      xtermRef.current?.clear();
+      outputBufferRef.current = "";
+    },
+    getLastOutput: () => outputBufferRef.current,
+  }));
 
   useEffect(() => {
     if (!containerRef.current) return;
 
     const term = new XTerm({
       cursorBlink: true,
-      fontFamily: 'var(--font-mono)',
+      fontFamily: "var(--font-mono)",
       theme: {
-        background: '#09090b', // hsl(240 10% 3.9%) - var(--background)
-        foreground: '#fafafa', // hsl(0 0% 98%) - var(--foreground)
-      }
+        background: "#09090b",
+        foreground: "#fafafa",
+      },
     });
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
@@ -42,13 +57,16 @@ export function Terminal() {
         const msg = JSON.parse(event.data);
         if (msg.type === "data" && msg.data) {
           term.write(msg.data);
+          // Strip basic ANSI escape codes and accumulate plain text
+          const plain = String(msg.data).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+          outputBufferRef.current = (outputBufferRef.current + plain).slice(-8192);
         } else if (msg.type === "exit") {
           term.write(`\r\n[Process exited with code ${msg.exitCode}]\r\n`);
         }
-      } catch (e) {
-        // Fallback if not JSON
+      } catch {
         if (typeof event.data === "string") {
           term.write(event.data);
+          outputBufferRef.current = (outputBufferRef.current + event.data).slice(-8192);
         }
       }
     };
@@ -65,7 +83,7 @@ export function Terminal() {
         wsRef.current.send(JSON.stringify({
           type: "resize",
           cols: xtermRef.current.cols,
-          rows: xtermRef.current.rows
+          rows: xtermRef.current.rows,
         }));
       }
     });
@@ -80,4 +98,6 @@ export function Terminal() {
   }, []);
 
   return <div ref={containerRef} className="h-full w-full overflow-hidden" data-testid="terminal-container" />;
-}
+});
+
+Terminal.displayName = "Terminal";

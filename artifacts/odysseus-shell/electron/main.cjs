@@ -10,7 +10,7 @@
 
 "use strict";
 
-const { app, BrowserWindow, Menu, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, Menu, dialog } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const http = require("http");
@@ -23,40 +23,88 @@ let odysseusProcess = null;
 const API_PORT = 8080;
 const ODYSSEUS_PORT = 7000;
 
-// Project root (two levels up from electron/)
-const PROJECT_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
+// ── Path resolution ───────────────────────────────────────────────────────────
+// In production (packaged) Electron, child binaries are in extraResources.
+// In development, they live in the source tree relative to this file.
 
-const API_DIST = path.join(PROJECT_ROOT, "artifacts", "api-server", "dist", "index.mjs");
-const ODYSSEUS_DIR = path.join(PROJECT_ROOT, "artifacts", "odysseus-service");
+const IS_PACKAGED = app.isPackaged;
+
+// Resources root differs between packaged and dev:
+//   packaged → <app>/resources/         (process.resourcesPath)
+//   dev      → <repo>/artifacts/        (4 dirs up from electron/main.cjs)
+const RESOURCES_ROOT = IS_PACKAGED
+  ? process.resourcesPath
+  : path.resolve(__dirname, "..", "..", "..");
+
+// API server: packaged stores dist/ under resources/api-server/dist/
+const API_DIST = IS_PACKAGED
+  ? path.join(RESOURCES_ROOT, "api-server", "dist", "index.mjs")
+  : path.join(RESOURCES_ROOT, "api-server", "dist", "index.mjs");
+
+const API_CWD = IS_PACKAGED
+  ? path.join(RESOURCES_ROOT, "api-server")
+  : path.join(RESOURCES_ROOT, "api-server");
+
+// Odysseus service
+const ODYSSEUS_DIR = IS_PACKAGED
+  ? path.join(RESOURCES_ROOT, "odysseus-service")
+  : path.join(RESOURCES_ROOT, "odysseus-service");
+
 const ODYSSEUS_START = path.join(ODYSSEUS_DIR, "start.sh");
-const FRONTEND_DIST = path.join(__dirname, "..", "dist", "public", "index.html");
+
+// Frontend HTML for production load (file:// URL to bundled index.html)
+const FRONTEND_HTML = IS_PACKAGED
+  ? path.join(__dirname, "..", "dist", "public", "index.html")
+  : path.join(__dirname, "..", "dist", "public", "index.html");
 
 // ── Logging ──────────────────────────────────────────────────────────────────
 function log(tag, msg) {
   const ts = new Date().toISOString().substring(11, 19);
-  console.log(`[${ts}][${tag}] ${msg}`);
+  process.stdout.write(`[${ts}][${tag}] ${msg}\n`);
 }
 
 // ── Service startup ──────────────────────────────────────────────────────────
+function buildApiEnv() {
+  return {
+    ...process.env,
+    PORT: String(API_PORT),
+    NODE_ENV: "production",
+    // Bind API server to loopback only — no external access
+    HOST: "127.0.0.1",
+  };
+}
+
 function buildOdysseusEnv() {
   const env = { ...process.env };
   env.HOST = "127.0.0.1";
   env.PORT = String(ODYSSEUS_PORT);
   env.AUTH_ENABLED = "false";
   env.ODYSSEUS_DATA_DIR = path.join(ODYSSEUS_DIR, "data");
-  // Allow callers to pre-set OPENAI_API_KEY; otherwise Odysseus starts unconfigured
+
+  // Map Replit AI Anthropic key if present
+  if (env.AI_INTEGRATIONS_ANTHROPIC_API_KEY && !env.OPENAI_API_KEY) {
+    env.OPENAI_API_KEY = env.AI_INTEGRATIONS_ANTHROPIC_API_KEY;
+  }
+  // Replit AI OpenAI-compatible base URL for claude-sonnet-4-5
+  if (!env.OPENAI_BASE_URL) {
+    env.OPENAI_BASE_URL = "https://openai-proxy.replit.com/v1";
+  }
+  if (!env.OPENAI_MODEL) {
+    env.OPENAI_MODEL = "claude-sonnet-4-5";
+  }
+
   return env;
 }
 
 function startApiServer() {
   if (!fs.existsSync(API_DIST)) {
-    log("api", `WARNING: dist not found at ${API_DIST} — run pnpm build first`);
+    log("api", `WARNING: dist not found at ${API_DIST} — run 'pnpm build' in api-server first`);
     return;
   }
 
   apiProcess = spawn(process.execPath, [API_DIST], {
-    cwd: path.join(PROJECT_ROOT, "artifacts", "api-server"),
-    env: { ...process.env, PORT: String(API_PORT), NODE_ENV: "production" },
+    cwd: API_CWD,
+    env: buildApiEnv(),
     stdio: "pipe",
   });
 
@@ -67,8 +115,9 @@ function startApiServer() {
 }
 
 function startOdysseus() {
-  const cmd = fs.existsSync(ODYSSEUS_START) ? "bash" : "python";
-  const args = fs.existsSync(ODYSSEUS_START)
+  const useScript = fs.existsSync(ODYSSEUS_START);
+  const cmd = useScript ? "bash" : "python";
+  const args = useScript
     ? [ODYSSEUS_START]
     : ["-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", String(ODYSSEUS_PORT)];
 
@@ -84,12 +133,15 @@ function startOdysseus() {
   odysseusProcess.on("exit", (code) => log("odysseus", `exited with code ${code}`));
 }
 
-// ── Wait for port ─────────────────────────────────────────────────────────────
+// ── Wait for HTTP port ─────────────────────────────────────────────────────────
 function waitForPort(port, maxMs = 30000) {
   return new Promise((resolve) => {
     const start = Date.now();
     const check = () => {
-      const req = http.request({ hostname: "127.0.0.1", port, path: "/", timeout: 1000 }, () => resolve(true));
+      const req = http.request(
+        { hostname: "127.0.0.1", port, path: "/api/healthz", timeout: 1000 },
+        (res) => { resolve(res.statusCode < 500); },
+      );
       req.on("error", () => {
         if (Date.now() - start < maxMs) setTimeout(check, 500);
         else resolve(false);
@@ -128,43 +180,52 @@ async function createWindow() {
     },
   });
 
-  // Suppress default menu bar
   Menu.setApplicationMenu(null);
 
-  const isDev = !fs.existsSync(FRONTEND_DIST);
+  const isDev = process.env.NODE_ENV === "development" || !IS_PACKAGED;
 
   if (isDev) {
-    // Development: load Vite dev server
-    log("app", "DEV mode — loading http://localhost:26142/");
-    await win.loadURL("http://localhost:26142/");
+    // Development: load Vite dev server (must be running separately)
+    const devPort = process.env.VITE_PORT || "26142";
+    log("app", `DEV mode — loading http://localhost:${devPort}/`);
     win.webContents.openDevTools();
+    await win.loadURL(`http://localhost:${devPort}/`);
   } else {
-    // Production: load built static files via api server
-    log("app", `Waiting for API server on port ${API_PORT}…`);
-    const ready = await waitForPort(API_PORT, 30000);
-    if (!ready) {
-      dialog.showErrorBox("Startup failed", "API server did not start within 30 seconds.");
+    // Production: serve built static files from file:// URL.
+    // The frontend connects to the API server via http://127.0.0.1:8080/api/...
+    // which is already started and bound to loopback.
+    if (!fs.existsSync(FRONTEND_HTML)) {
+      dialog.showErrorBox(
+        "Startup failed",
+        `Built frontend not found at:\n${FRONTEND_HTML}\n\nRun 'pnpm electron:build' to create a distributable.`,
+      );
       app.quit();
       return;
     }
-    log("app", "Loading production build via API server");
-    await win.loadURL(`http://127.0.0.1:${API_PORT}/`);
+
+    log("app", `Waiting for API server on port ${API_PORT}…`);
+    const ready = await waitForPort(API_PORT, 30000);
+    if (!ready) {
+      dialog.showErrorBox("Startup failed", "API server did not become healthy within 30 seconds.");
+      app.quit();
+      return;
+    }
+
+    log("app", `Loading frontend from file: ${FRONTEND_HTML}`);
+    await win.loadFile(FRONTEND_HTML);
   }
 
-  win.on("closed", () => {
-    killChildren();
-  });
+  win.on("closed", killChildren);
 }
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
-  log("app", "Starting child services…");
+  log("app", `Starting (packaged=${IS_PACKAGED}, resources=${RESOURCES_ROOT})`);
   startApiServer();
   startOdysseus();
 
-  // Give them a moment to start, then open the window
-  // (Window will poll/wait for the API server to be ready in production)
-  setTimeout(createWindow, 1000);
+  // Give services a head-start, then open the window (which polls for API readiness)
+  setTimeout(createWindow, 800);
 });
 
 app.on("window-all-closed", () => {

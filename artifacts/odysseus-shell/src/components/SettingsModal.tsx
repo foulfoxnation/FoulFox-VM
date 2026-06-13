@@ -31,7 +31,7 @@ const configSchema = z.object({
 
 export function SettingsModal() {
   const [open, setOpen] = useState(false);
-  const { data: config, isLoading } = useGetVmConfig({ query: { enabled: open } });
+  const { data: config, isLoading } = useGetVmConfig({ query: { enabled: open, queryKey: getGetVmConfigQueryKey() } });
   const updateConfig = useUpdateVmConfig();
   const queryClient = useQueryClient();
   const { toast } = useToast();
