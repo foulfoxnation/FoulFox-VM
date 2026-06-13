@@ -7,6 +7,7 @@ import { Terminal, type TerminalHandle } from "@/components/Terminal";
 import { OdysseusTab } from "@/components/OdysseusTab";
 import { ShellHistoryPanel } from "@/components/ShellHistoryPanel";
 import { useHealthCheck } from "@workspace/api-client-react";
+import { useShellToken } from "@/hooks/use-shell-token";
 import { Terminal as TermIcon, MonitorDot, Command, Trash2, Send, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -20,6 +21,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState("odysseus");
   const [sendingToOdysseus, setSendingToOdysseus] = useState(false);
   const { data: health } = useHealthCheck();
+  const { data: shellToken } = useShellToken();
   const terminalRef = useRef<TerminalHandle>(null);
   const { toast } = useToast();
 
@@ -40,7 +42,11 @@ export default function Home() {
       // The proxy at /api/odysseus/ forwards to the Odysseus Python service.
       const response = await fetch("/api/odysseus/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // Include shell token on any request that may be considered shell-related
+          ...(shellToken ? { "X-Shell-Token": shellToken } : {}),
+        },
         body: JSON.stringify({
           model: "claude-sonnet-4-5",
           messages: [
@@ -149,7 +155,7 @@ export default function Home() {
                 variant="ghost"
                 size="sm"
                 onClick={handleSendToOdysseus}
-                disabled={sendingToOdysseus}
+                disabled={sendingToOdysseus || !shellToken}
                 className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
                 data-testid="button-send-to-odysseus"
               >

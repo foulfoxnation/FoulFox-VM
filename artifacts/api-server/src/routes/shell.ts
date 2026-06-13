@@ -3,9 +3,11 @@ import { type IncomingMessage } from "http";
 import { WebSocketServer, type WebSocket } from "ws";
 import * as pty from "node-pty";
 import { spawn } from "child_process";
+import { URL } from "url";
 import { ExecShellCommandBody, ExecShellCommandResponse } from "@workspace/api-zod";
 import { vmRuntime, loadVmConfig } from "../lib/vm-state";
 import { logger } from "../lib/logger";
+import { SHELL_SESSION_TOKEN } from "../lib/shell-token";
 
 const router: IRouter = Router();
 
@@ -242,27 +244,38 @@ export function createShellWss(server: import("http").Server) {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on("upgrade", (request: IncomingMessage, socket, head) => {
-    if (request.url === "/api/shell/ws") {
-      // Enforce localhost-only for shell WebSocket (same as the REST middleware)
-      const remoteAddr = (socket as import("net").Socket).remoteAddress ?? "";
-      const isLocal =
-        remoteAddr === "127.0.0.1" ||
-        remoteAddr === "::1" ||
-        remoteAddr === "::ffff:127.0.0.1";
+    if (!request.url?.startsWith("/api/shell/ws")) return;
 
-      if (!isLocal) {
-        logger.warn({ remoteAddr }, "Rejected non-localhost WebSocket upgrade attempt");
-        (socket as import("net").Socket).write(
-          "HTTP/1.1 403 Forbidden\r\nContent-Length: 9\r\n\r\nForbidden",
-        );
-        socket.destroy();
-        return;
-      }
+    const netSocket = socket as import("net").Socket;
 
-      wss.handleUpgrade(request, socket as any, head, (ws) => {
-        wss.emit("connection", ws, request);
-      });
+    // 1. Enforce loopback-only (blocks remote attackers)
+    const remoteAddr = netSocket.remoteAddress ?? "";
+    const isLocal =
+      remoteAddr === "127.0.0.1" ||
+      remoteAddr === "::1" ||
+      remoteAddr === "::ffff:127.0.0.1";
+
+    if (!isLocal) {
+      logger.warn({ remoteAddr }, "Rejected non-localhost shell WebSocket upgrade");
+      netSocket.write("HTTP/1.1 403 Forbidden\r\nContent-Length: 9\r\n\r\nForbidden");
+      netSocket.destroy();
+      return;
     }
+
+    // 2. Require session token (CSRF protection — prevents malicious pages from
+    //    opening a shell WebSocket against the loopback API server)
+    const reqUrl = new URL(request.url, "http://localhost");
+    const providedToken = reqUrl.searchParams.get("token");
+    if (providedToken !== SHELL_SESSION_TOKEN) {
+      logger.warn("Rejected shell WebSocket upgrade: invalid token");
+      netSocket.write("HTTP/1.1 401 Unauthorized\r\nContent-Length: 12\r\n\r\nUnauthorized");
+      netSocket.destroy();
+      return;
+    }
+
+    wss.handleUpgrade(request, socket as any, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
   });
 
   wss.on("connection", handleShellWebSocket);

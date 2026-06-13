@@ -2,6 +2,7 @@ import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+import { useShellToken } from "@/hooks/use-shell-token";
 
 export interface TerminalHandle {
   clear: () => void;
@@ -13,8 +14,9 @@ export const Terminal = forwardRef<TerminalHandle>((_, ref) => {
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  // Circular buffer for last ~8 KB of terminal output (plain text, no ANSI)
   const outputBufferRef = useRef<string>("");
+
+  const { data: shellToken } = useShellToken();
 
   useImperativeHandle(ref, () => ({
     clear: () => {
@@ -26,6 +28,8 @@ export const Terminal = forwardRef<TerminalHandle>((_, ref) => {
 
   useEffect(() => {
     if (!containerRef.current) return;
+    // Wait until we have the shell token before opening the WebSocket
+    if (!shellToken) return;
 
     const term = new XTerm({
       cursorBlink: true,
@@ -43,8 +47,15 @@ export const Terminal = forwardRef<TerminalHandle>((_, ref) => {
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
+    // Include the session token as a query param — WebSocket API doesn't support
+    // custom headers, so ?token= is the standard workaround for token auth on WS.
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${wsProtocol}//${window.location.host}/api/shell/ws`);
+    const wsHost = window.location.protocol === "file:"
+      ? "127.0.0.1:8080"
+      : window.location.host;
+    const ws = new WebSocket(
+      `${wsProtocol}//${wsHost}/api/shell/ws?token=${encodeURIComponent(shellToken)}`,
+    );
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -57,7 +68,6 @@ export const Terminal = forwardRef<TerminalHandle>((_, ref) => {
         const msg = JSON.parse(event.data);
         if (msg.type === "data" && msg.data) {
           term.write(msg.data);
-          // Strip basic ANSI escape codes and accumulate plain text
           const plain = String(msg.data).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
           outputBufferRef.current = (outputBufferRef.current + plain).slice(-8192);
         } else if (msg.type === "exit") {
@@ -80,11 +90,9 @@ export const Terminal = forwardRef<TerminalHandle>((_, ref) => {
     const resizeObserver = new ResizeObserver(() => {
       if (fitAddonRef.current && wsRef.current?.readyState === WebSocket.OPEN && xtermRef.current) {
         fitAddonRef.current.fit();
-        wsRef.current.send(JSON.stringify({
-          type: "resize",
-          cols: xtermRef.current.cols,
-          rows: xtermRef.current.rows,
-        }));
+        wsRef.current.send(
+          JSON.stringify({ type: "resize", cols: xtermRef.current.cols, rows: xtermRef.current.rows }),
+        );
       }
     });
 
@@ -95,9 +103,11 @@ export const Terminal = forwardRef<TerminalHandle>((_, ref) => {
       ws.close();
       term.dispose();
     };
-  }, []);
+  }, [shellToken]); // re-run if token changes (e.g. API server restart)
 
-  return <div ref={containerRef} className="h-full w-full overflow-hidden" data-testid="terminal-container" />;
+  return (
+    <div ref={containerRef} className="h-full w-full overflow-hidden" data-testid="terminal-container" />
+  );
 });
 
 Terminal.displayName = "Terminal";

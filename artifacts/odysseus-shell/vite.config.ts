@@ -4,27 +4,16 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
+// In Replit dev, PORT and BASE_PATH are injected by the platform.
+// For local/Electron builds they are optional — fall back to safe defaults.
 const rawPort = process.env.PORT;
+const port = rawPort ? Number(rawPort) : 5173;
 
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
-
-const port = Number(rawPort);
-
-if (Number.isNaN(port) || port <= 0) {
+if (rawPort && (Number.isNaN(port) || port <= 0)) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-const basePath = process.env.BASE_PATH;
-
-if (!basePath) {
-  throw new Error(
-    "BASE_PATH environment variable is required but was not provided.",
-  );
-}
+const basePath = process.env.BASE_PATH ?? "/";
 
 export default defineConfig({
   base: basePath,
@@ -66,13 +55,13 @@ export default defineConfig({
     fs: {
       strict: true,
     },
-    // Proxy /api requests to the API server so the frontend dev server
-    // and API server can run on different ports without CORS issues.
+    // Proxy /api requests to the API server in dev so both services can run
+    // on different ports without CORS issues or extra configuration.
     proxy: {
       "/api": {
         target: "http://localhost:8080",
         changeOrigin: false,
-        ws: true, // also proxy WebSocket upgrades (/api/shell/ws)
+        ws: true, // also proxies WebSocket upgrades (/api/shell/ws)
       },
     },
   },

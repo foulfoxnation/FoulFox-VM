@@ -3,7 +3,7 @@ productName: "Windows Odysseus + Unity"
 
 directories:
   output: dist-electron
-  buildResources: electron/resources
+  # No custom buildResources — we use default icons or none; CI can add them later
 
 files:
   - dist/public/**/*
@@ -18,8 +18,8 @@ extraResources:
     filter:
       - "**/*.mjs"
       - "**/*.mjs.map"
-  # node-pty is externalized by build.mjs (native .node binary) so it
-  # must be present alongside the bundled dist at runtime.
+  # node-pty is externalized by esbuild (native .node binary) so it must be
+  # present alongside the bundled dist at runtime.
   - from: "../api-server/node_modules/node-pty"
     to: "api-server/node_modules/node-pty"
   - from: "../../artifacts/odysseus-service"
@@ -32,7 +32,7 @@ extraResources:
       - "!**/__pycache__/**"
       - "!**/.git/**"
 
-# Unpack native addons from the asar archive so they can be loaded with require()
+# Unpack native addons from the asar archive so node can dlopen() them
 asarUnpack:
   - "resources/api-server/node_modules/node-pty/**"
 
@@ -41,17 +41,14 @@ linux:
     - AppImage
     - deb
   category: Development
-  icon: electron/resources/icon.png
 
 win:
   target:
     - nsis
-  icon: electron/resources/icon.ico
 
 mac:
   target:
     - dmg
-  icon: electron/resources/icon.icns
   category: public.app-category.developer-tools
 
 nsis:
