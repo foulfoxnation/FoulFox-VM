@@ -1,0 +1,4 @@
+# Runtime frontload staging — user-supplied drivers/ISOs/files.
+# Created on demand by the /files/staging + /files/frontload endpoints.
+# Never commit user content.
+frontload/

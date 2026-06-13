@@ -1,0 +1,15 @@
+#!/bin/sh
+# Chroot hook: pre-build the Odysseus Python virtualenv at image-build time so
+# the first boot is fast and works even without a network. start.sh reuses an
+# existing .venv, so this is purely a warm-up.
+set -e
+
+SVC=/opt/foulfox/app/artifacts/odysseus-service
+if [ -d "$SVC" ] && [ -f "$SVC/requirements.txt" ]; then
+  python3 -m venv "$SVC/.venv"
+  "$SVC/.venv/bin/pip" install --upgrade pip
+  "$SVC/.venv/bin/pip" install -r "$SVC/requirements.txt"
+  chown -R foulfox:foulfox "$SVC/.venv" 2>/dev/null || true
+else
+  echo "[0020-foulfox-python-venv] Odysseus service not staged; skipping venv warm-up"
+fi

@@ -1,0 +1,13 @@
+[Unit]
+Description=FoulFox Windows VM autostart (no-op until a guest is configured)
+After=foulfox-api.service
+Requires=foulfox-api.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/foulfox/foulfox.env
+ExecStart=/usr/local/bin/foulfox-vm-autostart
+
+[Install]
+WantedBy=multi-user.target

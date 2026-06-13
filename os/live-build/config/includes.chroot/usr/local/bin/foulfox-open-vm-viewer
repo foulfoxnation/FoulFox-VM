@@ -1,0 +1,17 @@
+#!/bin/sh
+# Watch for the Windows VM's SPICE port and attach a fullscreen viewer when it
+# comes up. Runs inside the kiosk X session, retrying for the life of the
+# session so the viewer reappears each time the VM is (re)started.
+
+# shellcheck disable=SC1091
+[ -f /etc/foulfox/foulfox.env ] && . /etc/foulfox/foulfox.env
+SPICE_PORT="${VM_SPICE_PORT:-5930}"
+
+while true; do
+  if ss -ltn 2>/dev/null | grep -q "127.0.0.1:${SPICE_PORT}\b"; then
+    # Blocks until the viewer window is closed or the VM stops.
+    remote-viewer --full-screen "spice://127.0.0.1:${SPICE_PORT}" 2>/dev/null || true
+    sleep 3
+  fi
+  sleep 2
+done

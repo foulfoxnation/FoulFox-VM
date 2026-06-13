@@ -6,7 +6,17 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './copiedItem';
+export * from './directoryListing';
+export * from './driveInfo';
+export * from './fileEntry';
+export * from './fileEntryType';
+export * from './frontloadFailure';
+export * from './frontloadInput';
+export * from './frontloadInputCategory';
+export * from './frontloadResult';
 export * from './healthStatus';
+export * from './listDirectoryParams';
 export * from './shellCommandInput';
 export * from './shellCommandResult';
 export * from './shellHistoryEntry';

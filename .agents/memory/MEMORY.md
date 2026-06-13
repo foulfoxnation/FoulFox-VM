@@ -1,6 +1,7 @@
 - [Python deps install in this repl](python-deps-install.md) — pip/`installLanguagePackages`/`uv add` fail (immutable Nix store); use `uv pip install --target .pythonlibs/...`.
 - [Odysseus embedding](odysseus-embedding.md) — bundled Odysseus FastAPI app (artifacts/odysseus-service) embedded via api-server proxy; uses local SQLite, root-absolute URLs rewritten in proxy.
 - [Vite keep-awake](vite-keep-awake.md) — Replit Vite preview white-pages on long/idle sessions (HMR WS dies under throttling); fix = worker heartbeat + wake lock, no reload.
+- [FoulFox OS appliance](foulfox-os-appliance.md) — os/ live-build recipe; keep headless QEMU argv byte-identical, VM config fields optional+merged, shell static-serving gated on SERVE_SHELL_STATIC (off in dev).
 - [FoulFox VM rebrand scope](foulfox-rebrand-scope.md) — Odysseus→FoulFox VM: which strings are user-visible brand vs load-bearing identifiers (X-Odysseus-* headers, reminder subject marker, env vars) that must NOT be renamed.
 - [VM snapshot bridge](vm-snapshot-bridge.md) — qemu-img only when VM fully stopped (else corrupts qcow2); cross-service VM POST needs shared ODYSSEUS_INTERNAL_TOKEN; no-KVM here → honest failures.
 - [Odysseus agent suite](odysseus-agent-suite.md) — 3-role suite + Architect review loop: sequential, worker=tools/architect=tool-free JSON; stream_agent_loop does NOT persist session history.

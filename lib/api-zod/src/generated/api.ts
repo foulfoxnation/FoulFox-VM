@@ -151,3 +151,74 @@ export const GetShellHistoryResponseItem = zod.object({
 export const GetShellHistoryResponse = zod.array(GetShellHistoryResponseItem)
 
 
+/**
+ * @summary List entries in a directory
+ */
+export const ListDirectoryQueryParams = zod.object({
+  "path": zod.coerce.string().optional().describe('Absolute directory path to list (defaults to home)')
+})
+
+export const ListDirectoryResponse = zod.object({
+  "path": zod.string(),
+  "parent": zod.string().nullish(),
+  "entries": zod.array(zod.object({
+  "name": zod.string(),
+  "path": zod.string(),
+  "type": zod.enum(['file', 'directory', 'symlink', 'other']),
+  "sizeBytes": zod.number().nullish(),
+  "modifiedMs": zod.number().nullish()
+}))
+})
+
+
+/**
+ * @summary List mounted/removable drives (USB, etc.)
+ */
+export const ListDrivesResponseItem = zod.object({
+  "name": zod.string(),
+  "path": zod.string(),
+  "label": zod.string().nullish(),
+  "fsType": zod.string().nullish(),
+  "sizeBytes": zod.number().nullish(),
+  "removable": zod.boolean()
+})
+export const ListDrivesResponse = zod.array(ListDrivesResponseItem)
+
+
+/**
+ * @summary List the frontload staging area contents
+ */
+export const GetStagingResponse = zod.object({
+  "path": zod.string(),
+  "parent": zod.string().nullish(),
+  "entries": zod.array(zod.object({
+  "name": zod.string(),
+  "path": zod.string(),
+  "type": zod.enum(['file', 'directory', 'symlink', 'other']),
+  "sizeBytes": zod.number().nullish(),
+  "modifiedMs": zod.number().nullish()
+}))
+})
+
+
+/**
+ * @summary Copy files/drivers from a source (USB) into the staging area
+ */
+export const FrontloadFilesBody = zod.object({
+  "sources": zod.array(zod.string()),
+  "category": zod.enum(['drivers', 'isos', 'files']).optional()
+})
+
+export const FrontloadFilesResponse = zod.object({
+  "stagingPath": zod.string(),
+  "copied": zod.array(zod.object({
+  "source": zod.string(),
+  "destination": zod.string()
+})),
+  "failed": zod.array(zod.object({
+  "source": zod.string(),
+  "error": zod.string()
+}))
+})
+
+

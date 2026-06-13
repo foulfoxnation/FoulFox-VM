@@ -1,0 +1,37 @@
+#!/bin/sh
+# FoulFox OS kiosk X session (launched by LightDM autologin as user foulfox).
+# Starts the window manager, the Windows-VM viewer watcher, and a fullscreen
+# Chromium pointed at the locally-served FoulFox VM shell.
+
+# shellcheck disable=SC1091
+[ -f /etc/foulfox/foulfox.env ] && . /etc/foulfox/foulfox.env
+export HOME=/var/lib/foulfox
+
+# Always-on appliance: no screen blanking or power management.
+xset s off -dpms s noblank 2>/dev/null || true
+
+# Attach the fullscreen Windows-VM viewer whenever the guest is up (background).
+/usr/local/bin/foulfox-open-vm-viewer &
+
+# Window manager (handles window switching between the shell + the VM viewer).
+openbox &
+
+# Wait for the api-server to serve the shell before opening the browser.
+url="http://127.0.0.1:${PORT:-8080}/"
+i=0
+while [ "$i" -lt 60 ]; do
+  if curl -sf -o /dev/null "$url"; then break; fi
+  i=$((i + 1))
+  sleep 1
+done
+
+exec chromium \
+  --kiosk \
+  --no-first-run \
+  --disable-infobars \
+  --disable-translate \
+  --noerrdialogs \
+  --disable-session-crashed-bubble \
+  --check-for-update-interval=31536000 \
+  --password-store=basic \
+  "$url"

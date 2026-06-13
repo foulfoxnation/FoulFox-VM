@@ -7,10 +7,11 @@ import { VmControls } from "@/components/VmControls";
 import { Terminal, type TerminalHandle } from "@/components/Terminal";
 import { OdysseusTab } from "@/components/OdysseusTab";
 import { ShellHistoryPanel } from "@/components/ShellHistoryPanel";
+import { FileExplorer } from "@/components/FileExplorer";
 import foxLogo from "@assets/FoxQuest_Logo_1781378611335.png";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { useShellToken } from "@/hooks/use-shell-token";
-import { Terminal as TermIcon, MonitorDot, Command, Trash2, Send } from "lucide-react";
+import { Terminal as TermIcon, MonitorDot, Command, Trash2, Send, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -95,6 +96,14 @@ export default function Home() {
               <TermIcon className="mr-2 h-4 w-4" />
               Shell Terminal
             </TabsTrigger>
+            <TabsTrigger
+              value="files"
+              className="relative h-12 rounded-none border-b-2 border-b-transparent bg-transparent px-4 pb-3 pt-2 font-medium text-muted-foreground shadow-none transition-none data-[state=active]:border-b-primary data-[state=active]:text-foreground data-[state=active]:shadow-none"
+              data-testid="tab-files"
+            >
+              <FolderOpen className="mr-2 h-4 w-4" />
+              File Explorer
+            </TabsTrigger>
           </TabsList>
         </div>
 
@@ -152,6 +161,10 @@ export default function Home() {
               </ResizablePanel>
             </ResizablePanelGroup>
           </div>
+        </TabsContent>
+
+        <TabsContent value="files" className="flex-1 m-0 p-0 border-0 outline-none h-full data-[state=inactive]:hidden">
+          <FileExplorer />
         </TabsContent>
       </Tabs>
     </div>

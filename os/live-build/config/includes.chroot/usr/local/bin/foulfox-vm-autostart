@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Start the Windows VM through the api-server so runtime state stays consistent
+# with the shell's VM controls. No-ops gracefully when nothing is configured
+# (e.g. before the user has frontloaded a Windows ISO).
+set -euo pipefail
+
+# shellcheck disable=SC1091
+[ -f /etc/foulfox/foulfox.env ] && . /etc/foulfox/foulfox.env
+PORT="${PORT:-8080}"
+BASE="http://127.0.0.1:${PORT}"
+
+# Wait for the api-server to be reachable.
+for _ in $(seq 1 60); do
+  if curl -sf -o /dev/null "$BASE/api/vm/status"; then break; fi
+  sleep 1
+done
+
+# Only autostart if a Windows ISO or an existing disk is configured.
+status="$(curl -sf "$BASE/api/vm/status" 2>/dev/null || echo '{}')"
+case "$status" in
+  *'"isoPath":null'*'"diskPath":null'*)
+    echo "[foulfox-vm-autostart] no ISO or disk configured yet; skipping"
+    exit 0
+    ;;
+esac
+
+# The /vm/* routes are CSRF-guarded with a per-process token served on loopback.
+TOKEN="$(curl -sf "$BASE/api/shell/session-token" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+if [ -z "$TOKEN" ]; then
+  echo "[foulfox-vm-autostart] no shell token available; skipping"
+  exit 0
+fi
+
+curl -sf -X POST "$BASE/api/vm/start" \
+  -H "X-Shell-Token: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{}' >/dev/null || echo "[foulfox-vm-autostart] /vm/start returned non-zero; continuing"

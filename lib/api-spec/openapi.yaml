@@ -14,6 +14,8 @@ tags:
     description: QEMU/KVM Windows VM management
   - name: shell
     description: Shell session management
+  - name: files
+    description: File explorer and USB frontload
 paths:
   /healthz:
     get:
@@ -162,6 +164,73 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ShellHistoryEntry"
+
+  /files/list:
+    get:
+      operationId: listDirectory
+      tags: [files]
+      summary: List entries in a directory
+      parameters:
+        - name: path
+          in: query
+          required: false
+          description: Absolute directory path to list (defaults to home)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Directory listing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DirectoryListing"
+
+  /files/drives:
+    get:
+      operationId: listDrives
+      tags: [files]
+      summary: List mounted/removable drives (USB, etc.)
+      responses:
+        "200":
+          description: Detected drives
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DriveInfo"
+
+  /files/staging:
+    get:
+      operationId: getStaging
+      tags: [files]
+      summary: List the frontload staging area contents
+      responses:
+        "200":
+          description: Staging directory listing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DirectoryListing"
+
+  /files/frontload:
+    post:
+      operationId: frontloadFiles
+      tags: [files]
+      summary: Copy files/drivers from a source (USB) into the staging area
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FrontloadInput"
+      responses:
+        "200":
+          description: Frontload result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FrontloadResult"
 
 components:
   schemas:
@@ -326,3 +395,110 @@ components:
         - stdout
         - stderr
         - timestamp
+
+    FileEntry:
+      type: object
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        type:
+          type: string
+          enum: [file, directory, symlink, other]
+        sizeBytes:
+          type: ["integer", "null"]
+        modifiedMs:
+          type: ["integer", "null"]
+      required:
+        - name
+        - path
+        - type
+
+    DirectoryListing:
+      type: object
+      properties:
+        path:
+          type: string
+        parent:
+          type: ["string", "null"]
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileEntry"
+      required:
+        - path
+        - entries
+
+    DriveInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        label:
+          type: ["string", "null"]
+        fsType:
+          type: ["string", "null"]
+        sizeBytes:
+          type: ["integer", "null"]
+        removable:
+          type: boolean
+      required:
+        - name
+        - path
+        - removable
+
+    FrontloadInput:
+      type: object
+      properties:
+        sources:
+          type: array
+          items:
+            type: string
+        category:
+          type: string
+          enum: [drivers, isos, files]
+      required:
+        - sources
+
+    CopiedItem:
+      type: object
+      properties:
+        source:
+          type: string
+        destination:
+          type: string
+      required:
+        - source
+        - destination
+
+    FrontloadFailure:
+      type: object
+      properties:
+        source:
+          type: string
+        error:
+          type: string
+      required:
+        - source
+        - error
+
+    FrontloadResult:
+      type: object
+      properties:
+        stagingPath:
+          type: string
+        copied:
+          type: array
+          items:
+            $ref: "#/components/schemas/CopiedItem"
+        failed:
+          type: array
+          items:
+            $ref: "#/components/schemas/FrontloadFailure"
+      required:
+        - stagingPath
+        - copied
+        - failed

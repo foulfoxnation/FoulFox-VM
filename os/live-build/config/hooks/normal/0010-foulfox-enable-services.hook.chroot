@@ -1,0 +1,51 @@
+#!/bin/sh
+# Chroot hook: create the appliance user, enable the FoulFox services, and wire
+# up graphical autologin into the kiosk session. Runs at image-build time.
+set -e
+
+# ── Appliance user (runs the services + the kiosk X session) ─────────────────
+if ! id foulfox >/dev/null 2>&1; then
+  adduser --disabled-password --gecos "FoulFox" \
+    --home /var/lib/foulfox --shell /bin/bash foulfox
+fi
+# Group memberships: KVM (/dev/kvm), USB hotplug, networking, X video.
+for grp in kvm plugdev netdev video; do
+  getent group "$grp" >/dev/null 2>&1 && adduser foulfox "$grp" || true
+done
+# LightDM autologin in Debian requires membership in the "autologin" group.
+groupadd -f autologin
+adduser foulfox autologin || true
+
+# ── Enable the FoulFox services ──────────────────────────────────────────────
+systemctl enable foulfox-prepare.service
+systemctl enable odysseus-service.service
+systemctl enable foulfox-api.service
+systemctl enable foulfox-vm-autostart.service
+
+# ── Graphical autologin straight into the kiosk session ──────────────────────
+mkdir -p /etc/lightdm/lightdm.conf.d
+cat > /etc/lightdm/lightdm.conf.d/50-foulfox-autologin.conf <<EOF
+[Seat:*]
+autologin-user=foulfox
+autologin-user-timeout=0
+user-session=foulfox-kiosk
+greeter-session=lightdm-gtk-greeter
+EOF
+
+mkdir -p /usr/share/xsessions
+cat > /usr/share/xsessions/foulfox-kiosk.desktop <<EOF
+[Desktop Entry]
+Name=FoulFox Kiosk
+Comment=FoulFox VM kiosk session
+Exec=/usr/local/bin/foulfox-kiosk
+Type=Application
+EOF
+
+# Boot to the graphical target.
+systemctl set-default graphical.target
+
+# ── Permissions ──────────────────────────────────────────────────────────────
+chmod +x /usr/local/bin/foulfox-first-run \
+         /usr/local/bin/foulfox-kiosk \
+         /usr/local/bin/foulfox-open-vm-viewer \
+         /usr/local/bin/foulfox-vm-autostart

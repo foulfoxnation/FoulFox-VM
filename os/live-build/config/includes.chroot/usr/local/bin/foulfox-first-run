@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# FoulFox OS first-run provisioning. Idempotent: safe to run on every boot.
+#
+# Creates the runtime dirs, fixes ownership, locates a user-supplied Windows ISO
+# and the virtio-win driver ISO (frontloaded via the File Explorer or present on
+# removable media), creates the guest disk, and writes the VM config that the
+# api-server reads. The api-server merges this file with its defaults on load,
+# so only the appliance-relevant fields are written here.
+set -euo pipefail
+
+# shellcheck disable=SC1091
+[ -f /etc/foulfox/foulfox.env ] && . /etc/foulfox/foulfox.env
+
+FOULFOX_HOME="${HOME:-/var/lib/foulfox}"
+STAGING="${FRONTLOAD_STAGING_DIR:-$FOULFOX_HOME/frontload}"
+VM_DIR="$FOULFOX_HOME/vm"
+CONFIG="$FOULFOX_HOME/.odysseus-vm-config.json"
+DISK="$VM_DIR/windows.qcow2"
+DISK_SIZE="${VM_DISK_SIZE:-128G}"
+RAM_GB="${VM_RAM_GB:-8}"
+CPU_CORES="${VM_CPU_CORES:-4}"
+DISPLAY_MODE="${VM_DISPLAY_MODE:-spice}"
+SPICE_PORT="${VM_SPICE_PORT:-5930}"
+
+mkdir -p "$STAGING/drivers" "$STAGING/isos" "$STAGING/files" "$VM_DIR" "$FOULFOX_HOME/logs"
+
+# Ensure the appliance user (and the kvm group, for /dev/kvm) own runtime state.
+if id foulfox >/dev/null 2>&1; then
+  chown -R foulfox:foulfox "$FOULFOX_HOME" 2>/dev/null || true
+  usermod -aG kvm foulfox 2>/dev/null || true
+fi
+
+# ── Locate a Windows ISO ─────────────────────────────────────────────────────
+# Prefer the frontload staging dir, then any mounted removable media.
+find_windows_iso() {
+  local hit
+  hit="$(find "$STAGING/isos" -maxdepth 1 -iname '*.iso' 2>/dev/null | sort | head -n1)"
+  if [ -n "$hit" ]; then echo "$hit"; return 0; fi
+  local base
+  for base in /media /run/media /mnt; do
+    [ -d "$base" ] || continue
+    hit="$(find "$base" -maxdepth 4 \( -iname 'win*.iso' -o -iname '*windows*.iso' \) 2>/dev/null | sort | head -n1)"
+    if [ -n "$hit" ]; then echo "$hit"; return 0; fi
+  done
+  return 0
+}
+
+# ── Locate the virtio-win driver ISO ─────────────────────────────────────────
+find_virtio_iso() {
+  find "$STAGING/drivers" "$STAGING/isos" -maxdepth 1 -iname 'virtio-win*.iso' 2>/dev/null | sort | head -n1
+}
+
+WIN_ISO="$(find_windows_iso)"
+VIRTIO_ISO="$(find_virtio_iso)"
+
+# Best-effort download of virtio-win when absent and a network is available.
+if [ -z "$VIRTIO_ISO" ]; then
+  if curl -sfI https://fedorapeople.org >/dev/null 2>&1; then
+    VIRTIO_URL="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
+    if curl -fL --retry 3 -o "$STAGING/drivers/virtio-win.iso" "$VIRTIO_URL"; then
+      VIRTIO_ISO="$STAGING/drivers/virtio-win.iso"
+    fi
+  fi
+fi
+
+# ── Create the guest disk only when there's something to install or run ──────
+# Create it the first time a Windows ISO appears (the user is ready to install),
+# and keep using it once it exists (so an installed guest still boots after the
+# ISO is removed). Until then leave diskPath null so foulfox-vm-autostart
+# correctly no-ops instead of booting a blank disk.
+DISK_FIELD="null"
+if [ -f "$DISK" ] || [ -n "$WIN_ISO" ]; then
+  if [ ! -f "$DISK" ]; then
+    qemu-img create -f qcow2 "$DISK" "$DISK_SIZE"
+  fi
+  DISK_FIELD="\"$DISK\""
+fi
+
+# ── Write the VM config the api-server reads ─────────────────────────────────
+json_or_null() { if [ -n "${1:-}" ]; then printf '"%s"' "$1"; else printf 'null'; fi; }
+
+cat > "$CONFIG" <<JSON
+{
+  "isoPath": $(json_or_null "$WIN_ISO"),
+  "diskPath": $DISK_FIELD,
+  "virtioIsoPath": $(json_or_null "$VIRTIO_ISO"),
+  "ramGb": $RAM_GB,
+  "cpuCores": $CPU_CORES,
+  "displayMode": "$DISPLAY_MODE",
+  "spicePort": $SPICE_PORT,
+  "connectionMode": "ssh"
+}
+JSON
+chown foulfox:foulfox "$CONFIG" 2>/dev/null || true
+
+echo "[foulfox-first-run] Windows ISO: ${WIN_ISO:-<none — frontload one via the File Explorer>}"
+echo "[foulfox-first-run] virtio ISO:  ${VIRTIO_ISO:-<none — Windows can still install, drivers optional>}"
+echo "[foulfox-first-run] Guest disk:  $DISK ($DISK_SIZE)"

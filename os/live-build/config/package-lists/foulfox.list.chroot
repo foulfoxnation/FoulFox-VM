@@ -1,0 +1,59 @@
+# FoulFox OS package set.
+# Installed into the live image's chroot. Grouped by purpose.
+
+# ── Kernel + firmware (broad plug-and-play hardware support) ──────────────────
+linux-image-amd64
+firmware-linux
+firmware-linux-nonfree
+firmware-iwlwifi
+firmware-realtek
+firmware-atheros
+firmware-misc-nonfree
+
+# ── Networking (auto bring-up, wired + wireless) ─────────────────────────────
+network-manager
+network-manager-gnome
+iproute2
+iw
+wireless-tools
+
+# ── Storage / removable media (USB frontload + NTFS/exFAT/FAT drives) ────────
+udisks2
+ntfs-3g
+exfatprogs
+dosfstools
+rsync
+
+# ── Virtualization stack (Windows guest) ─────────────────────────────────────
+qemu-system-x86
+qemu-utils
+ovmf
+swtpm
+virt-viewer
+spice-client-gtk
+usbutils
+pciutils
+
+# ── Graphical kiosk session ──────────────────────────────────────────────────
+xserver-xorg
+xinit
+x11-xserver-utils
+openbox
+lightdm
+lightdm-gtk-greeter
+chromium
+
+# ── Runtimes for the FoulFox services ────────────────────────────────────────
+nodejs
+npm
+python3
+python3-venv
+python3-pip
+build-essential
+
+# ── Convenience ──────────────────────────────────────────────────────────────
+sudo
+ca-certificates
+curl
+less
+nano

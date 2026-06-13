@@ -12,6 +12,7 @@ import {
   SnapshotVmBody,
 } from "@workspace/api-zod";
 import { vmRuntime, loadVmConfig, saveVmConfig } from "../lib/vm-state";
+import { buildQemuArgs } from "../lib/qemu-args";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -88,33 +89,7 @@ router.post("/vm/start", (_req: Request, res: Response) => {
 
   vmRuntime.state = "starting";
 
-  const args: string[] = [
-    "-enable-kvm",
-    "-m", `${config.ramGb}G`,
-    "-smp", `cores=${config.cpuCores}`,
-    "-cpu", "host",
-    "-machine", "type=q35,accel=kvm",
-    "-net", "nic,model=virtio",
-    "-net", `user,hostfwd=tcp::${config.sshPort}-:22,hostfwd=tcp::3389-:3389`,
-    "-device", "virtio-vga",
-    "-display", "none",
-    // QEMU monitor on stdio for snapshot commands
-    "-monitor", "stdio",
-  ];
-
-  if (config.gpuPassthrough) {
-    args.push("-device", `vfio-pci,host=${config.gpuPassthrough}`);
-  }
-  if (config.diskPath) {
-    args.push("-hda", config.diskPath);
-  }
-  if (config.isoPath) {
-    args.push("-cdrom", config.isoPath);
-    if (!config.diskPath) args.push("-boot", "d");
-  }
-  if (config.connectionMode === "serial") {
-    args.push("-serial", "telnet:localhost:4444,server,nowait");
-  }
+  const args = buildQemuArgs(config);
 
   try {
     vmRuntime.process = spawn("qemu-system-x86_64", args, {
@@ -452,22 +427,6 @@ function parseSnapshotList(stdout: string): Array<{ id: string; name: string }> 
     if (parts.length >= 2) out.push({ id: parts[0], name: parts[1] });
   }
   return out;
-}
-
-// Helper: build QEMU args from config
-function buildQemuArgs(config: ReturnType<typeof loadVmConfig>): string[] {
-  const args = [
-    "-enable-kvm", "-m", `${config.ramGb}G`, "-smp", `cores=${config.cpuCores}`,
-    "-cpu", "host", "-machine", "type=q35,accel=kvm",
-    "-net", "nic,model=virtio",
-    "-net", `user,hostfwd=tcp::${config.sshPort}-:22,hostfwd=tcp::3389-:3389`,
-    "-device", "virtio-vga", "-display", "none", "-monitor", "stdio",
-  ];
-  if (config.gpuPassthrough) args.push("-device", `vfio-pci,host=${config.gpuPassthrough}`);
-  if (config.diskPath) args.push("-hda", config.diskPath);
-  if (config.isoPath) { args.push("-cdrom", config.isoPath); if (!config.diskPath) args.push("-boot", "d"); }
-  if (config.connectionMode === "serial") args.push("-serial", "telnet:localhost:4444,server,nowait");
-  return args;
 }
 
 export default router;

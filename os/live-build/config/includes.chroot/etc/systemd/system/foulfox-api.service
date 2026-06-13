@@ -1,0 +1,18 @@
+[Unit]
+Description=FoulFox VM API server (Express; serves shell + /api + Odysseus proxy)
+After=foulfox-prepare.service odysseus-service.service network-online.target
+Wants=network-online.target
+Requires=foulfox-prepare.service
+
+[Service]
+Type=simple
+User=foulfox
+Group=foulfox
+EnvironmentFile=/etc/foulfox/foulfox.env
+WorkingDirectory=/opt/foulfox/app/artifacts/api-server
+ExecStart=/usr/bin/node --enable-source-maps /opt/foulfox/app/artifacts/api-server/dist/index.mjs
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

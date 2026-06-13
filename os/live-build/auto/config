@@ -1,0 +1,20 @@
+#!/bin/sh
+# FoulFox OS — live-build configuration.
+#
+# Debian/Ubuntu-family live image with a broad firmware set (plug-and-play
+# networking + drivers), the QEMU/KVM stack, and a graphical kiosk session that
+# autostarts the FoulFox VM shell. Run via `lb config` (see scripts/build-image.sh).
+set -e
+
+lb config noauto \
+  --distribution bookworm \
+  --architectures amd64 \
+  --linux-flavours amd64 \
+  --archive-areas "main contrib non-free non-free-firmware" \
+  --debian-installer none \
+  --memtest none \
+  --apt-recommends true \
+  --firmware-chroot true \
+  --firmware-binary true \
+  --bootappend-live "boot=live components username=foulfox user-fullname=FoulFox hostname=foulfox persistence persistence-label=foulfox-persist" \
+  "${@}"

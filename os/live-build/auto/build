@@ -1,0 +1,5 @@
+#!/bin/sh
+# FoulFox OS — live-build build wrapper. Logs the full build to build.log.
+set -e
+
+lb build noauto "${@}" 2>&1 | tee build.log

@@ -1,6 +1,8 @@
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
+import path from "path";
+import fs from "fs";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { SHELL_SESSION_TOKEN } from "./lib/shell-token";
@@ -104,6 +106,9 @@ function requireVmToken(req: Request, res: Response, next: NextFunction) {
 app.use("/api/shell/exec", localhostOnly, requireShellToken);
 app.use("/api/shell/history", localhostOnly);
 
+// File explorer + USB frontload endpoints: localhost + token (powerful FS access)
+app.use("/api/files", localhostOnly, requireShellToken);
+
 // VM mutation endpoints: localhost + token
 app.use("/api/vm/start", localhostOnly, requireVmToken);
 app.use("/api/vm/stop", localhostOnly, requireVmToken);
@@ -121,5 +126,29 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", router);
+
+// ── Static shell serving (appliance / packaged mode) ──────────────────────────
+// In the Replit dev workspace the shell is served by Vite, so this stays off.
+// FoulFox OS sets SERVE_SHELL_STATIC=1 so a single origin serves the built
+// shell + the /api routes + the Odysseus proxy (keeping same-origin /api calls
+// working without the Vite dev proxy). SHELL_STATIC_DIR overrides the location.
+if (process.env["SERVE_SHELL_STATIC"]) {
+  const shellDir =
+    process.env["SHELL_STATIC_DIR"] ??
+    path.resolve(__dirname, "../../odysseus-shell/dist/public");
+  if (fs.existsSync(path.join(shellDir, "index.html"))) {
+    app.use(express.static(shellDir));
+    // SPA fallback: any non-/api GET returns index.html so client routing works.
+    app.get(/^\/(?!api\/).*/, (_req: Request, res: Response) => {
+      res.sendFile(path.join(shellDir, "index.html"));
+    });
+    logger.info({ shellDir }, "Serving built shell from api-server");
+  } else {
+    logger.warn(
+      { shellDir },
+      "SERVE_SHELL_STATIC is set but no index.html was found; build the shell first",
+    );
+  }
+}
 
 export default app;

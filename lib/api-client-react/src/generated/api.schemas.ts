@@ -134,3 +134,79 @@ export interface ShellHistoryEntry {
   timestamp: string;
 }
 
+export type FileEntryType = typeof FileEntryType[keyof typeof FileEntryType];
+
+
+export const FileEntryType = {
+  file: 'file',
+  directory: 'directory',
+  symlink: 'symlink',
+  other: 'other',
+} as const;
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  type: FileEntryType;
+  /** @nullable */
+  sizeBytes?: number | null;
+  /** @nullable */
+  modifiedMs?: number | null;
+}
+
+export interface DirectoryListing {
+  path: string;
+  /** @nullable */
+  parent?: string | null;
+  entries: FileEntry[];
+}
+
+export interface DriveInfo {
+  name: string;
+  path: string;
+  /** @nullable */
+  label?: string | null;
+  /** @nullable */
+  fsType?: string | null;
+  /** @nullable */
+  sizeBytes?: number | null;
+  removable: boolean;
+}
+
+export type FrontloadInputCategory = typeof FrontloadInputCategory[keyof typeof FrontloadInputCategory];
+
+
+export const FrontloadInputCategory = {
+  drivers: 'drivers',
+  isos: 'isos',
+  files: 'files',
+} as const;
+
+export interface FrontloadInput {
+  sources: string[];
+  category?: FrontloadInputCategory;
+}
+
+export interface CopiedItem {
+  source: string;
+  destination: string;
+}
+
+export interface FrontloadFailure {
+  source: string;
+  error: string;
+}
+
+export interface FrontloadResult {
+  stagingPath: string;
+  copied: CopiedItem[];
+  failed: FrontloadFailure[];
+}
+
+export type ListDirectoryParams = {
+/**
+ * Absolute directory path to list (defaults to home)
+ */
+path?: string;
+};
+

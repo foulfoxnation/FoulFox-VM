@@ -1,0 +1,15 @@
+[Unit]
+Description=FoulFox OS first-run provisioning (dirs, permissions, VM config)
+DefaultDependencies=yes
+After=local-fs.target network-online.target
+Wants=network-online.target
+Before=foulfox-api.service odysseus-service.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/foulfox/foulfox.env
+ExecStart=/usr/local/bin/foulfox-first-run
+
+[Install]
+WantedBy=multi-user.target

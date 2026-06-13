@@ -1,0 +1,18 @@
+[Unit]
+Description=Odysseus AI agent (FastAPI, loopback :7000)
+After=foulfox-prepare.service network-online.target
+Wants=network-online.target
+Requires=foulfox-prepare.service
+
+[Service]
+Type=simple
+User=foulfox
+Group=foulfox
+EnvironmentFile=/etc/foulfox/foulfox.env
+WorkingDirectory=/opt/foulfox/app/artifacts/odysseus-service
+ExecStart=/usr/bin/env bash /opt/foulfox/app/artifacts/odysseus-service/start.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

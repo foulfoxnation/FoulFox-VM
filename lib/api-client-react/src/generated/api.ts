@@ -20,7 +20,12 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  DirectoryListing,
+  DriveInfo,
+  FrontloadInput,
+  FrontloadResult,
   HealthStatus,
+  ListDirectoryParams,
   ShellCommandInput,
   ShellCommandResult,
   ShellHistoryEntry,
@@ -773,4 +778,313 @@ export function useGetShellHistory<TData = Awaited<ReturnType<typeof getShellHis
 
 
 
+
+export const getListDirectoryUrl = (params?: ListDirectoryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/files/list?${stringifiedParams}` : `/api/files/list`
+}
+
+/**
+ * @summary List entries in a directory
+ */
+export const listDirectory = async (params?: ListDirectoryParams, options?: RequestInit): Promise<DirectoryListing> => {
+
+  return customFetch<DirectoryListing>(getListDirectoryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDirectoryQueryKey = (params?: ListDirectoryParams,) => {
+    return [
+    `/api/files/list`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListDirectoryQueryOptions = <TData = Awaited<ReturnType<typeof listDirectory>>, TError = ErrorType<unknown>>(params?: ListDirectoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDirectory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDirectoryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDirectory>>> = ({ signal }) => listDirectory(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDirectory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListDirectoryQueryResult = NonNullable<Awaited<ReturnType<typeof listDirectory>>>
+export type ListDirectoryQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List entries in a directory
+ */
+
+export function useListDirectory<TData = Awaited<ReturnType<typeof listDirectory>>, TError = ErrorType<unknown>>(
+ params?: ListDirectoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDirectory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListDirectoryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListDrivesUrl = () => {
+
+
+
+
+  return `/api/files/drives`
+}
+
+/**
+ * @summary List mounted/removable drives (USB, etc.)
+ */
+export const listDrives = async ( options?: RequestInit): Promise<DriveInfo[]> => {
+
+  return customFetch<DriveInfo[]>(getListDrivesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDrivesQueryKey = () => {
+    return [
+    `/api/files/drives`
+    ] as const;
+    }
+
+
+export const getListDrivesQueryOptions = <TData = Awaited<ReturnType<typeof listDrives>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDrives>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDrivesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDrives>>> = ({ signal }) => listDrives({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDrives>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListDrivesQueryResult = NonNullable<Awaited<ReturnType<typeof listDrives>>>
+export type ListDrivesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List mounted/removable drives (USB, etc.)
+ */
+
+export function useListDrives<TData = Awaited<ReturnType<typeof listDrives>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDrives>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListDrivesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetStagingUrl = () => {
+
+
+
+
+  return `/api/files/staging`
+}
+
+/**
+ * @summary List the frontload staging area contents
+ */
+export const getStaging = async ( options?: RequestInit): Promise<DirectoryListing> => {
+
+  return customFetch<DirectoryListing>(getGetStagingUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetStagingQueryKey = () => {
+    return [
+    `/api/files/staging`
+    ] as const;
+    }
+
+
+export const getGetStagingQueryOptions = <TData = Awaited<ReturnType<typeof getStaging>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getStaging>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetStagingQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getStaging>>> = ({ signal }) => getStaging({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getStaging>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetStagingQueryResult = NonNullable<Awaited<ReturnType<typeof getStaging>>>
+export type GetStagingQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List the frontload staging area contents
+ */
+
+export function useGetStaging<TData = Awaited<ReturnType<typeof getStaging>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getStaging>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetStagingQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getFrontloadFilesUrl = () => {
+
+
+
+
+  return `/api/files/frontload`
+}
+
+/**
+ * @summary Copy files/drivers from a source (USB) into the staging area
+ */
+export const frontloadFiles = async (frontloadInput: FrontloadInput, options?: RequestInit): Promise<FrontloadResult> => {
+
+  return customFetch<FrontloadResult>(getFrontloadFilesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      frontloadInput,)
+  }
+);}
+
+
+
+
+export const getFrontloadFilesMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof frontloadFiles>>, TError,{data: BodyType<FrontloadInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof frontloadFiles>>, TError,{data: BodyType<FrontloadInput>}, TContext> => {
+
+const mutationKey = ['frontloadFiles'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof frontloadFiles>>, {data: BodyType<FrontloadInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  frontloadFiles(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type FrontloadFilesMutationResult = NonNullable<Awaited<ReturnType<typeof frontloadFiles>>>
+    export type FrontloadFilesMutationBody = BodyType<FrontloadInput>
+    export type FrontloadFilesMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Copy files/drivers from a source (USB) into the staging area
+ */
+export const useFrontloadFiles = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof frontloadFiles>>, TError,{data: BodyType<FrontloadInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof frontloadFiles>>,
+        TError,
+        {data: BodyType<FrontloadInput>},
+        TContext
+      > => {
+      return useMutation(getFrontloadFilesMutationOptions(options));
+    }
 
