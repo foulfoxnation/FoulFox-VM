@@ -8,8 +8,7 @@ import { OdysseusTab } from "@/components/OdysseusTab";
 import { ShellHistoryPanel } from "@/components/ShellHistoryPanel";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { useShellToken } from "@/hooks/use-shell-token";
-import { apiUrl } from "@/lib/api-url";
-import { Terminal as TermIcon, MonitorDot, Command, Trash2, Send, Loader2 } from "lucide-react";
+import { Terminal as TermIcon, MonitorDot, Command, Trash2, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -20,7 +19,10 @@ import {
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState("odysseus");
-  const [sendingToOdysseus, setSendingToOdysseus] = useState(false);
+  // Terminal context pending delivery to the Odysseus chat UI via iframe postMessage.
+  // Set when the user clicks "Send to Odysseus"; cleared once OdysseusTab confirms delivery.
+  const [pendingOdysseusContext, setPendingOdysseusContext] = useState<string | null>(null);
+
   const { data: health } = useHealthCheck();
   const { data: shellToken } = useShellToken();
   const terminalRef = useRef<TerminalHandle>(null);
@@ -30,63 +32,24 @@ export default function Home() {
     terminalRef.current?.clear();
   };
 
-  const handleSendToOdysseus = async () => {
+  const handleSendToOdysseus = () => {
     const lastOutput = terminalRef.current?.getLastOutput();
     if (!lastOutput?.trim()) {
       toast({ title: "No terminal output to send", variant: "destructive", duration: 2000 });
       return;
     }
 
-    setSendingToOdysseus(true);
-    try {
-      // POST the terminal transcript to the Odysseus OpenAI-compatible chat endpoint.
-      // The proxy at /api/odysseus/ forwards to the Odysseus Python service.
-      const response = await fetch(apiUrl("/api/odysseus/v1/chat/completions"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          // Include shell token on any request that may be considered shell-related
-          ...(shellToken ? { "X-Shell-Token": shellToken } : {}),
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-5",
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are operating as the user inside a Windows VM. " +
-                "The following is recent terminal output from the shell. " +
-                "Analyse it, identify any errors or next steps, and respond concisely.",
-            },
-            {
-              role: "user",
-              content: `Here is my recent terminal output:\n\n\`\`\`\n${lastOutput.slice(-4000)}\n\`\`\`\n\nWhat do you see and what should I do next?`,
-            },
-          ],
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      // Switch to Odysseus tab so user can see the response
-      setActiveTab("odysseus");
-      toast({
-        title: "Terminal context sent to Odysseus",
-        description: "Odysseus is analysing your terminal output.",
-        duration: 3000,
-      });
-    } catch (err) {
-      toast({
-        title: "Failed to send to Odysseus",
-        description: String(err),
-        variant: "destructive",
-        duration: 3000,
-      });
-    } finally {
-      setSendingToOdysseus(false);
-    }
+    // Store terminal output as pending context.  OdysseusTab will pick this up
+    // on its next iframe load (or immediately if already loaded) and forward it
+    // to the Odysseus chat UI via postMessage, injecting it into the active chat
+    // thread so the user sees the AI's response inline.
+    setPendingOdysseusContext(lastOutput);
+    setActiveTab("odysseus");
+    toast({
+      title: "Terminal context sent to Odysseus",
+      description: "Odysseus will analyse the output in the chat panel.",
+      duration: 3000,
+    });
   };
 
   return (
@@ -135,7 +98,10 @@ export default function Home() {
         </div>
 
         <TabsContent value="odysseus" className="flex-1 m-0 p-0 border-0 outline-none h-full data-[state=inactive]:hidden">
-          <OdysseusTab />
+          <OdysseusTab
+            pendingContext={pendingOdysseusContext}
+            onContextConsumed={() => setPendingOdysseusContext(null)}
+          />
         </TabsContent>
 
         <TabsContent value="shell" className="flex-1 m-0 p-0 border-0 outline-none h-full data-[state=inactive]:hidden">
@@ -156,15 +122,11 @@ export default function Home() {
                 variant="ghost"
                 size="sm"
                 onClick={handleSendToOdysseus}
-                disabled={sendingToOdysseus || !shellToken}
+                disabled={!shellToken}
                 className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
                 data-testid="button-send-to-odysseus"
               >
-                {sendingToOdysseus ? (
-                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Send className="mr-1 h-3.5 w-3.5" />
-                )}
+                <Send className="mr-1 h-3.5 w-3.5" />
                 Send to Odysseus
               </Button>
             </div>

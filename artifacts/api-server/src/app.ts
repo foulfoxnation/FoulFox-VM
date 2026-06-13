@@ -12,16 +12,10 @@ app.use(
     logger,
     serializers: {
       req(req) {
-        return {
-          id: req.id,
-          method: req.method,
-          url: req.url?.split("?")[0],
-        };
+        return { id: req.id, method: req.method, url: req.url?.split("?")[0] };
       },
       res(res) {
-        return {
-          statusCode: res.statusCode,
-        };
+        return { statusCode: res.statusCode };
       },
     },
   }),
@@ -30,17 +24,22 @@ app.use(
 // CORS: allow same-origin and localhost origins only
 const localCors = cors({
   origin: (origin, cb) => {
-    if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) || origin === "null") {
+    if (
+      !origin ||
+      origin === "null" ||
+      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+    ) {
       cb(null, true);
     } else {
       cb(null, false);
     }
   },
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Shell-Token"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Shell-Token", "X-Odysseus-Internal-Token"],
 });
 
-// ── Middleware: restrict to localhost socket ───────────────────────────────────
+// ── Middleware helpers ─────────────────────────────────────────────────────────
+
 function localhostOnly(req: Request, res: Response, next: NextFunction) {
   const remoteAddr = req.socket.remoteAddress;
   const isLocal =
@@ -54,25 +53,65 @@ function localhostOnly(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-// ── Middleware: require X-Shell-Token header (CSRF protection) ─────────────────
-// Prevents malicious web pages from using fetch/XHR to trigger shell commands
-// against the loopback API server (a common localhost-attack pattern).
+// ── Shell token CSRF protection ───────────────────────────────────────────────
+// Prevents malicious web pages from using XHR/fetch against the loopback API.
+// Accepts:
+//   a) X-Shell-Token: <session_token>  — from browser/Electron frontend
+//   b) X-Odysseus-Internal-Token: <odysseus_internal_token> — from Odysseus Python tools
+//      (Odysseus adds this header automatically to all internal loopback calls)
+const ODYSSEUS_BRIDGE_TOKEN = process.env["ODYSSEUS_INTERNAL_TOKEN"];
+
 function requireShellToken(req: Request, res: Response, next: NextFunction) {
-  const provided = req.headers["x-shell-token"] ?? req.query["token"];
-  if (provided !== SHELL_SESSION_TOKEN) {
-    logger.warn({ url: req.url }, "Rejected shell request: missing or invalid X-Shell-Token");
-    res.status(401).json({ error: "Missing or invalid shell session token" });
+  const shellToken = req.headers["x-shell-token"] ?? req.query["token"];
+  if (shellToken === SHELL_SESSION_TOKEN) {
+    next();
     return;
   }
-  next();
+  // Accept Odysseus's internal token as an alternative (Odysseus tool calls)
+  const odysseusToken = req.headers["x-odysseus-internal-token"];
+  if (ODYSSEUS_BRIDGE_TOKEN && odysseusToken === ODYSSEUS_BRIDGE_TOKEN) {
+    next();
+    return;
+  }
+  logger.warn({ url: req.url }, "Rejected shell request: invalid token");
+  res.status(401).json({ error: "Missing or invalid shell session token" });
+}
+
+// ── VM mutation CSRF protection ───────────────────────────────────────────────
+// State-changing VM endpoints also require the shell token to prevent
+// browser-based CSRF attacks against VM lifecycle operations.
+function requireVmToken(req: Request, res: Response, next: NextFunction) {
+  // Read-only methods don't need CSRF protection
+  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") {
+    next();
+    return;
+  }
+  const shellToken = req.headers["x-shell-token"] ?? req.query["token"];
+  if (shellToken === SHELL_SESSION_TOKEN) {
+    next();
+    return;
+  }
+  const odysseusToken = req.headers["x-odysseus-internal-token"];
+  if (ODYSSEUS_BRIDGE_TOKEN && odysseusToken === ODYSSEUS_BRIDGE_TOKEN) {
+    next();
+    return;
+  }
+  logger.warn({ url: req.url, method: req.method }, "Rejected VM mutation: invalid token");
+  res.status(401).json({ error: "Missing or invalid session token for VM mutation" });
 }
 
 // Apply localhost + token checks to shell execution endpoints
 app.use("/api/shell/exec", localhostOnly, requireShellToken);
 app.use("/api/shell/history", localhostOnly);
 
-// Shell token endpoint — returns the session token for the UI to store.
-// localhost-only so remote callers cannot obtain it.
+// VM mutation endpoints: localhost + token
+app.use("/api/vm/start", localhostOnly, requireVmToken);
+app.use("/api/vm/stop", localhostOnly, requireVmToken);
+app.use("/api/vm/restart", localhostOnly, requireVmToken);
+app.use("/api/vm/snapshot", localhostOnly, requireVmToken);
+app.use("/api/vm/config", localhostOnly, requireVmToken);
+
+// Shell session token endpoint — localhost only so remote callers can't obtain it
 app.get("/api/shell/session-token", localhostOnly, (_req, res) => {
   res.json({ token: SHELL_SESSION_TOKEN });
 });

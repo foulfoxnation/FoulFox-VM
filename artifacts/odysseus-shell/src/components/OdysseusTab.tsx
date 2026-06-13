@@ -1,8 +1,21 @@
+import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, ServerOff } from "lucide-react";
 import { apiUrl } from "@/lib/api-url";
 
-export function OdysseusTab() {
+// Expose a method to post terminal context into the Odysseus chat iframe
+export interface OdysseusTabHandle {
+  postTerminalContext: (terminalOutput: string) => void;
+}
+
+interface OdysseusTabProps {
+  pendingContext?: string | null;
+  onContextConsumed?: () => void;
+}
+
+export function OdysseusTab({ pendingContext, onContextConsumed }: OdysseusTabProps) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
   const { data: status, isLoading } = useQuery({
     queryKey: ["odysseus-lifecycle-status"],
     queryFn: async () => {
@@ -14,6 +27,22 @@ export function OdysseusTab() {
   });
 
   const isAlive = status?.alive === true;
+
+  // When the parent provides a pending terminal context, inject it into the
+  // Odysseus iframe via postMessage. Odysseus's frontend handles this message
+  // by pre-filling the chat input and switching to the chat view.
+  const handleIframeLoad = () => {
+    if (pendingContext && iframeRef.current?.contentWindow) {
+      iframeRef.current.contentWindow.postMessage(
+        {
+          type: "odysseus:inject-context",
+          payload: pendingContext.slice(-4000),
+        },
+        "*",
+      );
+      onContextConsumed?.();
+    }
+  };
 
   if (isLoading) {
     return (
@@ -36,16 +65,15 @@ export function OdysseusTab() {
     );
   }
 
-  // When running from file://, the iframe src must be an absolute URL
-  const iframeSrc = apiUrl("/api/odysseus/");
-
   return (
     <div className="h-full w-full" data-testid="odysseus-iframe-container">
       <iframe
-        src={iframeSrc}
+        ref={iframeRef}
+        src={apiUrl("/api/odysseus/")}
         className="h-full w-full border-0"
         title="Odysseus Workspace"
         data-testid="odysseus-iframe"
+        onLoad={handleIframeLoad}
       />
     </div>
   );

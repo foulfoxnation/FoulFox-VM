@@ -63,14 +63,25 @@ function log(tag, msg) {
   process.stdout.write(`[${ts}][${tag}] ${msg}\n`);
 }
 
-// ── Service startup ──────────────────────────────────────────────────────────
+// ── Shared bridge token ────────────────────────────────────────────────────────
+// Generated once per Electron session. Passed to both the API server
+// (as SHELL_SESSION_TOKEN + ODYSSEUS_INTERNAL_TOKEN) and to Odysseus
+// (as ODYSSEUS_BRIDGE_TOKEN) so Odysseus tool calls to /api/shell/exec
+// are accepted by the Express token-auth middleware.
+const { randomBytes } = require("crypto");
+const BRIDGE_TOKEN = randomBytes(32).toString("hex");
+
 function buildApiEnv() {
   return {
     ...process.env,
     PORT: String(API_PORT),
     NODE_ENV: "production",
-    // Bind API server to loopback only — no external access
     HOST: "127.0.0.1",
+    // Pre-seed the shell session token so Odysseus can share it
+    SHELL_SESSION_TOKEN: BRIDGE_TOKEN,
+    // Also exposed as ODYSSEUS_INTERNAL_TOKEN so the Express middleware
+    // accepts Odysseus's X-Odysseus-Internal-Token header
+    ODYSSEUS_INTERNAL_TOKEN: BRIDGE_TOKEN,
   };
 }
 
@@ -81,11 +92,15 @@ function buildOdysseusEnv() {
   env.AUTH_ENABLED = "false";
   env.ODYSSEUS_DATA_DIR = path.join(ODYSSEUS_DIR, "data");
 
+  // Route Odysseus tool /api/shell/exec calls to the Express API server
+  env.ODYSSEUS_SHELL_BASE = `http://127.0.0.1:${API_PORT}`;
+  // Shared token so Express accepts Odysseus's internal header
+  env.ODYSSEUS_BRIDGE_TOKEN = BRIDGE_TOKEN;
+
   // Map Replit AI Anthropic key if present
   if (env.AI_INTEGRATIONS_ANTHROPIC_API_KEY && !env.OPENAI_API_KEY) {
     env.OPENAI_API_KEY = env.AI_INTEGRATIONS_ANTHROPIC_API_KEY;
   }
-  // Replit AI OpenAI-compatible base URL for claude-sonnet-4-5
   if (!env.OPENAI_BASE_URL) {
     env.OPENAI_BASE_URL = "https://openai-proxy.replit.com/v1";
   }

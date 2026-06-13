@@ -3,36 +3,42 @@ productName: "Windows Odysseus + Unity"
 
 directories:
   output: dist-electron
-  # No custom buildResources — we use default icons or none; CI can add them later
 
 files:
   - dist/public/**/*
   - electron/main.cjs
   - package.json
 
-# The API server dist and Odysseus service are bundled as extraResources
-# so Electron can spawn them at runtime from the installed app path
 extraResources:
   - from: "../api-server/dist"
     to: "api-server/dist"
     filter:
       - "**/*.mjs"
       - "**/*.mjs.map"
-  # node-pty is externalized by esbuild (native .node binary) so it must be
-  # present alongside the bundled dist at runtime.
+  # node-pty is externalized by esbuild (native .node binary); must be present alongside dist/
   - from: "../api-server/node_modules/node-pty"
     to: "api-server/node_modules/node-pty"
+  # Include the full Odysseus service directory.
+  # Exclude only dev/build artifacts and caches; keep static/, src/, core/, routes/,
+  # config/, services/, scripts/, docs/ etc. so the UI renders correctly.
   - from: "../../artifacts/odysseus-service"
     to: "odysseus-service"
     filter:
-      - "**/*.py"
-      - "start.sh"
-      - "requirements.txt"
-      - "data/.gitkeep"
+      - "**/*"
       - "!**/__pycache__/**"
+      - "!**/*.pyc"
       - "!**/.git/**"
+      - "!**/node_modules/**"
+      - "!**/docker/**"
+      - "!**/Dockerfile*"
+      - "!**/.env*"
+      - "!**/dist/**"
+      - "!**/.pytest_cache/**"
+      - "!**/.mypy_cache/**"
+      - "!**/tests/**"
+      - "!**/*.egg-info/**"
 
-# Unpack native addons from the asar archive so node can dlopen() them
+# Unpack native addons from asar so node can dlopen() them
 asarUnpack:
   - "resources/api-server/node_modules/node-pty/**"
 
