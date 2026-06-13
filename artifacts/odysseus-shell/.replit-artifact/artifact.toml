@@ -1,6 +1,6 @@
 kind = "web"
 previewPath = "/"
-title = "Odysseus VM"
+title = "FoulFox VM"
 version = "1.0.0"
 id = "artifacts/odysseus-shell"
 router = "path"

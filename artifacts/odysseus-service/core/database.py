@@ -552,7 +552,7 @@ class AgentSuite(TimestampMixin, Base):
 
     id             = Column(String, primary_key=True, index=True)
     owner          = Column(String, nullable=True, index=True)
-    name           = Column(String, nullable=False, default="Odysseus Suite")
+    name           = Column(String, nullable=False, default="FoulFox VM Suite")
     is_active      = Column(Boolean, default=True)
     setup_complete = Column(Boolean, default=False)
 

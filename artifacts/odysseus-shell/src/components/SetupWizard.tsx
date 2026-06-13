@@ -61,7 +61,7 @@ type Caps = {
 const ROLES: { key: Role; label: string; icon: typeof MonitorCog }[] = [
   { key: "windows", label: "Windows Agent", icon: MonitorCog },
   { key: "game", label: "Game Agent", icon: Gamepad2 },
-  { key: "architect", label: "Odysseus Architect", icon: Compass },
+  { key: "architect", label: "FoulFox VM Architect", icon: Compass },
 ];
 
 async function getJson<T>(path: string): Promise<T> {
@@ -131,7 +131,7 @@ export function SetupWizard() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          name: stateQ.data?.suite?.name || "Odysseus Suite",
+          name: stateQ.data?.suite?.name || "FoulFox VM Suite",
           role_models,
           setup_complete: true,
         }),
@@ -156,7 +156,7 @@ export function SetupWizard() {
     <Dialog open={open} onOpenChange={(o) => !o && setDismissed(true)}>
       <DialogContent className="sm:max-w-[580px] max-h-[88vh] overflow-y-auto" data-testid="setup-wizard">
         <DialogHeader>
-          <DialogTitle>Set up your Odysseus agent suite</DialogTitle>
+          <DialogTitle>Set up your FoulFox VM agent suite</DialogTitle>
           <DialogDescription>
             Pick a model for each agent and check Windows VM readiness — takes a minute.
           </DialogDescription>
@@ -188,7 +188,7 @@ export function SetupWizard() {
           {step === 0 && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Odysseus runs as three coordinated agents. The Architect reviews the
+                FoulFox VM runs as three coordinated agents. The Architect reviews the
                 workers' results and only signs off when the work passes.
               </p>
               <div className="space-y-2">
@@ -215,7 +215,7 @@ export function SetupWizard() {
                   <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
                 )}
                 <span className="text-muted-foreground">
-                  {stateQ.data ? "Odysseus service reachable" : "Odysseus service unreachable"}
+                  {stateQ.data ? "FoulFox VM service reachable" : "FoulFox VM service unreachable"}
                 </span>
               </div>
             </div>
@@ -226,7 +226,7 @@ export function SetupWizard() {
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 Choose a model for each agent. Each agent is model-agnostic — you can
-                change these later in Odysseus settings.
+                change these later in FoulFox VM settings.
               </p>
               {modelsQ.isLoading ? (
                 <div className="flex justify-center p-6">
@@ -238,7 +238,7 @@ export function SetupWizard() {
                   <p className="text-xs text-muted-foreground">
                     No model providers detected yet. Your agents will use the current
                     default chat model. Add a provider (Ollama, LM Studio, OpenAI, …)
-                    in Odysseus → Settings → Models, then re-run setup to assign a
+                    in FoulFox VM → Settings → Models, then re-run setup to assign a
                     specific model per agent.
                   </p>
                 </div>

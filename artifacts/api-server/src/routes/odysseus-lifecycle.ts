@@ -37,7 +37,7 @@ router.post("/odysseus/lifecycle/start", async (_req: Request, res: Response) =>
   if (odysseusProcess && odysseusState === "running") {
     const alive = await checkOdysseusAlive();
     if (alive) {
-      res.json({ success: false, message: "Odysseus is already running", state: odysseusState });
+      res.json({ success: false, message: "FoulFox VM is already running", state: odysseusState });
       return;
     }
   }
@@ -115,18 +115,18 @@ router.post("/odysseus/lifecycle/start", async (_req: Request, res: Response) =>
       }
     }, 1000);
 
-    res.json({ success: true, message: "Odysseus starting", state: odysseusState });
+    res.json({ success: true, message: "FoulFox VM starting", state: odysseusState });
   } catch (err) {
     odysseusState = "error";
     logger.error({ err }, "Failed to spawn Odysseus");
-    res.json({ success: false, message: `Failed to start Odysseus: ${err instanceof Error ? err.message : String(err)}`, state: odysseusState });
+    res.json({ success: false, message: `Failed to start FoulFox VM: ${err instanceof Error ? err.message : String(err)}`, state: odysseusState });
   }
 });
 
 // Stop Odysseus Python service
 router.post("/odysseus/lifecycle/stop", (_req: Request, res: Response) => {
   if (!odysseusProcess) {
-    res.json({ success: false, message: "Odysseus is not running", state: odysseusState });
+    res.json({ success: false, message: "FoulFox VM is not running", state: odysseusState });
     return;
   }
 
@@ -134,7 +134,7 @@ router.post("/odysseus/lifecycle/stop", (_req: Request, res: Response) => {
   setTimeout(() => { if (odysseusProcess) odysseusProcess.kill("SIGKILL"); }, 5000);
 
   odysseusState = "stopped";
-  res.json({ success: true, message: "Odysseus stopping", state: odysseusState });
+  res.json({ success: true, message: "FoulFox VM stopping", state: odysseusState });
 });
 
 // Get Odysseus lifecycle state

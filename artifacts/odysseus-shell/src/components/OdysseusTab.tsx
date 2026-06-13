@@ -72,9 +72,9 @@ export function OdysseusTab({ pendingContext, onContextConsumed, shellToken }: O
     return (
       <div className="flex h-full w-full flex-col items-center justify-center bg-muted/20 text-muted-foreground" data-testid="odysseus-offline">
         <ServerOff className="mb-4 h-12 w-12" />
-        <h2 className="text-xl font-semibold text-foreground">Odysseus Offline</h2>
+        <h2 className="text-xl font-semibold text-foreground">FoulFox VM Offline</h2>
         <p className="mt-2 max-w-md text-center">
-          The Odysseus agent is currently disconnected or the server is unreachable.
+          The FoulFox VM agent is currently disconnected or the server is unreachable.
           Wait for it to come online or check the VM status.
         </p>
       </div>
@@ -87,7 +87,7 @@ export function OdysseusTab({ pendingContext, onContextConsumed, shellToken }: O
         ref={iframeRef}
         src={apiUrl("/api/odysseus/")}
         className="h-full w-full border-0"
-        title="Odysseus Workspace"
+        title="FoulFox VM Workspace"
         data-testid="odysseus-iframe"
         onLoad={handleIframeLoad}
       />

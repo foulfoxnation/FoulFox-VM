@@ -50,7 +50,7 @@ router.get("/vm/capabilities", async (_req: Request, res: Response) => {
   if (canBootVm) {
     message = "This machine can boot a Windows VM (KVM acceleration + QEMU available).";
   } else if (!kvm.available && !qemuSystem) {
-    message = "Cannot boot a VM here: no KVM acceleration and QEMU is not installed. Run Odysseus on your own machine with hardware virtualization enabled.";
+    message = "Cannot boot a VM here: no KVM acceleration and QEMU is not installed. Run FoulFox VM on your own machine with hardware virtualization enabled.";
   } else if (!kvm.available) {
     message = `Cannot boot a VM here: ${kvm.reason}. Snapshot/config still work, but booting needs a host with KVM (your own machine).`;
   } else {

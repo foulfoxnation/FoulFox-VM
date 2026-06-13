@@ -13,7 +13,7 @@ const ROLE_ORDER = ['windows', 'game', 'architect'];
 const FALLBACK_NAMES = {
   windows: 'Windows Agent',
   game: 'Game Agent',
-  architect: 'Odysseus Architect',
+  architect: 'FoulFox VM Architect',
 };
 const SHORT = { windows: 'Windows', game: 'Game', architect: 'Architect' };
 

@@ -1,6 +1,6 @@
-# Odysseus VM
+# FoulFox VM
 
-A desktop-first Electron control panel with an Odysseus AI workspace tab and a Shell tab providing an xterm.js terminal plus QEMU/KVM Windows VM management.
+A desktop-first Electron control panel with a FoulFox VM AI workspace tab and a Shell tab providing an xterm.js terminal plus QEMU/KVM Windows VM management.
 
 ## Run & Operate
 

@@ -2342,7 +2342,7 @@ async def action_architect_deep_dive(owner: str, **kwargs) -> Tuple[str, bool]:
         #    are the most recent, authoritative instructions and project memory
         #    cannot override them.
         prompt = (
-            "You are the Odysseus Architect performing a periodic deep-dive review "
+            "You are the FoulFox VM Architect performing a periodic deep-dive review "
             "of the project. Assess the project's direction, risks, recurring "
             "failure patterns, and the most valuable next steps, using the "
             "background context below.\n\n"
@@ -2517,5 +2517,5 @@ BUILTIN_ACTION_INFO = {
     "test_skills": "Run the per-skill Test on every skill: agent run + LLM judge → records verdict on the skill (pass/needs_work/fail/inconclusive). Advisory only — never rewrites or demotes anything.",
     "audit_skills": "Audit unaudited skills after enough new skills are added: test, narrow metadata, self-edit/retry, optional teacher rewrite, tag duplicates/trivial skills, and publish/draft using the auto-approve threshold.",
     "check_email_urgency": "Scan unread emails hourly, tag urgent/reply-soon/newsletter/marketing/spam, and send a reminder when a new email needs a fast reply.",
-    "architect_deep_dive": "Every 12h, the Odysseus Architect reviews project memory + recent agent runs, records new durable memory entries, and dispatches a bounded set of worker review loops.",
+    "architect_deep_dive": "Every 12h, the FoulFox VM Architect reviews project memory + recent agent runs, records new durable memory entries, and dispatches a bounded set of worker review loops.",
 }

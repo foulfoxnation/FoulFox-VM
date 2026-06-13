@@ -65,13 +65,13 @@ ROLE_DEFS = {
             "and scripting (PowerShell / batch)."
         ),
         "personality": (
-            "You are the Windows Agent in the Odysseus suite. Your domain is "
+            "You are the Windows Agent in the FoulFox VM suite. Your domain is "
             "operating a Windows environment: installing and configuring "
             "software, navigating the OS, automating tasks, managing files, "
             "troubleshooting, and scripting with PowerShell and batch.\n"
             "Produce output a reviewer can verify: the commands you ran, the "
             "results you observed, and the files or state you changed. Your work "
-            "is reviewed by the Odysseus Architect before it is considered done."
+            "is reviewed by the FoulFox VM Architect before it is considered done."
             + _COMMON_RAILS
         ),
     },
@@ -85,18 +85,18 @@ ROLE_DEFS = {
             "automation, strategy, and game development where relevant."
         ),
         "personality": (
-            "You are the Game Agent in the Odysseus suite. Your domain is "
+            "You are the Game Agent in the FoulFox VM suite. Your domain is "
             "games: playing, automating, testing, and building them — game "
             "logic, input automation, strategy, and (where relevant) game "
             "development.\n"
             "State your objective and plan, then execute step by step and "
-            "report verifiable results. Your work is reviewed by the Odysseus "
+            "report verifiable results. Your work is reviewed by the FoulFox VM "
             "Architect before it is considered done."
             + _COMMON_RAILS
         ),
     },
     "architect": {
-        "name": "Odysseus Architect",
+        "name": "FoulFox VM Architect",
         "folder": "Agent Suite",
         "sort": 3,
         "tools": ARCHITECT_TOOLS,
@@ -106,7 +106,7 @@ ROLE_DEFS = {
             "memory to set direction and dispatch work."
         ),
         "personality": (
-            "You are the Odysseus Architect — the reviewer and planner of the "
+            "You are the FoulFox VM Architect — the reviewer and planner of the "
             "suite. You review the output of the Windows Agent and the Game "
             "Agent, decide PASS or FAIL, and when work fails you specify the "
             "exact fixes required. You also periodically review the whole "
@@ -229,7 +229,7 @@ def get_session_role_context(session_id):
         db.close()
 
 
-def provision_suite(owner=None, name="Odysseus Suite", role_models=None,
+def provision_suite(owner=None, name="FoulFox VM Suite", role_models=None,
                     mark_setup_complete=False):
     """Create or update the 3-agent suite for an owner (idempotent).
 
@@ -252,7 +252,7 @@ def provision_suite(owner=None, name="Odysseus Suite", role_models=None,
         ).order_by(AgentSuite.created_at.desc()).first()
         if not suite:
             suite = AgentSuite(
-                id=str(uuid.uuid4()), owner=owner, name=name or "Odysseus Suite",
+                id=str(uuid.uuid4()), owner=owner, name=name or "FoulFox VM Suite",
                 is_active=True, setup_complete=False,
             )
             db.add(suite)

@@ -41,7 +41,7 @@ def setup_agent_suite_routes() -> APIRouter:
         Body: {name?, role_models?: {role: {endpoint_id, model}}, setup_complete?}
         """
         owner = effective_user(request)
-        name = (payload.get("name") or "Odysseus Suite").strip() or "Odysseus Suite"
+        name = (payload.get("name") or "FoulFox VM Suite").strip() or "FoulFox VM Suite"
         role_models = payload.get("role_models") or {}
         mark = bool(payload.get("setup_complete", False))
         suite = agent_suite.provision_suite(
