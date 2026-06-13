@@ -3,20 +3,23 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Windows Odysseus + Unity Shell API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: vm
+    description: QEMU/KVM Windows VM management
+  - name: shell
+    description: Shell session management
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +27,142 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /vm/status:
+    get:
+      operationId: getVmStatus
+      tags: [vm]
+      summary: Get VM status and configuration
+      responses:
+        "200":
+          description: VM status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VmStatus"
+
+  /vm/start:
+    post:
+      operationId: startVm
+      tags: [vm]
+      summary: Start Windows VM
+      responses:
+        "200":
+          description: VM start initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VmActionResult"
+
+  /vm/stop:
+    post:
+      operationId: stopVm
+      tags: [vm]
+      summary: Stop Windows VM
+      responses:
+        "200":
+          description: VM stop initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VmActionResult"
+
+  /vm/restart:
+    post:
+      operationId: restartVm
+      tags: [vm]
+      summary: Restart Windows VM
+      responses:
+        "200":
+          description: VM restart initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VmActionResult"
+
+  /vm/snapshot:
+    post:
+      operationId: snapshotVm
+      tags: [vm]
+      summary: Take a VM snapshot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SnapshotInput"
+      responses:
+        "200":
+          description: Snapshot taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VmActionResult"
+
+  /vm/config:
+    get:
+      operationId: getVmConfig
+      tags: [vm]
+      summary: Get VM hardware configuration
+      responses:
+        "200":
+          description: VM hardware configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VmConfig"
+    put:
+      operationId: updateVmConfig
+      tags: [vm]
+      summary: Update VM hardware configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VmConfigUpdate"
+      responses:
+        "200":
+          description: Configuration updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VmConfig"
+
+  /shell/exec:
+    post:
+      operationId: execShellCommand
+      tags: [shell]
+      summary: Execute a command in the shell (for Odysseus agent tool)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShellCommandInput"
+      responses:
+        "200":
+          description: Command result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellCommandResult"
+
+  /shell/history:
+    get:
+      operationId: getShellHistory
+      tags: [shell]
+      summary: Get recent shell command history
+      responses:
+        "200":
+          description: Shell history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ShellHistoryEntry"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +173,156 @@ components:
       required:
         - status
 
+    VmStatus:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [stopped, starting, running, stopping, error]
+        pid:
+          type: ["integer", "null"]
+        uptime:
+          type: ["integer", "null"]
+          description: Uptime in seconds
+        isoPath:
+          type: ["string", "null"]
+        diskPath:
+          type: ["string", "null"]
+        ramGb:
+          type: integer
+        cpuCores:
+          type: integer
+        gpuPassthrough:
+          type: ["string", "null"]
+        connectionMode:
+          type: string
+          enum: [serial, ssh]
+        sshPort:
+          type: ["integer", "null"]
+      required:
+        - state
+        - ramGb
+        - cpuCores
+        - connectionMode
+
+    VmActionResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        state:
+          type: string
+      required:
+        - success
+        - message
+        - state
+
+    VmConfig:
+      type: object
+      properties:
+        isoPath:
+          type: ["string", "null"]
+        diskPath:
+          type: ["string", "null"]
+        ramGb:
+          type: integer
+        cpuCores:
+          type: integer
+        gpuPassthrough:
+          type: ["string", "null"]
+        connectionMode:
+          type: string
+          enum: [serial, ssh]
+        sshPort:
+          type: integer
+        sshUser:
+          type: ["string", "null"]
+        sshPassword:
+          type: ["string", "null"]
+      required:
+        - ramGb
+        - cpuCores
+        - connectionMode
+        - sshPort
+
+    VmConfigUpdate:
+      type: object
+      properties:
+        isoPath:
+          type: ["string", "null"]
+        diskPath:
+          type: ["string", "null"]
+        ramGb:
+          type: integer
+        cpuCores:
+          type: integer
+        gpuPassthrough:
+          type: ["string", "null"]
+        connectionMode:
+          type: string
+          enum: [serial, ssh]
+        sshPort:
+          type: integer
+        sshUser:
+          type: ["string", "null"]
+        sshPassword:
+          type: ["string", "null"]
+
+    SnapshotInput:
+      type: object
+      properties:
+        name:
+          type: string
+      required:
+        - name
+
+    ShellCommandInput:
+      type: object
+      properties:
+        command:
+          type: string
+        timeoutMs:
+          type: integer
+          description: Max ms to wait for output (default 10000)
+      required:
+        - command
+
+    ShellCommandResult:
+      type: object
+      properties:
+        stdout:
+          type: string
+        stderr:
+          type: string
+        exitCode:
+          type: ["integer", "null"]
+        timedOut:
+          type: boolean
+      required:
+        - stdout
+        - stderr
+        - timedOut
+
+    ShellHistoryEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        command:
+          type: string
+        stdout:
+          type: string
+        stderr:
+          type: string
+        exitCode:
+          type: ["integer", "null"]
+        timestamp:
+          type: string
+      required:
+        - id
+        - command
+        - stdout
+        - stderr
+        - timestamp
