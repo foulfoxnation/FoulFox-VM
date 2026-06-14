@@ -2118,20 +2118,87 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 // user doesn't stare at a blind "Running…" spinner.
                 if (_isBg) continue;
                 if (!currentToolBubble) continue;
-                // The per-second ticker (started in tool_start) owns the
-                // elapsed display; here we just surface the live output tail.
-                const tailStr = (json.tail || '').trim();
-                if (tailStr) {
-                  let tailEl = currentToolBubble.querySelector('.agent-thread-tail');
-                  if (!tailEl) {
-                    tailEl = document.createElement('pre');
-                    tailEl.className = 'agent-thread-tail';
-                    tailEl.style.cssText = 'margin:4px 0 0;padding:6px 8px;font-size:11px;background:rgba(0,0,0,0.18);border-radius:4px;max-height:140px;overflow:auto;white-space:pre-wrap;opacity:0.85;';
+                if (json.phase === 'subagent' || json.phase === 'self_repair') {
+                  // Visible fan-out / self-repair trace: one live-updating row
+                  // per sub-task so the user can watch parallel helpers + the
+                  // self-repair edit→verify→restart flow instead of a blind spinner.
+                  let trace = currentToolBubble.querySelector('.agent-subtrace');
+                  if (!trace) {
+                    trace = document.createElement('div');
+                    trace.className = 'agent-subtrace';
+                    trace.style.cssText = 'margin:6px 0 0;display:flex;flex-direction:column;gap:3px;';
                     const content = currentToolBubble.querySelector('.agent-thread-content');
-                    if (content) content.appendChild(tailEl);
+                    if (content) content.appendChild(trace);
+                    currentToolBubble._subRows = {};
                   }
-                  tailEl.textContent = tailStr;
-                  tailEl.scrollTop = tailEl.scrollHeight;
+                  const rows = currentToolBubble._subRows || (currentToolBubble._subRows = {});
+                  const setRow = (key, mark, label, meta, color) => {
+                    let r = rows[key];
+                    if (!r) {
+                      r = document.createElement('div');
+                      r.className = 'agent-subtrace-row';
+                      r.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;line-height:1.4;';
+                      r.innerHTML = '<span class="st-mark" style="width:12px;flex:0 0 auto;text-align:center;"></span><span class="st-label" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span><span class="st-meta" style="flex:0 0 auto;opacity:0.7;"></span>';
+                      trace.appendChild(r);
+                      rows[key] = r;
+                    }
+                    const m = r.querySelector('.st-mark');
+                    const l = r.querySelector('.st-label');
+                    const t = r.querySelector('.st-meta');
+                    if (mark != null) m.textContent = mark;
+                    if (color) m.style.color = color;
+                    if (label != null) { l.textContent = label; l.title = label; }
+                    if (meta != null) t.textContent = meta;
+                  };
+                  const ev = json.event;
+                  if (json.phase === 'subagent') {
+                    if (ev === 'batch_start') {
+                      const n = json.count || 0;
+                      setRow('__hdr', '◆', 'Fanning out ' + n + ' sub-agent' + (n === 1 ? '' : 's') + '…', '', '#60a5fa');
+                    } else if (ev === 'start') {
+                      setRow('s' + json.index, '◐', '#' + ((json.index || 0) + 1) + ' ' + (json.kind || '') + '/' + (json.role || '') + ': ' + (json.objective || ''), 'running', '#fbbf24');
+                    } else if (ev === 'tool') {
+                      const r = rows['s' + json.index];
+                      if (r) r.querySelector('.st-meta').textContent = '→ ' + (json.tool || 'tool');
+                    } else if (ev === 'done') {
+                      const ok = json.status === 'ok';
+                      const tc = json.tool_calls || 0;
+                      setRow('s' + json.index, ok ? '✓' : (json.status === 'empty' ? '·' : '✗'), null,
+                        json.status + ' · ' + tc + ' tool' + (tc === 1 ? '' : 's'),
+                        ok ? '#4ade80' : (json.status === 'empty' ? '#9ca3af' : '#f87171'));
+                    } else if (ev === 'error') {
+                      setRow('s' + json.index, '✗', null, (json.error || 'failed').slice(0, 80), '#f87171');
+                    }
+                  } else {
+                    if (ev === 'start') {
+                      setRow('__hdr', '◆', 'Self-repair: ' + (json.objective || ''), '', '#60a5fa');
+                      setRow('work', '◐', 'Editing in ' + (json.workspace || 'repo'), 'running', '#fbbf24');
+                    } else if (ev === 'check') {
+                      setRow('work', '✓', null, 'edits applied', '#4ade80');
+                      setRow('check', '◐', 'Verifying: ' + (json.command || ''), 'running', '#fbbf24');
+                    } else if (ev === 'done') {
+                      const ok = json.checks_pass;
+                      setRow('check', ok ? '✓' : '✗', null,
+                        ok ? 'checks passed' : ('failed (exit ' + json.check_exit_code + ')'),
+                        ok ? '#4ade80' : '#f87171');
+                    }
+                  }
+                } else {
+                  // The per-second ticker (started in tool_start) owns the
+                  // elapsed display; here we just surface the live output tail.
+                  const tailStr = (json.tail || '').trim();
+                  if (tailStr) {
+                    let tailEl = currentToolBubble.querySelector('.agent-thread-tail');
+                    if (!tailEl) {
+                      tailEl = document.createElement('pre');
+                      tailEl.className = 'agent-thread-tail';
+                      tailEl.style.cssText = 'margin:4px 0 0;padding:6px 8px;font-size:11px;background:rgba(0,0,0,0.18);border-radius:4px;max-height:140px;overflow:auto;white-space:pre-wrap;opacity:0.85;';
+                      const content = currentToolBubble.querySelector('.agent-thread-content');
+                      if (content) content.appendChild(tailEl);
+                    }
+                    tailEl.textContent = tailStr;
+                    tailEl.scrollTop = tailEl.scrollHeight;
+                  }
                 }
                 uiModule.scrollHistory();
 

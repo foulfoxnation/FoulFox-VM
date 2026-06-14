@@ -210,6 +210,8 @@ async def test_spawn_aggregates_with_untrusted_delimiters(monkeypatch):
 
 
 async def test_spawn_emits_progress_trace(monkeypatch):
+    # Locks the backend -> UI contract: the (phase, event) pairs AND the fields
+    # that static/js/chat.js switches on to render the live fan-out trace.
     _patch_stream(monkeypatch, _make_fake_stream(delta="x", tool="grep"))
     events = []
     async def cb(p):
@@ -217,11 +219,40 @@ async def test_spawn_emits_progress_trace(monkeypatch):
     await subagents.handle_spawn_subagents(
         json.dumps({"subtasks": [{"objective": "a"}]}),
         owner="u1", agent_ctx=CTX, progress_cb=cb)
-    kinds = {(e.get("phase"), e.get("event")) for e in events}
-    assert ("subagent", "batch_start") in kinds
-    assert ("subagent", "start") in kinds
-    assert ("subagent", "tool") in kinds
-    assert ("subagent", "done") in kinds
+    by_event = {e.get("event"): e for e in events if e.get("phase") == "subagent"}
+    assert {"batch_start", "start", "tool", "done"} <= set(by_event)
+    # Fields the UI reads per event (missing any => trace rows render blank).
+    assert "count" in by_event["batch_start"]
+    for k in ("index", "kind", "role", "objective"):
+        assert k in by_event["start"]
+    for k in ("index", "tool"):
+        assert k in by_event["tool"]
+    for k in ("index", "status", "tool_calls"):
+        assert k in by_event["done"]
+
+
+async def test_self_repair_emits_progress_trace(monkeypatch):
+    # Locks the self-repair edit -> verify -> done trace contract for the UI.
+    async def fake_worker(**kwargs):
+        return {"index": 0, "status": "ok", "summary": "patched", "error": None}
+    async def fake_check(command, timeout=300):
+        return 0, "1 passed"
+    monkeypatch.setattr(subagents, "run_subagent", fake_worker)
+    monkeypatch.setattr(subagents, "_run_check_command", fake_check)
+    events = []
+    async def cb(p):
+        events.append(p)
+    await subagents.handle_self_repair(json.dumps({
+        "objective": "fix the bug",
+        "check_command": "python -m pytest -q",
+        "user_requested": True,
+    }), owner="u1", agent_ctx=CTX, progress_cb=cb)
+    by_event = {e.get("event"): e for e in events if e.get("phase") == "self_repair"}
+    assert {"start", "check", "done"} <= set(by_event)
+    assert "objective" in by_event["start"] and "workspace" in by_event["start"]
+    assert "command" in by_event["check"]
+    for k in ("checks_pass", "check_exit_code"):
+        assert k in by_event["done"]
 
 
 async def test_spawn_blocked_at_depth_1(monkeypatch):

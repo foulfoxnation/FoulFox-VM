@@ -53,7 +53,19 @@ smuggle instructions back into the parent.
 **Why:** self-killing the process from inside the request that triggered it
 drops the response and can wedge the service; a human/bridge owns the restart.
 
-## Progress trace is emitted but not yet rendered
-Progress events stream via `progress_cb` as SSE with `phase:"subagent"` /
-`phase:"self_repair"`. As of Task #12 the shell (`AgentChatPane.tsx`) does not
-render them — backend-only. A UI follow-up consumes these events.
+## Progress trace: backend -> UI contract lives in chat.js
+Progress events stream via `progress_cb`. The agent loop drains them and yields
+each as a `tool_progress` SSE with the payload's `phase`/`event` merged in
+(`phase:"subagent"` | `"self_repair"`). The renderer is the Odysseus native chat
+UI `static/js/chat.js` (the `tool_progress` handler) — NOT the shell's
+`AgentChatPane.tsx`, which only iframes that native UI. chat.js draws one
+live-updating row per sub-task inside the running tool card.
+**Why:** the visible trace is a pure odysseus-service change; the shell never
+touches these events. **How to apply:** the UI switches on exact
+`(phase, event)` pairs + fields — subagent: `batch_start{count}` /
+`start{index,kind,role,objective}` / `tool{index,tool}` /
+`done{index,status,tool_calls}` / `error{index,error}`; self_repair:
+`start{objective,workspace}` / `check{command}` / `done{checks_pass,check_exit_code}`.
+Changing an event name or field in `subagents.py` silently blanks the trace
+unless chat.js is updated in lockstep. The contract is locked by
+`test_spawn_emits_progress_trace` / `test_self_repair_emits_progress_trace`.
