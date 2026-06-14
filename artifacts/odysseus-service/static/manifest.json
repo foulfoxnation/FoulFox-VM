@@ -1,6 +1,6 @@
 {
-  "name": "FoulFox VM",
-  "short_name": "FoulFox VM",
+  "name": "FoulFox OS",
+  "short_name": "FoulFox OS",
   "description": "Self-hosted AI chat with memory, documents, and tools",
   "start_url": "/",
   "scope": "/",

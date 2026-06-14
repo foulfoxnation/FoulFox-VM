@@ -40,7 +40,7 @@ export function DownloadTab() {
           </div>
           <p className="text-muted-foreground">
             Download the bootable FoulFox OS image, write it to a USB stick, and
-            boot any PC straight into the FoulFox VM appliance.
+            boot any PC straight into the FoulFox OS appliance.
           </p>
         </div>
 

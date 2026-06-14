@@ -126,8 +126,8 @@ export default function Home() {
     // The chat sits beside the Host Shell now, so deliver in place — no tab jump.
     setPendingOdysseusContext(lastOutput);
     toast({
-      title: "Terminal context sent to FoulFox VM",
-      description: "FoulFox VM will analyse the output in the chat panel.",
+      title: "Terminal context sent to FoulFox OS",
+      description: "FoulFox OS will analyse the output in the chat panel.",
       duration: 3000,
     });
   };
@@ -145,8 +145,13 @@ export default function Home() {
       />
       <div className="flex items-center justify-between gap-4 border-b bg-card px-4 py-2 shadow-sm z-10">
         <div className="flex items-center gap-3 shrink-0">
-          <img src={foxLogo} alt="FoulFox VM" className="h-8 w-8 rounded-md object-cover" />
-          <h1 className="font-semibold tracking-tight">FoulFox VM</h1>
+          <img src={foxLogo} alt="FoulFox OS" className="h-8 w-8 rounded-md object-cover" />
+          <div className="flex flex-col leading-tight">
+            <h1 className="font-semibold tracking-tight">FoulFox OS</h1>
+            <span className="text-[11px] font-medium text-muted-foreground">
+              Powered by Odysseus
+            </span>
+          </div>
           <div
             className={`h-2 w-2 rounded-full ${health?.status === "ok" ? "bg-green-500" : "bg-red-500"}`}
             title="API Status"
@@ -165,7 +170,7 @@ export default function Home() {
           <TabsList className="h-12 w-full justify-start rounded-none border-b-0 bg-transparent p-0">
             <TabsTrigger value="odysseus" className={TAB_TRIGGER} data-testid="tab-odysseus">
               <MonitorDot className="mr-2 h-4 w-4" />
-              FoulFox VM Workspace
+              FoulFox OS Workspace
             </TabsTrigger>
             <TabsTrigger value="shell" className={TAB_TRIGGER} data-testid="tab-shell">
               <TermIcon className="mr-2 h-4 w-4" />
@@ -276,7 +281,7 @@ export default function Home() {
                     data-testid="button-send-to-odysseus"
                   >
                     <Send className="mr-1 h-3.5 w-3.5" />
-                    Send to FoulFox VM
+                    Send to FoulFox OS
                   </Button>
                 </div>
 

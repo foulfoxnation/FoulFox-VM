@@ -139,7 +139,7 @@ router.all("/odysseus{/*path}", (req: Request, res: Response) => {
       proxyRes.on("error", (err) => {
         logger.error({ err, path: targetPath }, "Odysseus proxy stream error");
         if (!res.headersSent) {
-          res.status(502).json({ error: "FoulFox VM service unavailable", details: err.message });
+          res.status(502).json({ error: "FoulFox OS service unavailable", details: err.message });
         }
       });
     } else {
@@ -151,7 +151,7 @@ router.all("/odysseus{/*path}", (req: Request, res: Response) => {
   proxyReq.on("error", (err) => {
     logger.error({ err, path: targetPath }, "Odysseus proxy error");
     if (!res.headersSent) {
-      res.status(502).json({ error: "FoulFox VM service unavailable", details: err.message });
+      res.status(502).json({ error: "FoulFox OS service unavailable", details: err.message });
     }
   });
 

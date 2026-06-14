@@ -219,7 +219,7 @@ function _buildCrashReport(task, outputText) {
   const diag = _diagnose(capturedOutput);
   const started = task?.ts ? new Date(task.ts).toISOString() : '';
   const report = [
-    '## FoulFox VM Cookbook crash report',
+    '## FoulFox OS Cookbook crash report',
     '',
     'Please review this report for secrets before posting it publicly.',
     '',

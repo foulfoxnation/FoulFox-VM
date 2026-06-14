@@ -36,7 +36,11 @@ export function AgentChatPane({
 }: AgentChatPaneProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const loadedRef = useRef(false);
+  // Label of the target the agent is *confirmed* bound to (updated only on a
+  // successful vm-target POST). `bindError` is set when a bind attempt fails so
+  // the badge can warn instead of falsely claiming the new target is active.
   const [boundLabel, setBoundLabel] = useState<string | null>(null);
+  const [bindError, setBindError] = useState(false);
 
   const { data: status, isLoading } = useQuery({
     queryKey: ["odysseus-lifecycle-status"],
@@ -74,10 +78,18 @@ export function AgentChatPane({
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled) return;
-        setBoundLabel(data && data.ok ? targetLabel : targetLabel);
+        if (data && data.ok) {
+          setBoundLabel(targetLabel);
+          setBindError(false);
+        } else {
+          // Bind failed: keep showing the last confirmed target and warn, since
+          // the agent's tools are still pointed at the previous machine.
+          setBindError(true);
+        }
       })
       .catch(() => {
-        // Non-fatal: the agent still works on the host default; surface nothing.
+        if (cancelled) return;
+        setBindError(true);
       });
     return () => {
       cancelled = true;
@@ -134,9 +146,9 @@ export function AgentChatPane({
     return (
       <div className="flex h-full w-full flex-col items-center justify-center bg-muted/20 text-muted-foreground" data-testid="agent-chat-offline">
         <ServerOff className="mb-4 h-12 w-12" />
-        <h2 className="text-xl font-semibold text-foreground">FoulFox VM Offline</h2>
+        <h2 className="text-xl font-semibold text-foreground">FoulFox OS Offline</h2>
         <p className="mt-2 max-w-md text-center">
-          The FoulFox VM agent is currently disconnected or the server is unreachable.
+          The FoulFox OS agent is currently disconnected or the server is unreachable.
           Wait for it to come online or check the VM status.
         </p>
       </div>
@@ -156,14 +168,19 @@ export function AgentChatPane({
             <Monitor className="h-3.5 w-3.5" />
           )}
           <span className="text-muted-foreground">Agent acting on:</span>
-          <span className="font-medium text-foreground">{boundLabel ?? targetLabel}</span>
+          <span className="font-medium text-foreground">{boundLabel ?? "binding…"}</span>
+          {bindError && (
+            <span className="text-destructive" data-testid="agent-chat-bind-error">
+              · couldn't switch to {targetLabel}
+            </span>
+          )}
         </div>
       )}
       <iframe
         ref={iframeRef}
         src={ODYSSEUS_SRC}
         className="min-h-0 w-full flex-1 border-0"
-        title="FoulFox VM Workspace"
+        title="FoulFox OS Workspace"
         data-testid="agent-chat-iframe"
         onLoad={handleIframeLoad}
       />
