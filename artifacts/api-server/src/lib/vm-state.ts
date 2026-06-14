@@ -31,6 +31,7 @@ const DEFAULT_CONFIG: VmConfigData = {
   sshUser: null,
   sshPassword: null,
   virtioIsoPath: null,
+  unattendIsoPath: null,
   displayMode: "headless",
   spicePort: 5930,
   vncDisplay: 1,

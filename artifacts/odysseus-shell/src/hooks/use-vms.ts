@@ -3,6 +3,7 @@ import { useShellToken } from "./use-shell-token";
 import {
   listVms,
   fetchCapabilities,
+  fetchOsImages,
   createVm,
   vmLifecycle,
   deleteVm,
@@ -11,10 +12,12 @@ import {
   type VmLifecycleAction,
   type VmSummary,
   type VmCapabilities,
+  type OsImage,
 } from "@/lib/vm-api";
 
 export const VM_LIST_KEY = ["vm-list"];
 export const VM_CAPS_KEY = ["vm-capabilities"];
+export const VM_OS_IMAGES_KEY = ["vm-os-images"];
 
 export function useVmList() {
   return useQuery<VmSummary[]>({
@@ -28,6 +31,14 @@ export function useVmCapabilities(enabled = true) {
   return useQuery<VmCapabilities>({
     queryKey: VM_CAPS_KEY,
     queryFn: fetchCapabilities,
+    enabled,
+  });
+}
+
+export function useOsImages(enabled = true) {
+  return useQuery<OsImage[]>({
+    queryKey: VM_OS_IMAGES_KEY,
+    queryFn: fetchOsImages,
     enabled,
   });
 }

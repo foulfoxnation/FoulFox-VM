@@ -18,15 +18,17 @@ import {
   Apple,
   Terminal as TermIcon,
 } from "lucide-react";
-import { useVmCapabilities, useCreateVm } from "@/hooks/use-vms";
-import { provisionStreamUrl, type OsKind, type ProvisioningState } from "@/lib/vm-api";
+import { useOsImages, useVmCapabilities, useCreateVm } from "@/hooks/use-vms";
+import { provisionStreamUrl, type OsKind, type OsImage, type ProvisioningState } from "@/lib/vm-api";
 import { useToast } from "@/hooks/use-toast";
 
-const OS_META: { key: OsKind; label: string; icon: typeof Monitor; blurb: string }[] = [
-  { key: "linux", label: "Linux", icon: TermIcon, blurb: "Ubuntu 24.04 — image auto-downloaded, SSH enabled for the agent." },
-  { key: "windows", label: "Windows", icon: Monitor, blurb: "Blank disk + unattended answer file. Supply a Windows ISO to install." },
-  { key: "macos", label: "macOS", icon: Apple, blurb: "Apple hardware only (licensing + Hypervisor.framework)." },
-];
+// Icon per OS family — the catalog itself is fetched from the backend so the
+// menu and the appliance never drift.
+const FAMILY_ICON: Record<OsKind, typeof Monitor> = {
+  linux: TermIcon,
+  windows: Monitor,
+  macos: Apple,
+};
 
 type Phase = "configure" | "provisioning";
 
@@ -46,25 +48,36 @@ export function OsPicker({
   onCreated: (vmId: string) => void;
 }) {
   const { toast } = useToast();
+  const osImages = useOsImages(open);
   const caps = useVmCapabilities(open);
   const createVm = useCreateVm();
+  const images = osImages.data ?? [];
 
   const [phase, setPhase] = useState<Phase>("configure");
-  const [osKind, setOsKind] = useState<OsKind>("linux");
+  const [imageId, setImageId] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [ramGb, setRamGb] = useState(2);
+  const [ramGb, setRamGb] = useState(4);
   const [cpuCores, setCpuCores] = useState(2);
   const [diskGb, setDiskGb] = useState(32);
   const [newVmId, setNewVmId] = useState<string | null>(null);
   const [prov, setProv] = useState<ProvisioningState | null>(null);
 
+  const selected = images.find((i) => i.id === imageId) ?? null;
+
+  // Selecting an OS also pulls in that image's recommended RAM/disk defaults.
+  const selectImage = (img: OsImage) => {
+    setImageId(img.id);
+    setRamGb(img.defaultRamGb);
+    setDiskGb(img.defaultDiskGb);
+  };
+
   // Reset to a clean configure state whenever the dialog is (re)opened.
   useEffect(() => {
     if (open) {
       setPhase("configure");
-      setOsKind("linux");
+      setImageId(null);
       setName("");
-      setRamGb(2);
+      setRamGb(4);
       setCpuCores(2);
       setDiskGb(32);
       setNewVmId(null);
@@ -72,13 +85,18 @@ export function OsPicker({
     }
   }, [open]);
 
-  // Windows wants more headroom by default.
+  // Once the catalog loads (or after a reset), default to the first supported
+  // OS so the picker always opens on a usable selection.
   useEffect(() => {
-    if (osKind === "windows") {
-      setRamGb((r) => Math.max(r, 4));
-      setDiskGb((d) => Math.max(d, 64));
-    }
-  }, [osKind]);
+    if (!open || images.length === 0) return;
+    // Keep a still-valid, still-supported selection; otherwise fall to the first
+    // supported image (so a late refetch marking the current pick unsupported
+    // moves off it rather than leaving a dead selection).
+    const current = images.find((i) => i.id === imageId);
+    if (current && current.supported) return;
+    selectImage(images.find((i) => i.supported) ?? current ?? images[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, images]);
 
   // Stream provisioning progress once a VM has been created.
   useEffect(() => {
@@ -99,15 +117,21 @@ export function OsPicker({
     return () => es.close();
   }, [phase, newVmId]);
 
-  const support = caps.data?.osSupport;
-  const osSupported = (k: OsKind) => support?.[k]?.supported ?? k !== "macos";
   const maxRam = Math.max(2, Math.floor((caps.data?.totalRamGb ?? 8) * 0.5));
   const maxCpu = Math.max(1, caps.data?.cpuCount ?? 4);
+  const selectedSupported = selected?.supported ?? false;
 
   const handleCreate = () => {
-    const fallback = OS_META.find((o) => o.key === osKind)?.label ?? "New";
+    if (!selected) return;
     createVm.mutate(
-      { name: name.trim() || `${fallback} VM`, osKind, ramGb, cpuCores, diskGb },
+      {
+        name: name.trim() || `${selected.label} VM`,
+        osKind: selected.family,
+        imageId: selected.id,
+        ramGb,
+        cpuCores,
+        diskGb,
+      },
       {
         onSuccess: (vm) => {
           setNewVmId(vm.id);
@@ -137,38 +161,45 @@ export function OsPicker({
 
         {phase === "configure" ? (
           <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-2">
-              {OS_META.map((o) => {
-                const supported = osSupported(o.key);
-                const active = osKind === o.key;
-                return (
-                  <button
-                    key={o.key}
-                    type="button"
-                    disabled={!supported}
-                    onClick={() => setOsKind(o.key)}
-                    className={`flex flex-col items-center gap-2 rounded-lg border p-3 text-center transition-colors ${
-                      active ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
-                    } ${!supported ? "cursor-not-allowed opacity-50" : ""}`}
-                    data-testid={`os-option-${o.key}`}
-                  >
-                    <o.icon className="h-6 w-6 text-primary" />
-                    <span className="text-sm font-medium">{o.label}</span>
-                  </button>
-                );
-              })}
-            </div>
+            {osImages.isLoading ? (
+              <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading operating systems…
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                {images.map((img) => {
+                  const Icon = FAMILY_ICON[img.family];
+                  const active = imageId === img.id;
+                  return (
+                    <button
+                      key={img.id}
+                      type="button"
+                      disabled={!img.supported}
+                      onClick={() => selectImage(img)}
+                      className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 text-center transition-colors ${
+                        active ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+                      } ${!img.supported ? "cursor-not-allowed opacity-50" : ""}`}
+                      data-testid={`os-option-${img.id}`}
+                    >
+                      <Icon className="h-6 w-6 text-primary" />
+                      <span className="text-sm font-medium leading-tight">{img.label}</span>
+                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{img.stability}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
-            {!osSupported(osKind) ? (
+            {selected && !selectedSupported ? (
               <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
                 <p className="text-xs text-muted-foreground">
-                  {support?.[osKind]?.reason ?? "This OS is not supported on this host."}
+                  {selected.reason || "This OS is not supported on this host."}
                 </p>
               </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">{OS_META.find((o) => o.key === osKind)?.blurb}</p>
-            )}
+            ) : selected ? (
+              <p className="text-xs text-muted-foreground">{selected.blurb}</p>
+            ) : null}
 
             <div className="space-y-3">
               <div className="space-y-1.5">
@@ -177,7 +208,7 @@ export function OsPicker({
                   id="vm-name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder={`${OS_META.find((o) => o.key === osKind)?.label} VM`}
+                  placeholder={selected ? `${selected.label} VM` : "VM name"}
                   data-testid="input-vm-name"
                 />
               </div>
@@ -211,7 +242,7 @@ export function OsPicker({
               <Button variant="ghost" onClick={() => onOpenChange(false)} data-testid="button-cancel-create">
                 Cancel
               </Button>
-              <Button onClick={handleCreate} disabled={!osSupported(osKind) || createVm.isPending} data-testid="button-confirm-create">
+              <Button onClick={handleCreate} disabled={!selected || !selectedSupported || createVm.isPending} data-testid="button-confirm-create">
                 {createVm.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Create VM
               </Button>

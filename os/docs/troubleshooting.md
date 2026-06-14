@@ -65,7 +65,11 @@ ls -R /var/lib/foulfox/frontload
   ls -lh /var/lib/foulfox/vm/
   ```
 
-## No Windows ISO detected
+## No Windows ISO detected / automatic download failed
+- First try the in-app picker: the **New virtual machine** dialog downloads the
+  official Windows ISO from Microsoft for you. If it reports the download is
+  unavailable, Microsoft has likely blocked your network (common on datacenter
+  or filtered connections) — use the frontload fallback below.
 - Frontload it: insert the USB stick, open the **File Explorer** tab, and copy
   the `.iso` into the staging `isos` area (first-boot.md, step 3).
 - Verify it landed:

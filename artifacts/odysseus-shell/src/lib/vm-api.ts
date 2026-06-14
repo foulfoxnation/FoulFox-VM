@@ -102,9 +102,33 @@ export async function fetchCapabilities(): Promise<VmCapabilities> {
   return res.json();
 }
 
+// One selectable OS in the picker. Mirrors the backend's UI-safe projection
+// (no raw download URLs) plus per-host capability gating.
+export interface OsImage {
+  id: string;
+  family: OsKind;
+  label: string;
+  version: string;
+  stability: string;
+  blurb: string;
+  autoDownload: boolean;
+  defaultRamGb: number;
+  defaultDiskGb: number;
+  supported: boolean;
+  reason: string;
+}
+
+export async function fetchOsImages(): Promise<OsImage[]> {
+  const res = await fetch(apiUrl("/api/vm/os-images"));
+  if (!res.ok) throw new Error(await parseError(res));
+  const j = await res.json();
+  return (j.images ?? []) as OsImage[];
+}
+
 export interface CreateVmInput {
   name: string;
   osKind: OsKind;
+  imageId?: string;
   ramGb?: number;
   cpuCores?: number;
   diskGb?: number;

@@ -34,9 +34,13 @@ export function buildQemuArgs(vm: VmRecord, accel: AcceleratorInfo): string[] {
   args.push("-m", `${c.ramGb}G`);
   args.push("-smp", `cores=${c.cpuCores}`);
 
-  // Networking: localhost-only host-forwards for SSH and RDP.
+  // Networking: localhost-only host-forwards for SSH and RDP. Windows has no
+  // inbox virtio-net driver, so a fresh install would have no network (and the
+  // auto-enabled OpenSSH/RDP would be unreachable) until virtio drivers are
+  // installed — use e1000e, which Windows drives out of the box. Linux keeps the
+  // faster virtio-net.
   args.push("-netdev", `user,id=net0,hostfwd=tcp:127.0.0.1:${vm.ports.ssh}-:22,hostfwd=tcp:127.0.0.1:${vm.ports.rdp}-:3389`);
-  args.push("-device", "virtio-net,netdev=net0");
+  args.push("-device", `${vm.osKind === "windows" ? "e1000e" : "virtio-net"},netdev=net0`);
 
   // Graphical display: QEMU VNC bound to localhost with a websocket for noVNC.
   // We never expose an unauthenticated socket to the outside — the websocket is
@@ -53,12 +57,39 @@ export function buildQemuArgs(vm: VmRecord, accel: AcceleratorInfo): string[] {
 
   if (c.gpuPassthrough) args.push("-device", `vfio-pci,host=${c.gpuPassthrough}`);
 
-  if (c.diskPath) {
-    args.push("-drive", `file=${c.diskPath},if=virtio,format=qcow2`);
-  }
-  if (c.isoPath) {
-    args.push("-cdrom", c.isoPath);
-    if (!c.diskPath) args.push("-boot", "d");
+  // Storage + optical media. A fresh Windows installer cannot see a virtio disk
+  // without first side-loading drivers, so Windows guests boot on an AHCI/SATA
+  // controller their bundled drivers recognize, while Linux keeps fast virtio.
+  // The install ISO boots first (bootindex 0) so a blank disk lands in setup;
+  // the virtio-win and autounattend ISOs ride along as extra CDs (drivers to
+  // install plus the answer file Windows Setup auto-detects on attached media).
+  if (vm.osKind === "windows") {
+    args.push("-device", "ich9-ahci,id=ahci");
+    let ahciPort = 0;
+    if (c.diskPath) {
+      args.push("-drive", `file=${c.diskPath},if=none,id=osdisk,format=qcow2`);
+      args.push("-device", `ide-hd,drive=osdisk,bus=ahci.${ahciPort++},bootindex=1`);
+    }
+    if (c.isoPath) {
+      args.push("-drive", `file=${c.isoPath},if=none,id=installcd,media=cdrom,readonly=on`);
+      args.push("-device", `ide-cd,drive=installcd,bus=ahci.${ahciPort++},bootindex=0`);
+    }
+    if (c.virtioIsoPath) {
+      args.push("-drive", `file=${c.virtioIsoPath},if=none,id=virtiocd,media=cdrom,readonly=on`);
+      args.push("-device", `ide-cd,drive=virtiocd,bus=ahci.${ahciPort++}`);
+    }
+    if (c.unattendIsoPath) {
+      args.push("-drive", `file=${c.unattendIsoPath},if=none,id=unattendcd,media=cdrom,readonly=on`);
+      args.push("-device", `ide-cd,drive=unattendcd,bus=ahci.${ahciPort++}`);
+    }
+  } else {
+    if (c.diskPath) {
+      args.push("-drive", `file=${c.diskPath},if=virtio,format=qcow2`);
+    }
+    if (c.isoPath) {
+      args.push("-cdrom", c.isoPath);
+      if (!c.diskPath) args.push("-boot", "d");
+    }
   }
   if (c.connectionMode === "serial") {
     // Serial console on a localhost telnet port derived from the monitor port.

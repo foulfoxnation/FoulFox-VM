@@ -48,14 +48,29 @@ os/
 6. `foulfox-vm-autostart.service` starts the Windows VM (if configured); a
    fullscreen SPICE viewer attaches automatically.
 
+## Picking an OS in the shell (no second machine)
+
+The shell's **New virtual machine** picker is the primary path: choose an OS and
+the appliance downloads the most stable release automatically — no second
+computer or pre-made install media required.
+
+- **Linux** (Ubuntu 24.04 LTS, Debian 12): a ready-to-boot cloud image is
+  fetched and the disk is built hands-off (SSH enabled on first boot).
+- **Windows** (11, or 10 22H2): the official ISO is downloaded straight from
+  Microsoft along with the stable virtio driver ISO. You bring your own Windows
+  license key to activate.
+- **macOS**: offered only on genuine Apple hardware (Apple's licence +
+  Hypervisor.framework).
+
 ## The frontload fallback
 
-When automatic setup can't fetch what it needs (no network, a Windows ISO you
-must supply, niche driver files), insert a USB stick and use the **File
-Explorer** tab in the shell to copy files into the staging area
+Auto-download needs network access, and Microsoft sometimes blocks downloads
+from certain networks. When automatic setup can't fetch what it needs (no
+network, a blocked Windows download, niche driver files), insert a USB stick and
+use the **File Explorer** tab in the shell to copy files into the staging area
 (`/var/lib/foulfox/frontload/{isos,drivers,files}`). The first-run provisioner
 and the VM launcher read from there. This is the manual escape hatch for every
-"it didn't auto-detect" situation.
+"it didn't auto-download" situation.
 
 ## Build it
 
@@ -79,5 +94,8 @@ See **docs/build.md** for details and **docs/flash.md** to write it to USB.
 
 ## Windows licensing
 
-FoulFox OS never bundles Windows. You supply your own Windows installation ISO
-and a valid license; the appliance installs it into the guest disk on first run.
+FoulFox OS never bundles Windows. The in-app picker downloads Microsoft's
+official, freely-redistributable Windows **installation media** for you, but a
+Windows license is still yours to provide: enter your own product key to
+activate. (If the automatic download is blocked on your network, frontload your
+own installation ISO instead — see "The frontload fallback".)

@@ -28,6 +28,10 @@ rsync
 qemu-system-x86
 qemu-utils
 ovmf
+# ISO authoring for auto-provisioning: cloud-init seed (Linux) + autounattend
+# answer-file CD (Windows). Without it both auto-download paths fail at the
+# seed/answer-ISO step on the flashed appliance.
+xorriso
 swtpm
 virt-viewer
 spice-client-gtk

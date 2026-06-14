@@ -1,6 +1,7 @@
 - [Python deps install in this repl](python-deps-install.md) — pip/`installLanguagePackages`/`uv add` fail (immutable Nix store); use `uv pip install --target .pythonlibs/...`.
 - [Odysseus embedding](odysseus-embedding.md) — bundled Odysseus FastAPI app (artifacts/odysseus-service) embedded via api-server proxy; uses local SQLite, root-absolute URLs rewritten in proxy.
 - [Vite keep-awake](vite-keep-awake.md) — Replit Vite preview white-pages on long/idle sessions (HMR WS dies under throttling); fix = worker heartbeat + wake lock, no reload.
+- [FoulFox VM launch path](foulfox-vm-launch.md) — only vm-launch.ts buildQemuArgs is live (qemu-args.ts is dead); Windows guests need AHCI disk + e1000e NIC + CD-delivered unattend; appliance needs xorriso.
 - [FoulFox OS appliance](foulfox-os-appliance.md) — os/ live-build recipe; keep headless QEMU argv byte-identical, VM config fields optional+merged, shell static-serving gated on SERVE_SHELL_STATIC (off in dev).
 - [Lib typecheck build order](lib-typecheck-build-order.md) — standalone artifact `tsc --noEmit` reads stale gitignored lib `dist/*.d.ts`; run `pnpm run typecheck:libs` after codegen/merge or get phantom type errors.
 - [FoulFox cloud ISO build](foulfox-cloud-iso-build.md) — GitHub Actions builds the .iso via os/scripts/build-image.sh; Release asset ~2GiB cap → run artifact is the guaranteed download; "latest" = latest pushed commit.

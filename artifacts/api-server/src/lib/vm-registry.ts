@@ -31,6 +31,7 @@ export interface VmConfigData {
   sshPassword: string | null;
   // ── FoulFox OS appliance display + driver options ──────────────────────────
   virtioIsoPath: string | null;
+  unattendIsoPath: string | null; // Windows autounattend.xml packaged as a CD
   displayMode: DisplayMode;
   spicePort: number;
   vncDisplay: number;
@@ -51,6 +52,7 @@ export interface VmRecord {
   id: string;
   name: string;
   osKind: OsKind;
+  imageId?: string | null; // selected catalog image id (drives auto-download); null = bare osKind
   config: VmConfigData;
   ports: VmPorts;
   provisioning: ProvisioningState;
@@ -108,6 +110,7 @@ function defaultConfig(): VmConfigData {
     sshUser: null,
     sshPassword: null,
     virtioIsoPath: null,
+    unattendIsoPath: null,
     displayMode: "headless",
     spicePort: 5930,
     vncDisplay: 1,
@@ -234,6 +237,7 @@ function allClaimedPorts(file: RegistryFile): number[] {
 export async function createVm(opts: {
   name: string;
   osKind: OsKind;
+  imageId?: string | null;
   ramGb?: number;
   cpuCores?: number;
   diskGb?: number;
@@ -251,6 +255,7 @@ export async function createVm(opts: {
     id,
     name: opts.name,
     osKind: opts.osKind,
+    imageId: opts.imageId ?? null,
     config: cfg,
     ports,
     provisioning: defaultProvisioning(),

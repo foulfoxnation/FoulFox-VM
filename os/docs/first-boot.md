@@ -33,29 +33,38 @@ fullscreen. In the background it:
   virtio driver ISO),
 - autostarts the Windows VM **if** an ISO or installed disk is present.
 
-## 3. Supply a Windows ISO
+## 3. Choose an operating system
 
-FoulFox OS does not include Windows — you provide it. Two ways:
+Open the shell's **New virtual machine** picker, choose an OS, and the appliance
+downloads the most stable release automatically — **no second machine or
+pre-made install media required**.
 
-### A. Frontload from USB (recommended, works offline)
+- **Linux** (Ubuntu 24.04 LTS, Debian 12): a ready-to-boot cloud image is
+  fetched and the disk is built hands-off.
+- **Windows** (11, or 10 22H2): the official ISO is downloaded straight from
+  Microsoft along with the stable virtio drivers. **Bring your own Windows
+  license key** to activate — FoulFox never bundles a license.
+- **macOS**: only on genuine Apple hardware.
+
+Watch the picker's progress bar; when it reads *ready*, start the VM.
+
+### Fallback: frontload from USB (works offline / when a download is blocked)
+Auto-download needs network access, and Microsoft sometimes blocks downloads
+from datacenter or filtered networks. If the picker reports the download is
+unavailable, supply the media yourself:
+
 1. Put your Windows installation `.iso` on a second USB stick (or the same data
    partition).
 2. Insert it. In the shell, open the **File Explorer** tab.
 3. Your stick appears under detected drives. Browse to the `.iso`, select it,
    and **copy it into staging** → the `isos` area.
-4. (Optional but recommended) also copy a `virtio-win*.iso` into the `drivers`
-   area so Windows gets paravirtualized drivers. If you have a network, the
-   appliance downloads this automatically.
+4. (Optional) also copy a `virtio-win*.iso` into the `drivers` area; with a
+   network the appliance downloads this automatically.
 5. Re-scan for the ISO so the VM config picks it up: **reboot**, or from a
    console (Ctrl+Alt+F2) run `sudo systemctl restart foulfox-prepare`. The
    appliance then creates the guest disk, points the VM at your ISO, and the
    Windows installer boots. (A VM-controls "restart" alone reuses the old
    config and won't pick up a newly-added ISO.)
-
-### B. Download on first run
-If the appliance has internet and you have a download URL/source for your
-licensed Windows media, fetch it and drop it into the staging `isos` area via
-the File Explorer, then start the VM.
 
 ## 4. Install Windows into the guest
 

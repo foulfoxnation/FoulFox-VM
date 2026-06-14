@@ -30,6 +30,7 @@ import {
   type OsKind,
 } from "../lib/vm-capabilities";
 import { startProvisioning, subscribeProvisioning } from "../lib/vm-provision";
+import { OS_IMAGES, toPublic, getOsImage, isOsImageId } from "../lib/os-catalog";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -80,14 +81,39 @@ router.get("/vm/list", (_req: Request, res: Response) => {
   res.json({ vms: listVms().map(statusPayload) });
 });
 
+// GET /vm/os-images — the OS catalog the picker renders, with per-host gating.
+// Raw download URLs / Microsoft product ids are intentionally NOT exposed.
+router.get("/vm/os-images", async (_req: Request, res: Response) => {
+  const caps = await detectHostCapabilities();
+  const images = OS_IMAGES.map((i) => {
+    const support = caps.osSupport[i.family];
+    return { ...toPublic(i), supported: support.supported, reason: support.reason };
+  });
+  res.json({ images });
+});
+
 // POST /vm/create — register a new VM and kick off auto-provisioning.
 // Body: { name, osKind, ramGb?, cpuCores?, diskGb? }
 router.post("/vm/create", async (req: Request, res: Response) => {
   const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
-  const osKind = req.body?.osKind;
   if (!isValidVmName(name)) {
     res.status(400).json({ error: "Invalid VM name (allowed: letters, digits, space . _ -, max 64 chars)" });
     return;
+  }
+
+  // Prefer an explicit catalog image id; fall back to a bare osKind for
+  // backwards compatibility. The image id is an allowlist and osKind is derived
+  // from it, so the client can never select an out-of-catalog target or URL.
+  const rawImageId = req.body?.imageId;
+  let image: ReturnType<typeof getOsImage> = undefined;
+  let osKind: unknown = req.body?.osKind;
+  if (rawImageId !== undefined && rawImageId !== null) {
+    if (!isOsImageId(rawImageId)) {
+      res.status(400).json({ error: "Unknown OS image" });
+      return;
+    }
+    image = getOsImage(rawImageId);
+    osKind = image!.family;
   }
   if (!isOsKind(osKind)) {
     res.status(400).json({ error: "Invalid osKind (expected linux, windows or macos)" });
@@ -105,9 +131,11 @@ router.post("/vm/create", async (req: Request, res: Response) => {
     res.status(409).json({ error: "Maximum number of VMs reached." });
     return;
   }
-  const ramGb = clampInt(req.body?.ramGb, 1, Math.max(2, Math.floor(caps.totalRamGb * 0.5)), osKind === "windows" ? 4 : 2);
+  const ramDefault = image?.defaultRamGb ?? (osKind === "windows" ? 4 : 2);
+  const diskDefault = image?.defaultDiskGb ?? (osKind === "windows" ? 64 : 32);
+  const ramGb = clampInt(req.body?.ramGb, 1, Math.max(2, Math.floor(caps.totalRamGb * 0.5)), ramDefault);
   const cpuCores = clampInt(req.body?.cpuCores, 1, Math.max(1, caps.cpuCount), 2);
-  const diskGb = clampInt(req.body?.diskGb, 8, 256, osKind === "windows" ? 64 : 32);
+  const diskGb = clampInt(req.body?.diskGb, 8, 256, diskDefault);
 
   // Aggregate-resource guardrails across all VMs.
   const totalRam = existing.reduce((s, v) => s + v.config.ramGb, 0) + ramGb;
@@ -117,7 +145,7 @@ router.post("/vm/create", async (req: Request, res: Response) => {
   }
 
   try {
-    const vm = await createVm({ name, osKind: osKind as OsKind, ramGb, cpuCores, diskGb });
+    const vm = await createVm({ name, osKind: osKind as OsKind, imageId: image?.id, ramGb, cpuCores, diskGb });
     // Fire-and-forget provisioning; the UI subscribes to progress via SSE.
     startProvisioning(vm.id).catch((err) => logger.error({ err, vm: vm.id }, "Provisioning failed to start"));
     res.json({ vm: statusPayload(vm) });

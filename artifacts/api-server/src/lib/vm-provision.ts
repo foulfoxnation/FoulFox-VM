@@ -13,7 +13,9 @@ import {
   VM_DATA_DIR,
   type ProvisioningState,
 } from "./vm-registry";
-import { type OsKind, binaryExists } from "./vm-capabilities";
+import { binaryExists } from "./vm-capabilities";
+import { getOsImage, defaultImageForOs } from "./os-catalog";
+import { resolveWindowsIso } from "./os-images/windows-msdl";
 import { logger } from "./logger";
 
 // ── Progress pub/sub ───────────────────────────────────────────────────────────
@@ -33,23 +35,13 @@ function emit(vmId: string, patch: Partial<ProvisioningState>) {
 }
 
 // ── OS image catalog ────────────────────────────────────────────────────────────
-// Real, redistributable cloud image for Linux (hands-off). Windows/macOS ISOs are
-// not freely redistributable, so those paths are user-ISO-driven and gated.
-interface ImageSpec {
-  url: string;
-  filename: string;
-  sha256?: string; // optional integrity check; verified when present
-  kind: "qcow2-disk" | "iso";
-}
+// The selectable OS images live in os-catalog.ts (single source of truth shared
+// with the UI). Linux images are ready-to-boot cloud qcow2s; Windows ISOs are
+// resolved live from Microsoft at download time. Nothing here is user-supplied.
 
-const CATALOG: Partial<Record<OsKind, ImageSpec>> = {
-  linux: {
-    // Ubuntu 24.04 LTS cloud image (qcow2). Used directly as the boot disk.
-    url: "https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-amd64.img",
-    filename: "ubuntu-24.04-server-cloudimg-amd64.img",
-    kind: "qcow2-disk",
-  },
-};
+// Stable virtio-win driver ISO (storage/network drivers for Windows guests).
+const VIRTIO_WIN_URL =
+  "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso";
 
 const CACHE_DIR = path.join(VM_DATA_DIR, "_image-cache");
 
@@ -81,15 +73,17 @@ export async function startProvisioning(vmId: string): Promise<void> {
 
 // ── Linux: cloud image + cloud-init first-boot config (hands-off) ─────────────────
 async function provisionLinux(vmId: string): Promise<void> {
-  const spec = CATALOG.linux!;
-  const cached = path.join(CACHE_DIR, spec.filename);
+  const spec = getOsImage(getVm(vmId)?.imageId) ?? defaultImageForOs("linux");
+  if (!spec || spec.resolver !== "cloud-image" || !spec.imageUrl || !spec.imageFilename) {
+    throw new Error("No cloud image is configured for this Linux selection.");
+  }
+  const cached = path.join(CACHE_DIR, spec.imageFilename);
 
-  emit(vmId, { status: "downloading", progress: 0, error: null, message: "Downloading Ubuntu cloud image…", imageUrl: spec.url });
+  emit(vmId, { status: "downloading", progress: 0, error: null, message: `Downloading ${spec.label} cloud image…`, imageUrl: spec.imageUrl });
   if (!fs.existsSync(cached)) {
-    await download(spec.url, cached, (pct) => emit(vmId, { status: "downloading", progress: pct, message: `Downloading Ubuntu cloud image… ${pct}%` }));
-    if (spec.sha256) await verifySha256(cached, spec.sha256);
+    await download(spec.imageUrl, cached, (pct) => emit(vmId, { status: "downloading", progress: pct, message: `Downloading ${spec.label} cloud image… ${pct}%` }));
   } else {
-    emit(vmId, { progress: 100, message: "Using cached Ubuntu cloud image." });
+    emit(vmId, { progress: 100, message: `Using cached ${spec.label} cloud image.` });
   }
 
   // Create a copy-on-write overlay disk backed by the cached image so multiple
@@ -168,30 +162,86 @@ async function buildCloudInitSeed(vmId: string, password: string): Promise<strin
   throw new Error("no ISO authoring tool (cloud-localds/genisoimage/mkisofs/xorriso) available");
 }
 
-// ── Windows: blank disk + unattend (ISO must be supplied by the user) ─────────────
+// ── Windows: auto-download the official ISO + virtio drivers (hands-off) ───────────
 async function provisionWindows(vmId: string): Promise<void> {
   const vm = getVm(vmId)!;
+  const spec = getOsImage(vm.imageId);
+  const label = spec?.label ?? "Windows";
+
+  // 1. Honor a user-supplied ISO (USB frontload / VM settings) if present.
+  let isoPath = vm.config.isoPath && fs.existsSync(vm.config.isoPath) ? vm.config.isoPath : null;
+
+  // 2. Otherwise resolve + download the official ISO straight from Microsoft so
+  //    the user never needs a second machine. This endpoint is a moving target
+  //    and Microsoft blocks some networks, so failure is expected and falls back
+  //    to the frontload path rather than bricking the VM.
+  if (!isoPath && spec?.resolver === "windows-msdl" && spec.productEditionId && spec.isoFilename) {
+    const cachedIso = path.join(CACHE_DIR, spec.isoFilename);
+    if (fs.existsSync(cachedIso)) {
+      isoPath = cachedIso;
+      emit(vmId, { status: "downloading", progress: 100, error: null, message: `Using cached ${label} ISO.` });
+    } else {
+      try {
+        emit(vmId, { status: "downloading", progress: 0, error: null, message: `Locating the latest ${label} ISO from Microsoft…`, imageUrl: null });
+        const url = await resolveWindowsIso(spec.productEditionId);
+        await download(url, cachedIso, (pct) => emit(vmId, { status: "downloading", progress: pct, message: `Downloading ${label} from Microsoft… ${pct}%` }));
+        isoPath = cachedIso;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn({ err, vm: vmId }, "Windows auto-download failed; falling back to frontload");
+        emit(vmId, {
+          status: "failed",
+          progress: 0,
+          error: msg,
+          message: `Automatic ${label} download is unavailable right now (${msg}). Copy a Windows ISO via File Explorer → USB Frontload → ISOs, set it in this VM's settings, then retry provisioning.`,
+        });
+        return;
+      }
+    }
+  }
+
+  // 3. Best-effort: fetch the stable virtio-win drivers so storage/network work
+  //    in the guest. A failure here is non-fatal — Windows can still install.
+  let virtioPath: string | null = vm.config.virtioIsoPath && fs.existsSync(vm.config.virtioIsoPath) ? vm.config.virtioIsoPath : null;
+  if (!virtioPath) {
+    const virtioCached = path.join(CACHE_DIR, "virtio-win.iso");
+    if (fs.existsSync(virtioCached)) {
+      virtioPath = virtioCached;
+    } else {
+      try {
+        emit(vmId, { status: "downloading", progress: 0, message: "Downloading virtio drivers…" });
+        await download(VIRTIO_WIN_URL, virtioCached, (pct) => emit(vmId, { status: "downloading", progress: pct, message: `Downloading virtio drivers… ${pct}%` }));
+        virtioPath = virtioCached;
+      } catch (err) {
+        logger.warn({ err, vm: vmId }, "virtio-win download failed (continuing without it)");
+      }
+    }
+  }
+
+  // 4. Create the disk + unattended answer file (auto-enables SSH + RDP).
   emit(vmId, { status: "creating-disk", progress: 0, message: "Creating Windows VM disk…" });
   const diskPath = path.join(vmDiskDir(vmId), "disk.qcow2");
   if (!fs.existsSync(diskPath)) {
     await runQemuImg(["create", "-f", "qcow2", diskPath, `${vm.diskGb}G`]);
   }
+  emit(vmId, { status: "installing", progress: 40, message: "Packaging unattended answer file (auto-SSH + RDP)…" });
+  const unattendIsoPath = await buildUnattendIso(vmId);
 
-  // Generate an unattended answer file that auto-enables SSH and RDP.
-  emit(vmId, { status: "installing", progress: 40, message: "Generating unattended answer file (auto-SSH + RDP)…" });
-  const answerPath = path.join(vmDiskDir(vmId), "autounattend.xml");
-  fs.writeFileSync(answerPath, buildAutoUnattend());
+  updateVmConfig(vmId, { diskPath, isoPath, virtioIsoPath: virtioPath, unattendIsoPath, connectionMode: "ssh" });
 
-  updateVmConfig(vmId, { diskPath, connectionMode: "ssh" });
-
-  if (vm.config.isoPath && fs.existsSync(vm.config.isoPath)) {
-    emit(vmId, { status: "ready", progress: 100, error: null, message: "Windows disk + unattend ready. Boot from the supplied ISO to run the unattended install (virtio drivers + SSH/RDP)." });
+  if (isoPath) {
+    emit(vmId, {
+      status: "ready",
+      progress: 100,
+      error: null,
+      message: `${label} is ready. Start the VM to boot the installer; OpenSSH + RDP turn on automatically after setup and the virtio driver CD is attached. Enter your own Windows license key to activate.`,
+    });
   } else {
     emit(vmId, {
       status: "ready",
       progress: 100,
       error: null,
-      message: "Windows disk + unattended answer file generated. Windows ISOs are not freely redistributable — set the Windows ISO path in this VM's settings, then start the VM to run the hands-off install.",
+      message: "Windows disk + unattended answer file generated. Add a Windows ISO via File Explorer → USB Frontload → ISOs (or this VM's settings), then start the VM.",
     });
   }
 }
@@ -256,20 +306,6 @@ function download(url: string, dest: string, onProgress: (pct: number) => void):
   });
 }
 
-function verifySha256(file: string, expected: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const hash = crypto.createHash("sha256");
-    const stream = fs.createReadStream(file);
-    stream.on("data", (d) => hash.update(d));
-    stream.on("end", () => {
-      const actual = hash.digest("hex");
-      if (actual.toLowerCase() === expected.toLowerCase()) resolve();
-      else reject(new Error(`checksum mismatch (expected ${expected}, got ${actual})`));
-    });
-    stream.on("error", reject);
-  });
-}
-
 function runQemuImg(args: string[]): Promise<void> {
   return runTool("qemu-img", args);
 }
@@ -293,6 +329,30 @@ function runTool(cmd: string, args: string[]): Promise<void> {
       else reject(new Error(stderr.trim() || `${cmd} exited ${code}`));
     });
   });
+}
+
+// Package the autounattend.xml into a small ISO. Windows Setup scans attached
+// optical/removable media for an autounattend.xml at the root, so the answer
+// file must live on a CD — a loose file in the VM directory is never read.
+// Returns null when no ISO-authoring tool is available (the install still
+// works, it just won't be unattended).
+async function buildUnattendIso(vmId: string): Promise<string | null> {
+  const stage = path.join(vmDiskDir(vmId), "unattend-cd");
+  fs.mkdirSync(stage, { recursive: true });
+  fs.writeFileSync(path.join(stage, "autounattend.xml"), buildAutoUnattend());
+  const isoOut = path.join(vmDiskDir(vmId), "unattend.iso");
+  for (const tool of ["genisoimage", "mkisofs", "xorriso"]) {
+    if (await binaryExists(tool)) {
+      const args =
+        tool === "xorriso"
+          ? ["-as", "mkisofs", "-output", isoOut, "-volid", "UNATTEND", "-joliet", "-rock", stage]
+          : ["-output", isoOut, "-volid", "UNATTEND", "-joliet", "-rock", stage];
+      await runTool(tool, args);
+      return isoOut;
+    }
+  }
+  logger.warn({ vm: vmId }, "no ISO authoring tool available — Windows install will not be unattended");
+  return null;
 }
 
 // Minimal Windows autounattend.xml that enables OpenSSH Server and RDP after
