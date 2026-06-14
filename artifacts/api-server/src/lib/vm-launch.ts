@@ -49,6 +49,17 @@ export function buildQemuArgs(vm: VmRecord, accel: AcceleratorInfo): string[] {
   args.push("-vnc", `127.0.0.1:${disp},websocket=127.0.0.1:${vm.ports.vncWs}`);
   args.push("-device", "virtio-vga");
 
+  // Absolute pointing device for agent computer-use (screenshot → click at exact
+  // pixel coordinates). The default PS/2 mouse is RELATIVE and cannot be
+  // positioned deterministically from a screenshot; a USB tablet reports
+  // ABSOLUTE coordinates, which is what QMP `input-send-event` abs axes need.
+  // qemu-xhci is the modern USB controller (q35 has no USB by default) and
+  // usb-tablet binds to it. Both Linux and Windows drive usb-tablet with in-box
+  // HID drivers, and it is independent of the VNC display, so the live noVNC
+  // view and a human using it are unaffected.
+  args.push("-device", "qemu-xhci,id=xhci");
+  args.push("-device", "usb-tablet,bus=xhci.0");
+
   // QMP monitor on a localhost TCP socket for lifecycle/snapshot control, plus a
   // stdio human monitor for savevm/loadvm/delvm (snapshot commands).
   args.push("-qmp", `tcp:127.0.0.1:${vm.ports.monitor},server,nowait`);

@@ -563,7 +563,7 @@ async def _execute_tool_block_impl(
         do_manage_contact,
         do_vault_search, do_vault_get, do_vault_unlock,
         do_app_api,
-        do_list_vms, do_select_vm, do_vm_tool,
+        do_list_vms, do_select_vm, do_vm_tool, do_vm_computer,
     )
 
     tool = block.tool_type
@@ -861,6 +861,22 @@ async def _execute_tool_block_impl(
     elif tool == "select_vm":
         desc = "select_vm"
         result = await do_select_vm(content, owner=owner)
+    elif tool == "vm_computer":
+        # See/control the SELECTED VM's desktop (screenshot + mouse/keyboard).
+        # Targets the same process-global selection as the shell/file tools, so
+        # the agent operates one machine coherently. Honest error if none chosen.
+        from src.vm_target import get_selected_vm
+
+        _vm = get_selected_vm()
+        if not _vm:
+            desc = "vm_computer: no VM selected"
+            result = {
+                "error": "No VM selected. Call select_vm <id> first to choose which VM to control.",
+                "exit_code": 1,
+            }
+        else:
+            result = await do_vm_computer(_vm, content, owner=owner)
+            desc = f"vm_computer @ {_vm}: {result.get('output', result.get('error', ''))[:80]}"
     elif tool == "edit_image":
         desc = "edit_image"
         result = await do_edit_image(content, owner=owner)
@@ -919,6 +935,10 @@ _FORMATTER_HANDLED_KEYS = {
     "response", "results", "session_id", "name", "model", "session_name",
     "success", "path", "action", "title", "doc_id", "version", "applied",
     "error", "output",
+    # vm_computer screenshots: the base64 image rides in `images` and is fed to
+    # the vision model by the agent loop, NOT echoed as text. Listing it here
+    # keeps the formatter from dumping a multi-MB data URI into the transcript.
+    "images",
 }
 
 

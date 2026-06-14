@@ -335,25 +335,56 @@ def _ollama_normalize_tool_messages(messages: List[Dict]) -> List[Dict]:
     """
     out: List[Dict] = []
     for m in messages or []:
-        tcs = m.get("tool_calls") if isinstance(m, dict) else None
-        if not tcs:
+        if not isinstance(m, dict):
             out.append(m)
             continue
-        new_calls = []
-        for tc in tcs:
-            fn = tc.get("function") or {}
-            args = fn.get("arguments")
-            if isinstance(args, str):
-                try:
-                    args = json.loads(args) if args.strip() else {}
-                except (json.JSONDecodeError, TypeError):
-                    args = {}
-            call: Dict = {"function": {"name": fn.get("name", ""), "arguments": args or {}}}
-            if tc.get("id"):
-                call["id"] = tc["id"]
-            new_calls.append(call)
-        nm = dict(m)
-        nm["tool_calls"] = new_calls
+        nm = m
+
+        # Multimodal content: native Ollama wants the text in `content` (a string)
+        # and base64 images in a separate `images` list — NOT OpenAI image_url
+        # blocks. Convert any list content (e.g. a VM screenshot the agent loop
+        # appended) to that shape, dropping the data-URI prefix.
+        content = m.get("content")
+        if isinstance(content, list):
+            text_parts: List[str] = []
+            imgs: List[str] = []
+            for blk in content:
+                if not isinstance(blk, dict):
+                    continue
+                if blk.get("type") == "text":
+                    text_parts.append(str(blk.get("text") or ""))
+                elif blk.get("type") == "image_url":
+                    url = (blk.get("image_url") or {}).get("url", "")
+                    if "base64," in url:
+                        imgs.append(url.split("base64,", 1)[1])
+                    elif url:
+                        imgs.append(url)
+            nm = dict(nm)
+            nm["content"] = "\n".join(text_parts)
+            if imgs:
+                nm["images"] = imgs
+
+        # Tool-call arguments: OpenAI carries them as a JSON *string*; native
+        # Ollama needs a JSON *object* or the whole request 400s.
+        tcs = nm.get("tool_calls")
+        if tcs:
+            new_calls = []
+            for tc in tcs:
+                fn = tc.get("function") or {}
+                args = fn.get("arguments")
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args) if args.strip() else {}
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                call: Dict = {"function": {"name": fn.get("name", ""), "arguments": args or {}}}
+                if tc.get("id"):
+                    call["id"] = tc["id"]
+                new_calls.append(call)
+            if nm is m:  # don't mutate the caller's dict
+                nm = dict(m)
+            nm["tool_calls"] = new_calls
+
         out.append(nm)
     return out
 
@@ -805,6 +836,19 @@ def _build_anthropic_payload(model, messages, temperature, max_tokens, stream=Fa
             # Convert multimodal content (image_url → image) for Anthropic
             content = _convert_openai_content_to_anthropic(m["content"])
             chat_messages.append({"role": m["role"], "content": content})
+
+    # Coalesce consecutive same-role turns. The tool→user(tool_result) conversion
+    # above emits one user message per tool result, and the agent loop appends a
+    # trailing user message carrying a VM screenshot; Anthropic wants a single
+    # user turn in those spots, so merge adjacent same-role messages, with all
+    # their content blocks concatenated into one block list.
+    merged: List[Dict] = []
+    for cm in chat_messages:
+        if merged and merged[-1]["role"] == cm["role"]:
+            merged[-1]["content"].extend(_as_content_blocks(cm["content"]))
+        else:
+            merged.append({"role": cm["role"], "content": list(_as_content_blocks(cm["content"]))})
+    chat_messages = merged
     # Anthropic only accepts temperature in [0.0, 1.0] and 400s on anything above
     # 1.0. Clamp here (in the Anthropic builder only) so presets/sliders that use
     # the wider OpenAI 0.0-2.0 range — e.g. the shipped "Nietzsche" preset at 1.2

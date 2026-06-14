@@ -174,6 +174,43 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "vm_computer",
+            "description": (
+                "See and control the desktop of the currently selected VM (call select_vm first). "
+                "Use action='screenshot' to capture the screen — it is returned to you as an image. "
+                "ALWAYS screenshot before clicking/typing so you know the current layout and exact pixel "
+                "positions. Then act: move, click, double_click, right_click, middle_click, mouse_down, "
+                "mouse_up, drag, scroll, type (text), or key (a key/chord like ctrl+c). x,y are pixel "
+                "coordinates in the most recent screenshot, origin at the top-left. After an input action, "
+                "screenshot again to observe the result."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["screenshot", "move", "click", "double_click", "right_click",
+                                 "middle_click", "mouse_down", "mouse_up", "drag", "scroll", "type", "key"],
+                        "description": "What to do. 'screenshot' returns an image; the rest are mouse/keyboard input."
+                    },
+                    "x": {"type": "integer", "description": "Target X pixel (move/click/drag start/scroll position)."},
+                    "y": {"type": "integer", "description": "Target Y pixel (move/click/drag start/scroll position)."},
+                    "x2": {"type": "integer", "description": "Drag END X pixel (action=drag)."},
+                    "y2": {"type": "integer", "description": "Drag END Y pixel (action=drag)."},
+                    "button": {"type": "string", "enum": ["left", "right", "middle"], "description": "Mouse button (default left)."},
+                    "text": {"type": "string", "description": "Text to type (action=type)."},
+                    "keys": {"type": "array", "items": {"type": "string"}, "description": "Key chord to press together, e.g. ['ctrl','c'] or ['alt','Tab'] (action=key)."},
+                    "key": {"type": "string", "description": "A single key to press, e.g. 'Return', 'Escape', 'Tab' (action=key)."},
+                    "amount": {"type": "integer", "description": "Scroll amount in wheel clicks (action=scroll, default 3)."},
+                    "direction": {"type": "string", "enum": ["up", "down"], "description": "Scroll direction (action=scroll, default down)."}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_file",
             "description": "Write/save a file to disk",
             "parameters": {
@@ -1282,6 +1319,8 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
         content = ""
     elif tool_type == "select_vm":
         content = json.dumps({"vm": args.get("vm") or args.get("target") or args.get("id") or ""})
+    elif tool_type == "vm_computer":
+        content = json.dumps(args) if args else "{}"
     elif tool_type == "write_file":
         content = args.get("path", "") + "\n" + args.get("content", "")
     elif tool_type == "edit_file":

@@ -46,6 +46,8 @@ ALWAYS_AVAILABLE = frozenset({
     # discover the registered VMs and pick which one its shell + file tools run on.
     "list_vms",
     "select_vm",
+    # See + control the selected VM's desktop (screenshot + mouse/keyboard).
+    "vm_computer",
 })
 
 # Tools that the Personal Assistant always has access to during scheduled
@@ -140,6 +142,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "trigger_research": "Start a deep research job on any topic — appears in the Deep Research sidebar, streams progress, produces a detailed report. Use for 'research X', 'look into Y', 'do deep research on Z', 'investigate'. NOT a scheduled task — it runs now and surfaces in the sidebar.",
     "list_vms": "List the registered virtual machines (id, name, OS, running state, SSH port). Use to see which VMs exist and which is running before targeting one with select_vm.",
     "select_vm": "Choose which machine your shell + file tools operate on. Pass a VM id (or name) to run bash/python/read_file/write_file/edit_file/ls/glob/grep ON THAT VM (over SSH); pass 'host' (or clear) to go back to the local host. Call list_vms first to see ids. The VM must be running for commands to succeed.",
+    "vm_computer": "See and control the selected VM's graphical desktop. action='screenshot' returns the screen as an image; then move/click/double_click/right_click/drag/scroll the mouse or type/key the keyboard at pixel coordinates from that screenshot. Use for GUI work the shell can't do (clicking buttons, installers, browsers, games). Select the VM with select_vm first.",
 }
 
 
@@ -350,6 +353,11 @@ class ToolIndex:
                    "windows vm", "linux vm", "mac vm", "macos vm", "qemu",
                    "select vm", "switch vm", "target vm", "on the vm", "inside the vm"}):
             {"list_vms", "select_vm"},
+        # GUI/desktop control of the VM: screenshot + mouse/keyboard.
+        frozenset({"screenshot", "screen shot", "click", "double click", "mouse",
+                   "keyboard", "type", "desktop", "gui", "see the screen",
+                   "control the vm", "computer use", "drag", "scroll"}):
+            {"vm_computer", "select_vm"},
         # NOTE: "tell" was removed from this set. It fired on any "tell me ..."
         # request (e.g. "visit <url> and tell me the title"), force-including the
         # whole email toolset and crowding out the relevant tools — the model then

@@ -2080,6 +2080,155 @@ async def do_select_vm(content: str = "", owner: Optional[str] = None) -> Dict[s
     }
 
 
+# ---------------------------------------------------------------------------
+# VM computer-use — SEE the desktop (screenshot) and CONTROL it (mouse/keyboard)
+# ---------------------------------------------------------------------------
+# The vm_computer tool gives the agent a perception + input layer for the
+# selected VM, alongside the shell/file tools. It is a thin bridge: the
+# api-server owns the QEMU machinery (QMP screendump for pixels, an absolute
+# usb-tablet + input-send-event for mouse/keyboard) and exposes it as
+# /api/vm/:id/screenshot and /api/vm/:id/input. We forward the agent's action
+# there and, for screenshots, hand the image back so the agent loop can show it
+# to the vision model. The live noVNC display is untouched (separate VNC socket),
+# so a human can watch the agent operate the machine in real time.
+#
+# Coordinates are pixels in the most recent screenshot (origin top-left). We
+# remember the last screenshot's dimensions per VM so input coordinates scale
+# against exactly what the model saw; if none is known yet, the api-server
+# discovers the size with a one-off screendump.
+
+_last_screen: Dict[str, Any] = {}
+
+
+async def _vm_screenshot(vm_id: str, owner: Optional[str] = None) -> Dict[str, Any]:
+    """Capture the VM desktop via the api-server. Returns the bridge JSON
+    ({"image","mimeType","width","height"}) or an {"error"} dict."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            r = await client.post(
+                f"{_SHELL_EXEC_BASE}/api/vm/{vm_id}/screenshot",
+                headers=_internal_headers(owner),
+            )
+        if r.status_code >= 400:
+            return {"error": f"screenshot HTTP {r.status_code}: {r.text[:300]}"}
+        data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        return data if isinstance(data, dict) else {}
+    except Exception as e:  # noqa: BLE001 - surface transport errors honestly
+        return {"error": f"VM screenshot failed: {e}"}
+
+
+async def _vm_input(
+    vm_id: str,
+    actions: list,
+    owner: Optional[str] = None,
+    screen: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Inject mouse/keyboard actions on the VM via the api-server input bridge."""
+    import httpx
+
+    payload: Dict[str, Any] = {"actions": actions}
+    if screen and isinstance(screen, (tuple, list)) and len(screen) == 2 and screen[0] and screen[1]:
+        payload["screenW"], payload["screenH"] = int(screen[0]), int(screen[1])
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            r = await client.post(
+                f"{_SHELL_EXEC_BASE}/api/vm/{vm_id}/input",
+                json=payload,
+                headers=_internal_headers(owner),
+            )
+        if r.status_code >= 400:
+            return {"error": f"input HTTP {r.status_code}: {r.text[:300]}"}
+        data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        return data if isinstance(data, dict) else {}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"VM input failed: {e}"}
+
+
+def _describe_vm_action(action: str, args: Dict[str, Any]) -> str:
+    """Short human/LLM-readable summary of an input action."""
+    a = action.replace("_", " ")
+    if action in ("move", "click", "double_click", "right_click", "middle_click", "mouse_down", "mouse_up"):
+        if args.get("x") is not None and args.get("y") is not None:
+            return f"{a} at ({args.get('x')}, {args.get('y')})"
+        return a
+    if action == "drag":
+        return f"drag from ({args.get('x')}, {args.get('y')}) to ({args.get('x2')}, {args.get('y2')})"
+    if action == "scroll":
+        return f"scroll {args.get('direction', 'down')} x{args.get('amount', 3)}"
+    if action == "type":
+        txt = str(args.get("text", ""))
+        preview = txt if len(txt) <= 40 else txt[:40] + "…"
+        return f"type {preview!r}"
+    if action == "key":
+        keys = args.get("keys") or ([args.get("key")] if args.get("key") else [])
+        return f"key {'+'.join(str(k) for k in keys)}"
+    return a
+
+
+async def do_vm_computer(vm_id: str, content: str, owner: Optional[str] = None) -> Dict[str, Any]:
+    """See and control the selected VM's desktop.
+
+    Parses the action payload (JSON with an ``action`` plus parameters). For
+    ``screenshot`` it returns ``{"images":[{"data","mimeType"}], "output"}`` so
+    the agent loop can feed the picture to the vision model; for input actions it
+    forwards to the api-server and returns a one-line confirmation.
+    """
+    raw = (content or "").strip()
+    try:
+        args = json.loads(raw) if raw else {}
+    except (ValueError, TypeError):
+        args = {}
+    if not isinstance(args, dict):
+        args = {}
+
+    action = str(args.get("action") or "").strip().lower()
+    if not action:
+        return {
+            "error": "vm_computer requires an 'action' (screenshot, move, click, double_click, "
+                     "right_click, middle_click, mouse_down, mouse_up, drag, scroll, type, key).",
+            "exit_code": 1,
+        }
+
+    if action == "screenshot":
+        res = await _vm_screenshot(vm_id, owner=owner)
+        if res.get("error"):
+            return {"error": res["error"], "exit_code": 1}
+        img = res.get("image")
+        if not img:
+            return {"error": "Screenshot returned no image data.", "exit_code": 1}
+        w, h = int(res.get("width") or 0), int(res.get("height") or 0)
+        if w and h:
+            _last_screen[vm_id] = (w, h)
+        return {
+            "images": [{"data": img, "mimeType": res.get("mimeType") or "image/png"}],
+            "output": (
+                f"Screenshot of VM '{vm_id}' captured ({w}x{h} px). Click/move coordinates are "
+                "pixels in this image, with the origin at the top-left corner."
+            ),
+            "exit_code": 0,
+        }
+
+    # Any other action is mouse/keyboard input forwarded to the input endpoint.
+    act: Dict[str, Any] = {"type": action}
+    for k in ("x", "y", "x2", "y2", "button", "text", "key", "keys", "amount", "direction"):
+        if args.get(k) is not None:
+            act[k] = args[k]
+
+    res = await _vm_input(vm_id, [act], owner=owner, screen=_last_screen.get(vm_id))
+    if res.get("error"):
+        return {"error": res["error"], "exit_code": 1}
+    # Remember the display size the bridge used so later coords stay consistent.
+    sw, sh = int(res.get("screenW") or 0), int(res.get("screenH") or 0)
+    if sw and sh:
+        _last_screen[vm_id] = (sw, sh)
+    return {
+        "output": f"{_describe_vm_action(action, args)} on VM '{vm_id}'. Take a screenshot to see the result.",
+        "exit_code": 0,
+    }
+
+
 async def do_vm_tool(
     vm_id: str, tool: str, content: str, owner: Optional[str] = None
 ) -> Dict[str, Any]:

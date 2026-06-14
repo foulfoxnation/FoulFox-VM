@@ -1,5 +1,9 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { spawn } from "child_process";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import crypto from "crypto";
 import {
   GetVmStatusResponse,
   GetVmConfigResponse,
@@ -21,6 +25,8 @@ import {
   type VmRecord,
 } from "../lib/vm-registry";
 import { startVm, stopVm, writeMonitor } from "../lib/vm-launch";
+import { qmpScreendump, qmpInputSendEvent } from "../lib/vm-qmp";
+import { actionToEventBatches, actionNeedsCoords, type InputAction } from "../lib/vm-input";
 import {
   detectHostCapabilities,
   isValidVmId,
@@ -169,6 +175,124 @@ router.get("/vm/:id/agent-health", async (req: Request, res: Response) => {
   const vm = requireVm(req, res); if (!vm) return;
   const health = await checkAgentHealth(vm);
   res.json(health);
+});
+
+// ── Computer-use: see (screenshot) + control (input) ──────────────────────────
+// These let an agent perceive and drive the guest desktop directly. They speak
+// QMP over the per-VM monitor TCP port; the live noVNC display is untouched (it
+// uses the separate VNC socket), so a human can watch the agent work.
+
+const PNG_MAGIC = 0x89504e47;
+
+// Parse width/height from a PNG IHDR (bytes 16-23, big-endian). Returns null if
+// the buffer isn't a PNG. Used to tell the agent the resolution its screenshot
+// coordinates live in, and to scale input coordinates back to QEMU's abs range.
+function pngSize(buf: Buffer): { width: number; height: number } | null {
+  if (buf.length < 24 || buf.readUInt32BE(0) !== PNG_MAGIC) return null;
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+}
+
+// Convert an image file (QEMU may emit PPM on older builds) to a PNG buffer via
+// ImageMagick. Tries `magick` (v7) then falls back to `convert` (v6).
+function convertToPng(inputPath: string): Promise<Buffer> {
+  const run = (bin: string): Promise<Buffer> =>
+    new Promise((resolve, reject) => {
+      const out: Buffer[] = [];
+      const err: Buffer[] = [];
+      const child = spawn(bin, [inputPath, "png:-"]);
+      child.stdout.on("data", (d: Buffer) => out.push(d));
+      child.stderr.on("data", (d: Buffer) => err.push(d));
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code === 0) resolve(Buffer.concat(out));
+        else reject(new Error(`${bin} exited ${code}: ${Buffer.concat(err).toString().slice(0, 500)}`));
+      });
+    });
+  return run("magick").catch(() => run("convert"));
+}
+
+// Screendump to a temp host file, read it, ensure PNG, and return base64 + size.
+async function captureScreenshot(monitorPort: number): Promise<{ image: string; mimeType: string; width: number; height: number }> {
+  const tmp = path.join(os.tmpdir(), `vm-shot-${crypto.randomBytes(8).toString("hex")}.img`);
+  try {
+    const dump = await qmpScreendump(monitorPort, tmp);
+    if (!dump.ok) throw new Error(dump.error || "screendump failed");
+    const raw = await fs.promises.readFile(tmp);
+    const pngBuf = pngSize(raw) ? raw : await convertToPng(tmp);
+    const size = pngSize(pngBuf) ?? { width: 0, height: 0 };
+    return { image: pngBuf.toString("base64"), mimeType: "image/png", width: size.width, height: size.height };
+  } finally {
+    fs.promises.unlink(tmp).catch(() => { /* best-effort cleanup */ });
+  }
+}
+
+// POST /vm/:id/screenshot — capture the guest desktop as a PNG (base64).
+router.post("/vm/:id/screenshot", async (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  if (getRuntime(vm.id).state !== "running") {
+    res.status(409).json({ error: `VM '${vm.name}' is not running` });
+    return;
+  }
+  try {
+    const shot = await captureScreenshot(vm.ports.monitor);
+    res.json(shot);
+  } catch (e) {
+    logger.warn({ err: e, vm: vm.id }, "Screenshot failed");
+    res.status(502).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+// POST /vm/:id/input — inject mouse/keyboard. Body is a single action object or
+// { actions: [...] }. Coordinate-based actions scale against the display size,
+// taken from `screenW`/`screenH` if provided (the size from the last screenshot)
+// or discovered with a one-off screendump otherwise.
+router.post("/vm/:id/input", async (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  if (getRuntime(vm.id).state !== "running") {
+    res.status(409).json({ error: `VM '${vm.name}' is not running` });
+    return;
+  }
+  const body = (req.body ?? {}) as { actions?: InputAction[]; type?: string; screenW?: number; screenH?: number };
+  const actions: InputAction[] = Array.isArray(body.actions)
+    ? body.actions
+    : body.type
+    ? [body as InputAction]
+    : [];
+  if (actions.length === 0) {
+    res.status(400).json({ error: "No actions provided" });
+    return;
+  }
+
+  let screenW = Number(body.screenW) > 0 ? Number(body.screenW) : 0;
+  let screenH = Number(body.screenH) > 0 ? Number(body.screenH) : 0;
+  if ((!screenW || !screenH) && actions.some(actionNeedsCoords)) {
+    try {
+      const shot = await captureScreenshot(vm.ports.monitor);
+      screenW = shot.width;
+      screenH = shot.height;
+    } catch (e) {
+      res.status(502).json({ error: `Could not determine display size: ${e instanceof Error ? e.message : String(e)}` });
+      return;
+    }
+  }
+
+  // Translate first (so a bad action 400s before we inject anything partial).
+  let batches: unknown[][];
+  try {
+    batches = actions.flatMap((a) => actionToEventBatches(a, screenW, screenH));
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    return;
+  }
+
+  for (const events of batches) {
+    const r = await qmpInputSendEvent(vm.ports.monitor, events);
+    if (!r.ok) {
+      res.status(502).json({ error: r.error || "input-send-event failed" });
+      return;
+    }
+  }
+  res.json({ success: true, actions: actions.length, screenW, screenH });
 });
 
 // POST /vm/:id/start

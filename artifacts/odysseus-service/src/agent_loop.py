@@ -1403,6 +1403,57 @@ def _resolve_tool_blocks(round_response: str, native_tool_calls: list, round_num
     return tool_blocks, used_native
 
 
+# Private marker on the trailing user message that carries a VM screenshot.
+# Stripped by llm_core._sanitize_llm_messages before any provider request (it is
+# not in that function's allow-list), so it only lives on the in-memory history
+# and lets us find + bound stale screenshots across rounds.
+_VM_SCREENSHOT_KEY = "_vm_screenshot"
+
+
+def _append_vm_screenshots(messages: List[Dict], images: Optional[list]) -> None:
+    """Feed this round's VM screenshot(s) back to the vision model.
+
+    ``images`` is a list of ``{"data": <b64>, "mimeType": ...}`` produced by a
+    vm_computer screenshot (any tool result carrying ``images`` is accepted). We
+    append a trailing ``user`` message whose content is OpenAI-style multimodal
+    blocks (text + ``image_url`` data URIs); llm_core already converts those to
+    Anthropic image blocks / Ollama ``images`` on the way out, so every provider
+    sees the picture.
+
+    To bound context we keep only the newest screenshot: image blocks from any
+    earlier screenshot turn are replaced with a short text breadcrumb before the
+    new one is appended (mirroring how reasoning_content is trimmed to the latest
+    turn). The model can always take another screenshot to see the screen again.
+    """
+    if not images:
+        return
+    blocks: List[Dict] = []
+    for img in images:
+        data = (img or {}).get("data") if isinstance(img, dict) else None
+        if not data:
+            continue
+        mime = (img or {}).get("mimeType") or "image/png"
+        blocks.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}})
+    if not blocks:
+        return
+    for _m in messages:
+        if _m.get(_VM_SCREENSHOT_KEY):
+            _m["content"] = (
+                "(An earlier VM screenshot was shown here; it was dropped to save context. "
+                "Take another screenshot if you need to see the screen again.)"
+            )
+            _m.pop(_VM_SCREENSHOT_KEY, None)
+    content: List[Dict] = [{
+        "type": "text",
+        "text": (
+            "Current VM screen (the result of the actions above). Click/move coordinates "
+            "are pixels in this image, with the origin at the top-left corner:"
+        ),
+    }]
+    content.extend(blocks)
+    messages.append({"role": "user", "content": content, _VM_SCREENSHOT_KEY: True})
+
+
 def _append_tool_results(
     messages: List[Dict],
     round_response: str,
@@ -1412,6 +1463,7 @@ def _append_tool_results(
     used_native: bool,
     round_num: int,
     round_reasoning: str = "",
+    images: Optional[list] = None,
 ):
     """Append tool execution results back into the message history for the next LLM round.
 
@@ -1477,6 +1529,10 @@ def _append_tool_results(
         messages.append(
             {"role": "user", "content": f"[Tool execution results]\n\n{tool_output_text}"}
         )
+
+    # VM computer-use: surface this round's screenshot(s) to the vision model
+    # (after the text results, regardless of native vs textual tool channel).
+    _append_vm_screenshots(messages, images)
 
 
 def _compute_final_metrics(
@@ -2613,6 +2669,7 @@ async def stream_agent_loop(
         # Execute each tool block
         tool_results = []
         tool_result_texts = []  # plain text for native tool role messages
+        round_images = []       # base64 screenshots (vm_computer) to show the model
         budget_hit = False
         for i, block in enumerate(tool_blocks):
             # --- Tool budget check ---
@@ -2878,6 +2935,13 @@ async def stream_agent_loop(
             formatted = format_tool_result(desc, result)
             tool_results.append(formatted)
             tool_result_texts.append(formatted)
+            # Collect any screenshot(s) this tool returned so the next round can
+            # show them to the vision model (vm_computer screenshots; also any
+            # other tool that returns base64 images).
+            if result.get("images"):
+                for _img in result["images"]:
+                    if isinstance(_img, dict) and _img.get("data"):
+                        round_images.append(_img)
 
         # If budget was hit, stop the loop
         if budget_hit:
@@ -2893,7 +2957,7 @@ async def stream_agent_loop(
         # Feed results back to LLM for next round
         _append_tool_results(messages, round_response, native_tool_calls,
                              tool_results, tool_result_texts, used_native, round_num,
-                             round_reasoning=round_reasoning)
+                             round_reasoning=round_reasoning, images=round_images)
 
         # Emit agent_step event
         yield (
