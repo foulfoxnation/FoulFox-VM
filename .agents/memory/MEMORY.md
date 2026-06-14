@@ -1,6 +1,7 @@
 - [Python deps install in this repl](python-deps-install.md) — pip/`installLanguagePackages`/`uv add` fail (immutable Nix store); use `uv pip install --target .pythonlibs/...`.
 - [Odysseus embedding](odysseus-embedding.md) — bundled Odysseus FastAPI app (artifacts/odysseus-service) embedded via api-server proxy; uses local SQLite, root-absolute URLs rewritten in proxy.
 - [Vite keep-awake](vite-keep-awake.md) — Replit Vite preview white-pages on long/idle sessions (HMR WS dies under throttling); fix = worker heartbeat + wake lock, no reload.
+- [FoulFox rebrand load-bearing](foulfox-rebrand-load-bearing.md) — rename brand in frontends only; DON'T rename email reminder subject/TOTP issuer/MCP client_name (matched by external systems/existing data).
 - [GitHub push from subrepl](github-push-subrepl.md) — no Connect-to-GitHub UI; push via direct-URL `git push` + token-from-env credential helper (remote add/config writes are sandbox-blocked).
 - [FoulFox VM launch path](foulfox-vm-launch.md) — only vm-launch.ts buildQemuArgs is live (qemu-args.ts is dead); Windows guests need AHCI disk + e1000e NIC + CD-delivered unattend; appliance needs xorriso.
 - [FoulFox OS appliance](foulfox-os-appliance.md) — os/ live-build recipe; keep headless QEMU argv byte-identical, VM config fields optional+merged, shell static-serving gated on SERVE_SHELL_STATIC (off in dev).
