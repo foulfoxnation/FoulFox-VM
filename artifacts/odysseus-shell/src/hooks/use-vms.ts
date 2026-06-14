@@ -4,6 +4,7 @@ import {
   listVms,
   fetchCapabilities,
   fetchOsImages,
+  fetchOsRelease,
   createVm,
   vmLifecycle,
   deleteVm,
@@ -13,11 +14,13 @@ import {
   type VmSummary,
   type VmCapabilities,
   type OsImage,
+  type OsReleaseInfo,
 } from "@/lib/vm-api";
 
 export const VM_LIST_KEY = ["vm-list"];
 export const VM_CAPS_KEY = ["vm-capabilities"];
 export const VM_OS_IMAGES_KEY = ["vm-os-images"];
+export const OS_RELEASE_KEY = ["os-release"];
 
 export function useVmList() {
   return useQuery<VmSummary[]>({
@@ -40,6 +43,14 @@ export function useOsImages(enabled = true) {
     queryKey: VM_OS_IMAGES_KEY,
     queryFn: fetchOsImages,
     enabled,
+  });
+}
+
+export function useOsRelease() {
+  return useQuery<OsReleaseInfo>({
+    queryKey: OS_RELEASE_KEY,
+    queryFn: fetchOsRelease,
+    refetchInterval: 60_000,
   });
 }
 

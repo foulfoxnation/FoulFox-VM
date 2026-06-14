@@ -125,6 +125,24 @@ export async function fetchOsImages(): Promise<OsImage[]> {
   return (j.images ?? []) as OsImage[];
 }
 
+// Where the bootable FoulFox OS appliance .iso can be downloaded from. Populated
+// from the api-server's env (explicit URL or a GitHub repo's rolling release).
+// When unavailable, the Download tab shows one-time setup steps instead.
+export interface OsReleaseInfo {
+  available: boolean;
+  isoUrl: string | null;
+  sha256Url: string | null;
+  repo: string | null;
+  source: "explicit" | "github" | null;
+  version: string | null;
+}
+
+export async function fetchOsRelease(): Promise<OsReleaseInfo> {
+  const res = await fetch(apiUrl("/api/os/release-info"));
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export interface CreateVmInput {
   name: string;
   osKind: OsKind;

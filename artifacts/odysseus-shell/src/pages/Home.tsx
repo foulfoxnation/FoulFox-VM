@@ -9,6 +9,7 @@ import { ShellHistoryPanel } from "@/components/ShellHistoryPanel";
 import { FileExplorer } from "@/components/FileExplorer";
 import { VmTab } from "@/components/VmTab";
 import { OsPicker } from "@/components/OsPicker";
+import { DownloadTab } from "@/components/DownloadTab";
 import foxLogo from "@assets/FoxQuest_Logo_1781378611335.png";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { useShellToken } from "@/hooks/use-shell-token";
@@ -24,6 +25,7 @@ import {
   Plus,
   Monitor,
   Apple,
+  Disc3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -137,6 +139,14 @@ export default function Home() {
               <FolderOpen className="mr-2 h-4 w-4" />
               File Explorer
             </TabsTrigger>
+            <TabsTrigger
+              value="download"
+              className={TAB_TRIGGER}
+              data-testid="tab-download"
+            >
+              <Disc3 className="mr-2 h-4 w-4" />
+              Get FoulFox OS
+            </TabsTrigger>
 
             {vms.map((vm) => {
               const Icon = OS_ICON[vm.osKind] ?? Monitor;
@@ -223,6 +233,9 @@ export default function Home() {
 
         <TabsContent value="files" className={TAB_CONTENT}>
           <FileExplorer />
+        </TabsContent>
+        <TabsContent value="download" className={TAB_CONTENT}>
+          <DownloadTab />
         </TabsContent>
         {vms.map((vm) => (
           <TabsContent key={vm.id} value={`vm:${vm.id}`} className={TAB_CONTENT}>
