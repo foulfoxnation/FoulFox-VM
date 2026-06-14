@@ -1,6 +1,7 @@
 - [Python deps install in this repl](python-deps-install.md) — pip/`installLanguagePackages`/`uv add` fail (immutable Nix store); use `uv pip install --target .pythonlibs/...`.
 - [Odysseus embedding](odysseus-embedding.md) — bundled Odysseus FastAPI app (artifacts/odysseus-service) embedded via api-server proxy; uses local SQLite, root-absolute URLs rewritten in proxy.
 - [Vite keep-awake](vite-keep-awake.md) — Replit Vite preview white-pages on long/idle sessions (HMR WS dies under throttling); fix = worker heartbeat + wake lock, no reload.
+- [Odysseus sub-agents & self-repair](odysseus-subagents.md) — spawn_subagents/self_repair: depth-1 recursion lock, inherit parent agent_ctx, self-repair double-gated + never self-kills uvicorn.
 - [Odysseus service tests](odysseus-service-tests.md) — run pytest from artifacts/odysseus-service with DATABASE_URL=sqlite:///:memory: (workspace Postgres has no psycopg2); needs pytest-asyncio.
 - [Static-testing odysseus tools](odysseus-static-tool-tests.md) — stub sys.modules['core'] + monkeypatch VM bridges to exercise do_* fns without booting the service (no KVM).
 - [api-server typecheck](api-server-typecheck.md) — cold `tsc -p` times out building project refs; build `@workspace/db`+`@workspace/api-zod` with `tsc -b` first.

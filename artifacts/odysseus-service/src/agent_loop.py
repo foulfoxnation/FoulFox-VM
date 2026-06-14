@@ -1790,6 +1790,8 @@ async def stream_agent_loop(
     tool_policy: Optional[ToolPolicy] = None,
     workspace: Optional[str] = None,
     _is_teacher_run: bool = False,
+    subagent_depth: int = 0,
+    parent_role: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
 
@@ -2709,6 +2711,20 @@ async def stream_agent_loop(
                 async def _push_progress(payload):
                     await _progress_q.put(payload)
 
+                # Execution context handed to sub-agent-spawning tools so a
+                # spawned agent inherits this turn's endpoint/model/headers and
+                # the recursion-depth guard can fire (depth>=1 rejects further
+                # spawns). Plain tools ignore it.
+                _agent_ctx = {
+                    "endpoint_url": endpoint_url,
+                    "model": model,
+                    "headers": headers,
+                    "fallbacks": fallbacks,
+                    "depth": subagent_depth,
+                    "owner": owner,
+                    "parent_role": parent_role,
+                }
+
                 async def _run_tool():
                     try:
                         return await execute_tool_block(
@@ -2719,6 +2735,7 @@ async def stream_agent_loop(
                             owner=owner,
                             progress_cb=_push_progress,
                             workspace=workspace,
+                            agent_ctx=_agent_ctx,
                         )
                     finally:
                         # Sentinel so the drainer knows to stop.

@@ -302,6 +302,8 @@ _ADMIN_TOOLS = {
     "serve_preset",
     "stop_served_model",
     "cancel_download",
+    # Self-repair edits FoulFox's own source + can restart a service. Admin only.
+    "self_repair",
 }
 
 
@@ -513,12 +515,19 @@ async def execute_tool_block(
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
     workspace: Optional[str] = None,
     tool_policy: Optional[Any] = None,
+    agent_ctx: Optional[Dict] = None,
 ) -> Tuple[str, Dict]:
     """Execute a single tool block. Returns (description, result_dict).
 
     Thin wrapper: bind the per-turn workspace (so the path resolvers + subprocess
     cwd confine to it) for the duration of this call, then delegate. Reset on the
     way out so the binding never leaks to the next tool call.
+
+    `agent_ctx` carries the parent turn's execution context (endpoint_url, model,
+    headers, fallbacks, depth, owner, parent_role). It is None for ordinary
+    callers and only consumed by sub-agent-spawning tools (spawn_subagents,
+    self_repair) so a spawned agent inherits the parent's model/endpoint and the
+    recursion-depth guard can fire.
     """
     token = _active_workspace.set(workspace or None)
     try:
@@ -529,6 +538,7 @@ async def execute_tool_block(
             owner=owner,
             progress_cb=progress_cb,
             tool_policy=tool_policy,
+            agent_ctx=agent_ctx,
         )
     finally:
         _active_workspace.reset(token)
@@ -541,12 +551,16 @@ async def _execute_tool_block_impl(
     owner: Optional[str] = None,
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
     tool_policy: Optional[Any] = None,
+    agent_ctx: Optional[Dict] = None,
 ) -> Tuple[str, Dict]:
     """Execute a single tool block. Returns (description, result_dict).
 
     `progress_cb` is forwarded to long-running subprocess tools
     (bash, python) so the agent loop can emit `tool_progress` SSE
     events while the command is in flight. Ignored by other tools.
+
+    `agent_ctx` is forwarded to the sub-agent spawning tools so they can inherit
+    the parent's endpoint/model and enforce the recursion-depth limit.
     """
     from src.tool_implementations import (
         do_search_chats, do_manage_tasks,
@@ -913,6 +927,26 @@ async def _execute_tool_block_impl(
     elif tool == "vault_unlock":
         desc = "vault_unlock"
         result = await do_vault_unlock(content, owner=owner)
+    elif tool == "spawn_subagents":
+        # Fan out read-only explorer / worker sub-agents from the current turn.
+        # subagents.py inherits endpoint/model from agent_ctx and enforces the
+        # depth-1 recursion guard. Progress streams via progress_cb.
+        from src.subagents import handle_spawn_subagents
+        desc = "spawn_subagents"
+        result = await handle_spawn_subagents(
+            content, owner=owner, session_id=session_id,
+            agent_ctx=agent_ctx, progress_cb=progress_cb,
+        )
+    elif tool == "self_repair":
+        # USER-INITIATED repair of FoulFox's own codebase. Admin-gated above;
+        # subagents.py confines the worker to the repo root, runs the check
+        # command, and returns a staged restart signal (never self-kills).
+        from src.subagents import handle_self_repair
+        desc = "self_repair"
+        result = await handle_self_repair(
+            content, owner=owner, session_id=session_id,
+            agent_ctx=agent_ctx, progress_cb=progress_cb,
+        )
     elif tool.startswith("mcp__"):
         # MCP tool dispatch
         mcp = get_mcp_manager()

@@ -28,11 +28,9 @@ from core.database import (
     AgentSuite,
     AgentSuiteMember,
     CrewMember,
-    ModelEndpoint,
     AgentSuiteRun,
     AgentReviewIteration,
 )
-from src import agent_lessons
 
 logger = logging.getLogger(__name__)
 
@@ -98,21 +96,13 @@ def _resolve_member(db, owner, role, suite=None):
 
 
 def _role_persona(crew, role):
-    persona = (crew.personality if crew and crew.personality else "").strip()
-    if not persona:
-        from src.agent_suite import ROLE_DEFS
-        rd = ROLE_DEFS.get(role)
-        persona = (rd["personality"] if rd else "").strip()
-    return persona
+    from src import subagent_prompts
+    return subagent_prompts.role_persona(crew, role)
 
 
 def _lessons_block(role, owner, objective):
-    try:
-        lessons = agent_lessons.retrieve_lessons(objective, role, owner=owner, limit=5)
-        return agent_lessons.format_lessons_block(lessons) or ""
-    except Exception as e:
-        logger.debug("lessons block for %s failed: %s", role, e)
-        return ""
+    from src import subagent_prompts
+    return subagent_prompts.lessons_block(role, owner, objective)
 
 
 def _build_worker_prompt(crew, role, owner, objective):
@@ -137,13 +127,8 @@ def _build_worker_prompt(crew, role, owner, objective):
 def _memory_block(owner, limit=50, max_chars=4000):
     """Shared project-memory context, trusted + best-effort. Defaults match the
     Architect's full view (P8); workers pass smaller bounds."""
-    try:
-        from src import project_memory
-        return project_memory.memory_context_block(
-            owner, limit=limit, max_chars=max_chars) or ""
-    except Exception as e:
-        logger.debug("memory block failed: %s", e)
-        return ""
+    from src import subagent_prompts
+    return subagent_prompts.memory_block(owner, limit=limit, max_chars=max_chars)
 
 
 def _build_architect_prompt(crew, owner, objective):
@@ -162,30 +147,13 @@ def _build_architect_prompt(crew, owner, objective):
 
 
 def _resolve_headers(db, owner, endpoint_url):
-    headers = {}
-    if not endpoint_url:
-        return headers
-    try:
-        from src.endpoint_resolver import normalize_base, build_headers
-        from src.auth_helpers import owner_filter
-        ep_q = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)  # noqa: E712
-        ep_q = owner_filter(ep_q, ModelEndpoint, owner or None)
-        for ep in ep_q.all():
-            nb = normalize_base(ep.base_url)
-            if nb and (nb in endpoint_url or endpoint_url in nb):
-                headers = build_headers(ep.api_key, nb)
-                break
-    except Exception as e:
-        logger.debug("header resolve failed: %s", e)
-    return headers
+    from src import subagent_prompts
+    return subagent_prompts.resolve_headers(db, owner, endpoint_url)
 
 
 def _fallbacks(owner):
-    try:
-        from src.endpoint_resolver import resolve_utility_fallback_candidates
-        return resolve_utility_fallback_candidates(owner=owner or None)
-    except Exception:
-        return []
+    from src import subagent_prompts
+    return subagent_prompts.fallbacks(owner)
 
 
 # --------------------------------------------------------------------------- #

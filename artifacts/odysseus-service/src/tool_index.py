@@ -500,6 +500,20 @@ class ToolIndex:
         frozenset({"write a", "create a doc", "draft", "compose", "poem", "story",
                    "essay", "outline", "letter"}):
             {"create_document", "edit_document", "update_document"},
+        # Parallel delegation / fan-out intent — spin up helper sub-agents to
+        # investigate or work on several pieces at once.
+        frozenset({"sub-agent", "subagent", "sub agent", "sub-agents", "subagents",
+                   "fan out", "fan-out", "in parallel", "concurrently", "delegate",
+                   "spawn agents", "helper agents", "explore in parallel",
+                   "investigate several", "split this up", "divide and conquer",
+                   "at the same time", "multiple agents"}):
+            {"spawn_subagents"},
+        # User-initiated self-repair of FoulFox's own codebase.
+        frozenset({"fix yourself", "fix your own", "repair yourself",
+                   "fix your code", "repair your code", "self-repair", "self repair",
+                   "patch yourself", "fix foulfox", "fix your bug", "debug yourself",
+                   "edit your own code", "modify your own code"}):
+            {"self_repair"},
     }
 
     def get_tools_for_query(
