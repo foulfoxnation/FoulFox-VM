@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SettingsModal } from "@/components/SettingsModal";
 import { SetupWizard } from "@/components/SetupWizard";
 import { SnapshotModal } from "@/components/SnapshotModal";
 import { Terminal, type TerminalHandle } from "@/components/Terminal";
-import { OdysseusTab } from "@/components/OdysseusTab";
+import { AgentChatPane, type ChatTarget } from "@/components/AgentChatPane";
 import { ShellHistoryPanel } from "@/components/ShellHistoryPanel";
 import { FileExplorer } from "@/components/FileExplorer";
 import { VmTab } from "@/components/VmTab";
@@ -56,8 +56,11 @@ const STATE_DOT: Record<string, string> = {
 export default function Home() {
   const [activeTab, setActiveTab] = useState("odysseus");
   const [pickerOpen, setPickerOpen] = useState(false);
-  // Terminal context pending delivery to the Odysseus chat UI via iframe postMessage.
+  // Terminal context pending delivery to the agent chat (host shell -> chat).
   const [pendingOdysseusContext, setPendingOdysseusContext] = useState<string | null>(null);
+  // Width (% of the content row) of the side-by-side agent chat panel.
+  const [chatWidthPct, setChatWidthPct] = useState(38);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   const { data: health } = useHealthCheck();
   const { data: shellToken } = useShellToken();
@@ -73,6 +76,43 @@ export default function Home() {
     }
   }, [vms, activeTab]);
 
+  // ── Workspace layout ──────────────────────────────────────────────────────
+  // The agent chat is a single persistent iframe (it never unmounts, so the
+  // conversation + the VM VNC/terminals all stay alive across tab switches).
+  // - Workspace tab      -> chat fills the area.
+  // - Host Shell + VM    -> chat on the LEFT, the tab body on the right.
+  // - File Explorer + Get FoulFox OS -> no chat (hidden, still mounted).
+  const isVm = activeTab.startsWith("vm:");
+  const activeVmId = isVm ? activeTab.slice(3) : null;
+  const activeVm = activeVmId ? vms.find((v) => v.id === activeVmId) ?? null : null;
+  const chatVisible = activeTab === "odysseus" || activeTab === "shell" || isVm;
+  const chatFull = activeTab === "odysseus";
+  const split = chatVisible && !chatFull;
+  const rightVisible = activeTab !== "odysseus";
+  const chatTarget: ChatTarget =
+    isVm && activeVm
+      ? { kind: "vm", vmId: activeVm.id, label: activeVm.name }
+      : { kind: "host", label: "Host system" };
+
+  const startChatResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const el = contentRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const onMove = (ev: PointerEvent) => {
+      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      setChatWidthPct(Math.min(60, Math.max(22, pct)));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      document.body.style.userSelect = "";
+    };
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   const handleClearTerminal = () => {
     terminalRef.current?.clear();
   };
@@ -83,8 +123,8 @@ export default function Home() {
       toast({ title: "No terminal output to send", variant: "destructive", duration: 2000 });
       return;
     }
+    // The chat sits beside the Host Shell now, so deliver in place — no tab jump.
     setPendingOdysseusContext(lastOutput);
-    setActiveTab("odysseus");
     toast({
       title: "Terminal context sent to FoulFox VM",
       description: "FoulFox VM will analyse the output in the chat panel.",
@@ -175,74 +215,115 @@ export default function Home() {
           </TabsList>
         </div>
 
-        <TabsContent value="odysseus" className={TAB_CONTENT}>
-          <OdysseusTab
-            pendingContext={pendingOdysseusContext}
-            onContextConsumed={() => setPendingOdysseusContext(null)}
-            shellToken={shellToken}
-          />
-        </TabsContent>
-
-        <TabsContent value="shell" className={TAB_CONTENT}>
-          <div className="flex flex-col h-full">
-            {/* Quick-actions toolbar */}
-            <div className="flex items-center gap-2 border-b bg-muted/30 px-4 py-1.5" data-testid="shell-quick-actions">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleClearTerminal}
-                className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                data-testid="button-clear-terminal"
-              >
-                <Trash2 className="mr-1 h-3.5 w-3.5" />
-                Clear
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleSendToOdysseus}
-                disabled={!shellToken}
-                className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                data-testid="button-send-to-odysseus"
-              >
-                <Send className="mr-1 h-3.5 w-3.5" />
-                Send to FoulFox VM
-              </Button>
-            </div>
-
-            <ResizablePanelGroup direction="vertical" className="flex-1">
-              <ResizablePanel defaultSize={70} minSize={30}>
-                <div className="h-full p-4 bg-zinc-950">
-                  <Terminal ref={terminalRef} />
-                </div>
-              </ResizablePanel>
-              <ResizableHandle withHandle />
-              <ResizablePanel defaultSize={30} minSize={20}>
-                <div className="flex flex-col h-full bg-card">
-                  <div className="flex items-center border-b px-4 py-2 font-medium text-sm">
-                    <Command className="mr-2 h-4 w-4" /> Command History
-                  </div>
-                  <div className="flex-1 overflow-hidden">
-                    <ShellHistoryPanel />
-                  </div>
-                </div>
-              </ResizablePanel>
-            </ResizablePanelGroup>
+        {/* Content area: persistent agent chat (left) + per-tab body (right). */}
+        <div ref={contentRef} className="flex flex-1 overflow-hidden">
+          {/* The agent chat is a single iframe that never unmounts, so the
+              conversation (and any VM VNC/terminal it drives) survives tab
+              switches. It fills the area on the Workspace tab, sits on the left
+              beside the Host Shell / VM tabs, and is hidden (but kept mounted)
+              on File Explorer + Get FoulFox OS. */}
+          <div
+            className={chatVisible ? "h-full min-w-0" : "hidden"}
+            style={
+              chatFull
+                ? { flex: "1 1 0%" }
+                : { width: `${chatWidthPct}%`, flexShrink: 0 }
+            }
+          >
+            <AgentChatPane
+              pendingContext={pendingOdysseusContext}
+              onContextConsumed={() => setPendingOdysseusContext(null)}
+              shellToken={shellToken}
+              target={chatTarget}
+              showTargetBadge={split}
+            />
           </div>
-        </TabsContent>
 
-        <TabsContent value="files" className={TAB_CONTENT}>
-          <FileExplorer />
-        </TabsContent>
-        <TabsContent value="download" className={TAB_CONTENT}>
-          <DownloadTab />
-        </TabsContent>
-        {vms.map((vm) => (
-          <TabsContent key={vm.id} value={`vm:${vm.id}`} className={TAB_CONTENT}>
-            <VmTab vm={vm} isDefault={vm.id === DEFAULT_VM_ID} onDeleted={() => setActiveTab("odysseus")} />
-          </TabsContent>
-        ))}
+          {/* Drag divider — only when the chat sits beside a tab body. */}
+          {split && (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              onPointerDown={startChatResize}
+              className="w-1.5 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/50"
+              data-testid="chat-resize-handle"
+            />
+          )}
+
+          {/* Right region — every non-chat body stays mounted; shown by tab so
+              terminal scrollback and VNC sessions are never torn down. */}
+          <div className={rightVisible ? "h-full min-w-0 flex-1" : "hidden"}>
+            <Body show={activeTab === "shell"}>
+              <div className="flex flex-col h-full">
+                {/* Quick-actions toolbar */}
+                <div className="flex items-center gap-2 border-b bg-muted/30 px-4 py-1.5" data-testid="shell-quick-actions">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearTerminal}
+                    className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                    data-testid="button-clear-terminal"
+                  >
+                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                    Clear
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleSendToOdysseus}
+                    disabled={!shellToken}
+                    className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                    data-testid="button-send-to-odysseus"
+                  >
+                    <Send className="mr-1 h-3.5 w-3.5" />
+                    Send to FoulFox VM
+                  </Button>
+                </div>
+
+                <ResizablePanelGroup direction="vertical" className="flex-1">
+                  <ResizablePanel defaultSize={70} minSize={30}>
+                    <div className="h-full p-4 bg-zinc-950">
+                      <Terminal ref={terminalRef} />
+                    </div>
+                  </ResizablePanel>
+                  <ResizableHandle withHandle />
+                  <ResizablePanel defaultSize={30} minSize={20}>
+                    <div className="flex flex-col h-full bg-card">
+                      <div className="flex items-center border-b px-4 py-2 font-medium text-sm">
+                        <Command className="mr-2 h-4 w-4" /> Command History
+                      </div>
+                      <div className="flex-1 overflow-hidden">
+                        <ShellHistoryPanel />
+                      </div>
+                    </div>
+                  </ResizablePanel>
+                </ResizablePanelGroup>
+              </div>
+            </Body>
+
+            <Body show={activeTab === "files"}>
+              <FileExplorer />
+            </Body>
+            <Body show={activeTab === "download"}>
+              <DownloadTab />
+            </Body>
+            {vms.map((vm) => (
+              <Body key={vm.id} show={activeTab === `vm:${vm.id}`}>
+                <VmTab vm={vm} isDefault={vm.id === DEFAULT_VM_ID} onDeleted={() => setActiveTab("odysseus")} />
+              </Body>
+            ))}
+          </div>
+        </div>
       </Tabs>
     </div>
   );
+}
+
+/**
+ * A tab body that stays mounted but is hidden with `display:none` when its tab
+ * is inactive. Keeping every body mounted preserves expensive state — terminal
+ * scrollback, VM VNC sessions — across tab switches.
+ */
+function Body({ show, children }: { show: boolean; children: ReactNode }) {
+  return <div className={show ? "h-full w-full" : "hidden"}>{children}</div>;
 }

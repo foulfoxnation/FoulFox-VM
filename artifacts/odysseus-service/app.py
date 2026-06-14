@@ -852,6 +852,44 @@ async def readiness_check() -> JSONResponse:
     result = check_readiness()
     return JSONResponse(status_code=200 if result.get("ready") else 503, content=result)
 
+@app.get("/api/vm-target")
+async def get_vm_target() -> Dict[str, object]:
+    """The VM id the agent's shell + file tools currently target (None = host)."""
+    from src.vm_target import get_selected_vm
+    return {"vm": get_selected_vm()}
+
+
+@app.post("/api/vm-target")
+async def set_vm_target(request: Request) -> JSONResponse:
+    """Bind the agent's shell + file tools to a VM (or back to the host).
+
+    The shell UI calls this when the user switches workspace tabs, so the chat
+    shown beside a VM tab drives that VM and the chat shown beside the Host
+    Shell / Workspace tab drives the host. Body: ``{"vm": "<id>"|"host"|null}``.
+    Reuses ``do_select_vm`` so the id is validated against the live VM registry
+    (the same path the agent's own ``select_vm`` tool takes).
+    """
+    from src.tool_implementations import do_select_vm
+    from src.vm_target import get_selected_vm
+
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 - tolerate empty/non-JSON body
+        body = {}
+    vm = body.get("vm") if isinstance(body, dict) else None
+    owner = (request.headers.get("X-Odysseus-Owner") or "").strip() or None
+    result = await do_select_vm("" if vm is None else str(vm), owner=owner)
+    ok = not result.get("error")
+    return JSONResponse(
+        status_code=200 if ok else 400,
+        content={
+            "ok": ok,
+            "vm": get_selected_vm(),
+            "message": result.get("output") or result.get("error") or "",
+        },
+    )
+
+
 @app.get("/api/runtime")
 async def runtime_info() -> Dict[str, object]:
     in_docker = os.path.exists("/.dockerenv")

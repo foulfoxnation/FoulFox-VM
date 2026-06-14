@@ -65,6 +65,18 @@ if [ -n "$ODYSSEUS_BRIDGE_TOKEN" ] && [ -z "$ODYSSEUS_INTERNAL_TOKEN" ]; then
   export ODYSSEUS_INTERNAL_TOKEN="$ODYSSEUS_BRIDGE_TOKEN"
 fi
 
+# Dev/standalone fallback for the shell-exec bridge. The Electron lifecycle
+# always exports ODYSSEUS_SHELL_EXEC_BASE explicitly (pointing at the Express
+# API server), so the `-z` guard leaves the packaged app untouched. The Replit
+# dev workflow launches this script with no such env, which would otherwise let
+# ODYSSEUS_SHELL_EXEC_BASE fall back to Odysseus's own origin — making the agent's
+# /api/shell/exec and /api/vm/list calls 404 against Odysseus instead of reaching
+# the VM registry. Point them at the API server (default port 8080) so VM-target
+# selection and VM-scoped shell tools work in dev exactly as they do when packaged.
+if [ -z "$ODYSSEUS_SHELL_EXEC_BASE" ]; then
+  export ODYSSEUS_SHELL_EXEC_BASE="http://127.0.0.1:${API_SERVER_PORT:-8080}"
+fi
+
 exec "$PY" -m uvicorn app:app \
   --host "${HOST:-127.0.0.1}" \
   --port "${PORT:-7000}" \

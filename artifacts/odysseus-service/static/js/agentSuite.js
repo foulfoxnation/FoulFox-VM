@@ -24,13 +24,14 @@ let _observer = null;
 function _injectStyles() {
   if (document.getElementById('as-toggle-styles')) return;
   const css = `
-  /* left:44px clears every left-corner occupant in all sidebar modes:
-     .incognito-indicator (left:12px, ~24px wide), the right-sidebar
-     .chat-new-btn (left:12px), and the collapsed hamburger's 38px region.
-     Absolute offset is measured from the padding box, so it is unaffected
-     by the collapsed top-bar's padding-left. */
-  .as-toggle { position:absolute; left:44px; top:50%; transform:translateY(-50%);
-    z-index:3; display:inline-flex; align-items:center; gap:2px; padding:2px;
+  /* The switcher lives INSIDE the chat (in #agent-suite-inline-anchor at the
+     top of the composer), so it flows inline rather than being absolutely
+     pinned to the top bar. This keeps it visible in the narrow left-panel
+     embed the shell shows beside Host Shell + every VM tab. */
+  .agent-suite-inline { display:flex; align-items:center; }
+  .agent-suite-inline:empty { display:none; }
+  .as-toggle { display:inline-flex; align-items:center; gap:2px; padding:2px;
+    margin:0 0 6px; flex-wrap:wrap;
     border:1px solid var(--border,#355a66); border-radius:7px;
     background:color-mix(in srgb, var(--panel,#111) 88%, var(--bg,#282c34)); }
   .as-toggle-label { font-size:9px; text-transform:uppercase; letter-spacing:.06em;
@@ -71,7 +72,10 @@ function _teardown() {
 }
 
 function _build(roleNames) {
-  const bar = document.querySelector('.chat-top-bar');
+  // Anchor the switcher inside the chat composer (not the top bar) so swapping
+  // agents lives within the chat and survives the narrow left-panel embed.
+  const bar = document.getElementById('agent-suite-inline-anchor')
+    || document.querySelector('.chat-input-bar');
   if (!bar) return;
 
   // Idempotent: tear down any previous instance before rebuilding so a

@@ -991,6 +991,11 @@
 
     <!-- Unified chat input bar -->
     <div class="chat-input-bar">
+      <!-- Anchor for the in-chat agent switcher (Windows / Game / Architect).
+           agentSuite.js injects the segmented control here so swapping agents
+           lives inside the chat itself, and stays visible in the narrow
+           left-panel embed used by the shell's Host Shell + VM tabs. -->
+      <div id="agent-suite-inline-anchor" class="agent-suite-inline"></div>
       <div class="chat-input-top">
         <div id="message-ghost" class="ghost-text-overlay" aria-hidden="true"></div>
         <textarea id="message" placeholder="Message FoulFox VM..." required autocomplete="off" aria-label="Message input" rows="1" autofocus></textarea>
