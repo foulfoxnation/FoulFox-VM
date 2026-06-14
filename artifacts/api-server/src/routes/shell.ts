@@ -6,6 +6,7 @@ import { spawn } from "child_process";
 import { URL } from "url";
 import { ExecShellCommandBody, ExecShellCommandResponse } from "@workspace/api-zod";
 import { getVm, getRuntime } from "../lib/vm-registry";
+import { buildSshArgs } from "../lib/vm-ssh";
 import { logger } from "../lib/logger";
 import { SHELL_SESSION_TOKEN } from "../lib/shell-token";
 
@@ -37,17 +38,7 @@ interface ResolvedTarget {
   label: string;
   sshPort?: number;
   sshUser?: string | null;
-}
-
-function sshArgsFor(sshPort: number, sshUser: string | null): string[] {
-  const args = [
-    "-o", "StrictHostKeyChecking=no",
-    "-o", "UserKnownHostsFile=/dev/null",
-    "-o", "ConnectTimeout=5",
-    "-p", String(sshPort),
-  ];
-  args.push(sshUser ? `${sshUser}@localhost` : "localhost");
-  return args;
+  sshKeyPath?: string | null;
 }
 
 // Resolve the live target for a request. Reads the registry + runtime on every
@@ -74,12 +65,18 @@ function resolveTarget(vmId: string | undefined): ResolvedTarget {
     label: vm.name,
     sshPort: vm.config.sshPort,
     sshUser: vm.config.sshUser,
+    sshKeyPath: vm.config.sshKeyPath,
   };
 }
 
 function buildPtyCommand(t: ResolvedTarget): { cmd: string; args: string[] } | null {
   if (t.kind === "vm-ssh") {
-    return { cmd: "ssh", args: sshArgsFor(t.sshPort!, t.sshUser ?? null) };
+    // Interactive terminal: authenticate with the per-VM key. BatchMode is left
+    // off so a human can still type a password as a fallback if the key fails.
+    return {
+      cmd: "ssh",
+      args: buildSshArgs({ sshPort: t.sshPort!, sshUser: t.sshUser ?? null, sshKeyPath: t.sshKeyPath ?? null }),
+    };
   }
   if (t.kind === "vm-serial") {
     // Legacy serial console (single-VM) was exposed via telnet on 4444. Per-VM
@@ -196,7 +193,15 @@ router.post("/shell/exec", (req: Request, res: Response) => {
 
   if (target.kind === "vm-ssh") {
     spawnCmd = "ssh";
-    spawnArgs = [...sshArgsFor(target.sshPort!, target.sshUser ?? null), command];
+    // One-shot exec: key auth + BatchMode so a missing/rejected key fails fast
+    // instead of blocking on a password prompt with no TTY.
+    spawnArgs = [
+      ...buildSshArgs(
+        { sshPort: target.sshPort!, sshUser: target.sshUser ?? null, sshKeyPath: target.sshKeyPath ?? null },
+        { batch: true },
+      ),
+      command,
+    ];
   } else if (target.kind === "vm-serial") {
     respond("", `Cannot exec on '${target.label}': serial console does not support one-shot commands (use SSH mode).`, -1, false);
     return;

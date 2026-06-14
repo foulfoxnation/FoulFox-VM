@@ -3,25 +3,24 @@ name: FoulFox agent-in-VM reality (auth, display, privilege)
 description: What actually works vs. the aspirational scope for the agent operating inside the Windows/Linux guest — auth, display path, and privilege model.
 ---
 
-# Agent-in-VM exec is NOT wired end-to-end (auth gap)
+# Agent-in-VM exec auth: now wired via per-VM SSH key (key mode only)
 
-The agent's non-interactive VM exec (`_vm_shell_exec` → `POST /api/shell/exec`
-→ `shell.ts`) spawns a bare `ssh -o StrictHostKeyChecking=no -o
-UserKnownHostsFile=/dev/null -p <port> <user>@localhost <command>` with **no
-PTY, no `-i` key, no `sshpass`/askpass**. `config.sshPassword` is written by
-`provisionLinux` (random pw) and surfaced in SettingsModal but is **never passed
-to the ssh command** (repo-wide: no sshpass/askpass, no key injection into
-guests). Windows `autounattend.xml` only enables OpenSSH.Server + RDP — it
-creates no known account/password/key.
-**Effect:** the agent cannot authenticate to *either* Linux or Windows guests
-non-interactively. Only the interactive node-pty terminal works (a human types
-the password at the prompt).
-**Why:** the `sshPassword` field is cosmetic plumbing; nothing consumes it.
-**How to apply:** to make agent-in-VM exec real, inject a per-VM SSH **key** in
-both Linux cloud-init (`ssh_authorized_keys`) and Windows unattend
-(administrators_authorized_keys), store the private key path in vm config, and
-have `sshArgsFor` use `-i <key> -o BatchMode=yes`. Password auth via spawn() is a
-dead end without a PTY + askpass.
+Non-interactive VM exec (`POST /api/shell/exec` → `shell.ts`) and the health
+probe now go through the shared `buildSshArgs` (`lib/vm-ssh.ts`): when the VM has
+a per-VM key it spawns `ssh -i <key> -o IdentitiesOnly=yes [-o BatchMode=yes]
+-l <user> localhost <cmd>`. Provisioning generates an ed25519 key
+(`ensureVmSshKey`), stores its path in `vm.config.sshKeyPath`, and injects the
+pubkey (Linux cloud-init `ssh_authorized_keys`; Windows unattend creates an admin
+account + writes `administrators_authorized_keys` with icacls + opens the sshd
+firewall). `authMode(vm)` → "key" | "password" | "none".
+**Still true:** `config.sshPassword` is cosmetic — no `sshpass`/askpass anywhere,
+so **password mode is NOT a working non-interactive path**; only key mode is.
+The interactive node-pty terminal still allows a human password fallback (no
+BatchMode).
+**Caveat:** VMs provisioned *before* this feature (e.g. the seeded `default` VM)
+have `sshKeyPath: null` → `authMode "none"` → must be re-provisioned to get a key.
+**Untested:** host has no KVM, so guest boot + actual key login is unverified;
+confirmed only via typecheck + endpoint probes returning honest failures.
 
 # Display path: noVNC works, the appliance SPICE viewer does not
 

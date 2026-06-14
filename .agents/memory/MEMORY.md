@@ -1,6 +1,7 @@
 - [Python deps install in this repl](python-deps-install.md) — pip/`installLanguagePackages`/`uv add` fail (immutable Nix store); use `uv pip install --target .pythonlibs/...`.
 - [Odysseus embedding](odysseus-embedding.md) — bundled Odysseus FastAPI app (artifacts/odysseus-service) embedded via api-server proxy; uses local SQLite, root-absolute URLs rewritten in proxy.
 - [Vite keep-awake](vite-keep-awake.md) — Replit Vite preview white-pages on long/idle sessions (HMR WS dies under throttling); fix = worker heartbeat + wake lock, no reload.
+- [FoulFox VM agent access](foulfox-vm-agent-access.md) — per-VM ed25519 SSH key auth (use `-l`+validation, key-only, health requires key mode); dev host has no KVM so guests can't boot-test.
 - [FoulFox agent-in-VM reality](foulfox-agent-vm-reality.md) — agent VM exec auth NOT wired (no key/sshpass, sshPassword cosmetic); live launcher emits VNC not SPICE (appliance viewer broken); foulfox user not in sudo.
 - [FoulFox rebrand load-bearing](foulfox-rebrand-load-bearing.md) — rename brand in frontends only; DON'T rename email reminder subject/TOTP issuer/MCP client_name (matched by external systems/existing data).
 - [GitHub push from subrepl](github-push-subrepl.md) — no Connect-to-GitHub UI; push via direct-URL `git push` + token-from-env credential helper (remote add/config writes are sandbox-blocked).

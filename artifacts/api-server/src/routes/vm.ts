@@ -30,6 +30,7 @@ import {
   type OsKind,
 } from "../lib/vm-capabilities";
 import { startProvisioning, subscribeProvisioning } from "../lib/vm-provision";
+import { authMode, checkAgentHealth } from "../lib/vm-ssh";
 import { OS_IMAGES, toPublic, getOsImage, isOsImageId } from "../lib/os-catalog";
 import { logger } from "../lib/logger";
 
@@ -54,6 +55,7 @@ function statusPayload(vm: VmRecord) {
     gpuPassthrough: vm.config.gpuPassthrough,
     connectionMode: vm.config.connectionMode,
     sshPort: vm.config.sshPort,
+    authMode: authMode(vm),
     ports: vm.ports,
     provisioning: vm.provisioning,
     displayToken: vm.displayToken,
@@ -158,6 +160,15 @@ router.post("/vm/create", async (req: Request, res: Response) => {
 router.get("/vm/:id/status", (req: Request, res: Response) => {
   const vm = requireVm(req, res); if (!vm) return;
   res.json(statusPayload(vm));
+});
+
+// GET /vm/:id/agent-health — verify an agent can run a command in the guest with
+// no human input. Runs `echo <marker>` over key-based SSH and reports the result
+// so the UI can surface a clear connection-health status.
+router.get("/vm/:id/agent-health", async (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  const health = await checkAgentHealth(vm);
+  res.json(health);
 });
 
 // POST /vm/:id/start

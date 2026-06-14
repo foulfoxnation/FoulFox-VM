@@ -20,10 +20,14 @@ import {
   Loader2,
   AlertTriangle,
   RefreshCw,
+  KeyRound,
+  ShieldCheck,
+  ShieldAlert,
+  Shield,
 } from "lucide-react";
 import { useVmLifecycle, useDeleteVm, useRetryProvision } from "@/hooks/use-vms";
 import { useToast } from "@/hooks/use-toast";
-import { type VmSummary, type VmLifecycleAction } from "@/lib/vm-api";
+import { checkAgentHealth, type AgentHealth, type VmSummary, type VmLifecycleAction } from "@/lib/vm-api";
 
 function formatUptime(seconds: number | null) {
   if (seconds == null) return "00:00:00";
@@ -47,6 +51,8 @@ export function VmTab({
   const retry = useRetryProvision();
   const { toast } = useToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [health, setHealth] = useState<AgentHealth | null>(null);
+  const [checking, setChecking] = useState(false);
 
   const isRunning = vm.state === "running";
   const isTransitioning = vm.state === "starting" || vm.state === "stopping";
@@ -68,6 +74,24 @@ export function VmTab({
           toast({ title: `Failed to ${action} VM`, description: e.message, variant: "destructive" }),
       },
     );
+
+  const testAgent = async () => {
+    setChecking(true);
+    try {
+      const h = await checkAgentHealth(vm.id);
+      setHealth(h);
+      toast({
+        title: h.ok ? "Agent SSH healthy" : "Agent SSH unreachable",
+        description: h.detail,
+        variant: h.ok ? undefined : "destructive",
+      });
+    } catch (e) {
+      setHealth(null);
+      toast({ title: "Health check failed", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setChecking(false);
+    }
+  };
 
   const handleDelete = () =>
     del.mutate(vm.id, {
@@ -133,6 +157,45 @@ export function VmTab({
         </div>
 
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <span
+            className="flex items-center"
+            title={
+              vm.authMode === "key"
+                ? "Agent SSH: key-based login"
+                : vm.authMode === "password"
+                ? "Agent SSH: password login (re-provision for a key)"
+                : "Agent SSH: no key configured (re-provision to generate one)"
+            }
+            data-testid={`vm-authmode-${vm.id}`}
+          >
+            <KeyRound className="mr-1 h-3 w-3" />
+            {vm.authMode === "key" ? "Key" : vm.authMode === "password" ? "Password" : "No key"}
+          </span>
+          <button
+            type="button"
+            className="flex items-center hover:text-foreground disabled:opacity-50"
+            onClick={testAgent}
+            disabled={!isRunning || checking}
+            title={
+              !isRunning
+                ? "Start the VM to test the agent connection"
+                : health
+                ? `${health.ok ? "Healthy" : "Unreachable"} — ${health.detail}`
+                : "Test agent SSH connection"
+            }
+            data-testid={`button-agent-health-${vm.id}`}
+          >
+            {checking ? (
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            ) : health?.ok ? (
+              <ShieldCheck className="mr-1 h-3 w-3 text-green-500" />
+            ) : health ? (
+              <ShieldAlert className="mr-1 h-3 w-3 text-destructive" />
+            ) : (
+              <Shield className="mr-1 h-3 w-3" />
+            )}
+            {checking ? "Testing" : health?.ok ? "Healthy" : health ? "Unreachable" : "Test SSH"}
+          </button>
           <span className="flex items-center" title="RAM">
             <Activity className="mr-1 h-3 w-3" />
             {vm.ramGb}GB

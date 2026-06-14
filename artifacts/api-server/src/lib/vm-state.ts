@@ -30,6 +30,7 @@ const DEFAULT_CONFIG: VmConfigData = {
   sshPort: 5985,
   sshUser: null,
   sshPassword: null,
+  sshKeyPath: null,
   virtioIsoPath: null,
   unattendIsoPath: null,
   displayMode: "headless",

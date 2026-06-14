@@ -45,9 +45,21 @@ export interface VmSummary {
   gpuPassthrough: string | null;
   connectionMode: string;
   sshPort: number;
+  authMode: AgentAuthMode;
   ports: VmPorts;
   provisioning: ProvisioningState;
   displayToken: string;
+}
+
+// How the agent authenticates to the guest over SSH. "key" = per-VM keypair was
+// generated and injected at provision time (the healthy, hands-off path).
+export type AgentAuthMode = "key" | "password" | "none";
+
+export interface AgentHealth {
+  ok: boolean;        // a command ran and returned the expected marker
+  reachable: boolean; // the SSH port answered (auth may still have failed)
+  authMode: AgentAuthMode;
+  detail: string;
 }
 
 export interface OsSupport {
@@ -191,6 +203,14 @@ export async function retryProvision(id: string, token?: string | null): Promise
     headers: jsonHeaders(token),
   });
   if (!res.ok) throw new Error(await parseError(res));
+}
+
+// Probe whether the agent can run a command inside the guest with no human
+// input (key-based SSH). Surfaced as a connection-health indicator in the UI.
+export async function checkAgentHealth(id: string): Promise<AgentHealth> {
+  const res = await fetch(apiUrl(`/api/vm/${encodeURIComponent(id)}/agent-health`));
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
 }
 
 // websockify-style raw-RFB relay to the VM's QEMU VNC port, gated by per-VM token.

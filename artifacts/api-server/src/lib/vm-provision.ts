@@ -97,7 +97,11 @@ async function provisionLinux(vmId: string): Promise<void> {
   // Generate a cloud-init seed ISO that enables SSH for the agent on first boot.
   emit(vmId, { status: "installing", progress: 50, message: "Generating first-boot (cloud-init) configuration…" });
   const password = crypto.randomBytes(12).toString("base64url");
-  const seedIso = await buildCloudInitSeed(vmId, password).catch((err) => {
+  // Dedicated agent keypair: the public key is injected via cloud-init so the
+  // agent logs in with the key (no password typing); the password remains as an
+  // interactive-terminal fallback only.
+  const agentKey = await ensureVmSshKey(vmId);
+  const seedIso = await buildCloudInitSeed(vmId, password, agentKey?.pubKey ?? null).catch((err) => {
     logger.warn({ err, vm: vmId }, "cloud-init seed generation skipped");
     return null;
   });
@@ -108,10 +112,11 @@ async function provisionLinux(vmId: string): Promise<void> {
     connectionMode: "ssh",
     sshUser: "foulfox",
     sshPassword: password,
+    sshKeyPath: agentKey?.keyPath ?? null,
   });
 
   if (seedIso) {
-    emit(vmId, { status: "ready", progress: 100, error: null, message: "Linux VM ready. SSH is enabled on first boot for the agent." });
+    emit(vmId, { status: "ready", progress: 100, error: null, message: agentKey ? "Linux VM ready. Key-based SSH is enabled on first boot for the agent." : "Linux VM ready. SSH is enabled on first boot for the agent." });
   } else {
     emit(vmId, { status: "ready", progress: 100, error: null, message: "Linux disk ready. Install cloud-utils/genisoimage on the host to auto-enable SSH; otherwise configure SSH manually." });
   }
@@ -119,10 +124,10 @@ async function provisionLinux(vmId: string): Promise<void> {
 
 // Build a NoCloud seed ISO (user-data + meta-data). Requires cloud-localds OR
 // genisoimage/mkisofs. Returns the iso path, or throws if no tool is available.
-async function buildCloudInitSeed(vmId: string, password: string): Promise<string> {
+async function buildCloudInitSeed(vmId: string, password: string, pubKey: string | null): Promise<string> {
   const dir = vmDiskDir(vmId);
   const metaData = `instance-id: ${vmId}\nlocal-hostname: ${vmId}\n`;
-  const userData = [
+  const userLines = [
     "#cloud-config",
     "users:",
     "  - name: foulfox",
@@ -131,6 +136,14 @@ async function buildCloudInitSeed(vmId: string, password: string): Promise<strin
     "    shell: /bin/bash",
     "    lock_passwd: false",
     `    plain_text_passwd: ${password}`,
+  ];
+  if (pubKey) {
+    // Authorize the agent's per-VM public key so non-interactive login needs no
+    // password. cloud-init writes this into /home/foulfox/.ssh/authorized_keys.
+    userLines.push("    ssh_authorized_keys:");
+    userLines.push(`      - ${pubKey}`);
+  }
+  userLines.push(
     "ssh_pwauth: true",
     "package_update: true",
     "packages:",
@@ -138,7 +151,8 @@ async function buildCloudInitSeed(vmId: string, password: string): Promise<strin
     "runcmd:",
     "  - systemctl enable --now ssh",
     "",
-  ].join("\n");
+  );
+  const userData = userLines.join("\n");
 
   const metaPath = path.join(dir, "meta-data");
   const userPath = path.join(dir, "user-data");
@@ -225,9 +239,27 @@ async function provisionWindows(vmId: string): Promise<void> {
     await runQemuImg(["create", "-f", "qcow2", diskPath, `${vm.diskGb}G`]);
   }
   emit(vmId, { status: "installing", progress: 40, message: "Packaging unattended answer file (auto-SSH + RDP)…" });
-  const unattendIsoPath = await buildUnattendIso(vmId);
+  // Per-VM agent keypair + admin account so the agent can SSH in key-only with
+  // no human typing a password. The password is a fallback for RDP/interactive.
+  const agentKey = await ensureVmSshKey(vmId);
+  const adminUser = "foulfox";
+  const adminPassword = crypto.randomBytes(12).toString("base64url");
+  const unattendIsoPath = await buildUnattendIso(vmId, {
+    username: adminUser,
+    password: adminPassword,
+    pubKey: agentKey?.pubKey ?? null,
+  });
 
-  updateVmConfig(vmId, { diskPath, isoPath, virtioIsoPath: virtioPath, unattendIsoPath, connectionMode: "ssh" });
+  updateVmConfig(vmId, {
+    diskPath,
+    isoPath,
+    virtioIsoPath: virtioPath,
+    unattendIsoPath,
+    connectionMode: "ssh",
+    sshUser: adminUser,
+    sshPassword: adminPassword,
+    sshKeyPath: agentKey?.keyPath ?? null,
+  });
 
   if (isoPath) {
     emit(vmId, {
@@ -336,10 +368,13 @@ function runTool(cmd: string, args: string[]): Promise<void> {
 // file must live on a CD — a loose file in the VM directory is never read.
 // Returns null when no ISO-authoring tool is available (the install still
 // works, it just won't be unattended).
-async function buildUnattendIso(vmId: string): Promise<string | null> {
+async function buildUnattendIso(
+  vmId: string,
+  opts: { username: string; password: string; pubKey: string | null },
+): Promise<string | null> {
   const stage = path.join(vmDiskDir(vmId), "unattend-cd");
   fs.mkdirSync(stage, { recursive: true });
-  fs.writeFileSync(path.join(stage, "autounattend.xml"), buildAutoUnattend());
+  fs.writeFileSync(path.join(stage, "autounattend.xml"), buildAutoUnattend(opts));
   const isoOut = path.join(vmDiskDir(vmId), "unattend.iso");
   for (const tool of ["genisoimage", "mkisofs", "xorriso"]) {
     if (await binaryExists(tool)) {
@@ -355,31 +390,71 @@ async function buildUnattendIso(vmId: string): Promise<string | null> {
   return null;
 }
 
-// Minimal Windows autounattend.xml that enables OpenSSH Server and RDP after
-// install so the agent can connect. (Edition/key/partition specifics vary by ISO
-// and are intentionally left to the supplied media's defaults.)
-function buildAutoUnattend(): string {
+// Windows autounattend.xml that makes the guest hands-off for the agent:
+//   • creates a local Administrator account (so OOBE never blocks on account setup)
+//   • auto-logs in once so the FirstLogonCommands actually run
+//   • enables OpenSSH Server + RDP
+//   • installs the agent's public key into administrators_authorized_keys with the
+//     ACLs OpenSSH requires (Administrators + SYSTEM only, inheritance removed) —
+//     for an admin user OpenSSH ignores ~/.ssh/authorized_keys and reads this file.
+// The public key is base64-wrapped before being embedded in the PowerShell so no
+// quoting/XML-escaping can corrupt it. (Edition/key/partition specifics vary by
+// ISO and are intentionally left to the supplied media's defaults.)
+function buildAutoUnattend(opts: { username: string; password: string; pubKey: string | null }): string {
+  const { username, password, pubKey } = opts;
+  const keyB64 = pubKey ? Buffer.from(pubKey, "utf-8").toString("base64") : null;
+  const keyCommand = keyB64
+    ? `        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "$d='C:\\ProgramData\\ssh'; New-Item -ItemType Directory -Force -Path $d | Out-Null; $k=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${keyB64}')); $f=Join-Path $d 'administrators_authorized_keys'; Set-Content -Path $f -Value $k -Encoding ascii; icacls $f /inheritance:r /grant 'Administrators:F' /grant 'SYSTEM:F'"</CommandLine>
+        </SynchronousCommand>
+`
+    : "";
   return `<?xml version="1.0" encoding="utf-8"?>
-<unattend xmlns="urn:schemas-microsoft-com:unattend">
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
   <settings pass="oobeSystem">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64"
                publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <UserAccounts>
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>${username}</Name>
+            <Group>Administrators</Group>
+            <Password>
+              <Value>${password}</Value>
+              <PlainText>true</PlainText>
+            </Password>
+          </LocalAccount>
+        </LocalAccounts>
+      </UserAccounts>
+      <AutoLogon>
+        <Username>${username}</Username>
+        <Enabled>true</Enabled>
+        <LogonCount>1</LogonCount>
+        <Password>
+          <Value>${password}</Value>
+          <PlainText>true</PlainText>
+        </Password>
+      </AutoLogon>
       <OOBE>
         <HideEULAPage>true</HideEULAPage>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
         <ProtectYourPC>3</ProtectYourPC>
         <NetworkLocation>Home</NetworkLocation>
       </OOBE>
       <FirstLogonCommands>
-        <SynchronousCommand wcm:action="add" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+        <SynchronousCommand wcm:action="add">
           <Order>1</Order>
-          <CommandLine>powershell -NoProfile -Command "Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; Set-Service sshd -StartupType Automatic; Start-Service sshd"</CommandLine>
+          <CommandLine>powershell -NoProfile -Command "Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; Set-Service sshd -StartupType Automatic; Start-Service sshd; New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction SilentlyContinue"</CommandLine>
         </SynchronousCommand>
-        <SynchronousCommand wcm:action="add" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
-          <Order>2</Order>
+${keyCommand}        <SynchronousCommand wcm:action="add">
+          <Order>3</Order>
           <CommandLine>reg add "HKLM\\System\\CurrentControlSet\\Control\\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f</CommandLine>
         </SynchronousCommand>
-        <SynchronousCommand wcm:action="add" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
-          <Order>3</Order>
+        <SynchronousCommand wcm:action="add">
+          <Order>4</Order>
           <CommandLine>netsh advfirewall firewall set rule group="remote desktop" new enable=Yes</CommandLine>
         </SynchronousCommand>
       </FirstLogonCommands>
@@ -387,4 +462,27 @@ function buildAutoUnattend(): string {
   </settings>
 </unattend>
 `;
+}
+
+// Generate (or reuse) a dedicated ed25519 keypair for this VM's agent login.
+// The private key stays on the host (referenced by vm.config.sshKeyPath); the
+// public key is injected into the guest at provision time. Returns null if
+// ssh-keygen is unavailable so provisioning degrades to password/manual setup.
+async function ensureVmSshKey(vmId: string): Promise<{ keyPath: string; pubKey: string } | null> {
+  const keyPath = path.join(vmDiskDir(vmId), "agent_ed25519");
+  const pubPath = keyPath + ".pub";
+  try {
+    if (!fs.existsSync(keyPath) || !fs.existsSync(pubPath)) {
+      // Clear any half-written remnants so ssh-keygen never prompts to overwrite.
+      fs.rmSync(keyPath, { force: true });
+      fs.rmSync(pubPath, { force: true });
+      await runTool("ssh-keygen", ["-t", "ed25519", "-N", "", "-C", `foulfox-agent@${vmId}`, "-f", keyPath]);
+    }
+    const pubKey = fs.readFileSync(pubPath, "utf-8").trim();
+    try { fs.chmodSync(keyPath, 0o600); } catch { /* ignore */ }
+    return { keyPath, pubKey };
+  } catch (err) {
+    logger.warn({ err, vm: vmId }, "agent SSH keypair generation skipped");
+    return null;
+  }
 }

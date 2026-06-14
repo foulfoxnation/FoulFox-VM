@@ -29,6 +29,7 @@ export interface VmConfigData {
   sshPort: number;        // mirror of ports.ssh, kept for legacy compatibility
   sshUser: string | null;
   sshPassword: string | null;
+  sshKeyPath: string | null; // per-VM agent private key (key-based agent login)
   // ── FoulFox OS appliance display + driver options ──────────────────────────
   virtioIsoPath: string | null;
   unattendIsoPath: string | null; // Windows autounattend.xml packaged as a CD
@@ -109,6 +110,7 @@ function defaultConfig(): VmConfigData {
     sshPort: LEGACY_SSH_PORT,
     sshUser: null,
     sshPassword: null,
+    sshKeyPath: null,
     virtioIsoPath: null,
     unattendIsoPath: null,
     displayMode: "headless",
