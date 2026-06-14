@@ -12,7 +12,7 @@ import logging
 import re
 import uuid
 
-from core.database import SessionLocal, AgentLesson, utcnow_naive
+from core.database import SessionLocal, AgentLesson
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +33,6 @@ def _tokenize(text):
         w for w in _WORD_RE.findall((text or "").lower())
         if len(w) > 2 and w not in _STOP
     ]
-
-
-def _tags_to_list(raw):
-    try:
-        v = json.loads(raw) if raw else []
-        return v if isinstance(v, list) else []
-    except Exception:
-        return []
 
 
 # --------------------------------------------------------------------------
@@ -150,9 +142,11 @@ def add_lesson(role, text, title="", tags=None, source="manual",
         db.add(lesson)
         db.commit()
         db.refresh(lesson)
-        return lesson.to_dict()
+        result = lesson.to_dict()
     finally:
         db.close()
+    _index_lesson_safe(result)
+    return result
 
 
 def list_lessons(role=None, owner=None, include_inactive=False):
@@ -192,9 +186,11 @@ def update_lesson(lesson_id, owner=None, **fields):
             row.source = fields["source"]
         db.commit()
         db.refresh(row)
-        return row.to_dict()
+        result = row.to_dict()
     finally:
         db.close()
+    _index_lesson_safe(result)
+    return result
 
 
 def delete_lesson(lesson_id, owner=None):
@@ -207,9 +203,10 @@ def delete_lesson(lesson_id, owner=None):
             return False
         db.delete(row)
         db.commit()
-        return True
     finally:
         db.close()
+    _unindex_lesson_safe(lesson_id, owner)
+    return True
 
 
 def count_lessons(owner=None):
@@ -222,12 +219,18 @@ def count_lessons(owner=None):
 
 
 # --------------------------------------------------------------------------
-# Retrieval — keyword overlap scoring (no vector store required)
+# Retrieval — semantic when an embedder/vector store is available, else keyword
 # --------------------------------------------------------------------------
 def retrieve_lessons(query, role, owner=None, limit=5):
     """Return up to `limit` active lessons for `role` (+ shared), ranked by
-    keyword overlap with `query`. Falls back to most-recent lessons when the
-    query has no overlap, so core guide-rail lessons are always present.
+    SEMANTIC similarity to `query` when an embedder / vector store is available,
+    falling back to keyword overlap otherwise.
+
+    Isolation is guaranteed structurally by the SQL filter below: an agent only
+    ever sees its own role plus the shared scope. The ranking layer
+    (:mod:`src.agent_kb`) only orders that already-isolated candidate set, so a
+    windows agent can never surface another agent's private lessons regardless
+    of which ranking tier is active.
     """
     owner = owner or None
     roles = ["shared"] if role == "shared" else [role, "shared"]
@@ -241,20 +244,40 @@ def retrieve_lessons(query, role, owner=None, limit=5):
     finally:
         db.close()
 
+    candidates = [r.to_dict() for r in rows]
+    # Semantic ranking over the role-isolated candidates. Returns None when no
+    # embedder / vector store is available, in which case we keyword-rank.
+    try:
+        from src import agent_kb
+        ranked = agent_kb.rank_lessons(query, role, owner, candidates, limit)
+        if ranked is not None:
+            return ranked
+    except Exception as e:
+        logger.debug(
+            "semantic lesson ranking unavailable, keyword fallback: %s", e)
+    return _keyword_rank(query, candidates, limit)
+
+
+def _keyword_rank(query, candidates, limit):
+    """Rank candidate lesson dicts by keyword overlap with `query`. Falls back
+    to most-recent when nothing overlaps, so core guide-rail lessons are always
+    present. This is the no-embedder fallback for :func:`retrieve_lessons`.
+    """
     q_tokens = set(_tokenize(query))
     scored = []
-    for r in rows:
-        body_tokens = set(_tokenize(" ".join([r.title or "", r.text or ""])))
-        tag_tokens = set(_tokenize(" ".join(_tags_to_list(r.tags))))
+    for c in candidates:
+        body_tokens = set(_tokenize(
+            " ".join([c.get("title") or "", c.get("text") or ""])))
+        tag_tokens = set(_tokenize(" ".join(c.get("tags") or [])))
         score = len(q_tokens & body_tokens) + 2 * len(q_tokens & tag_tokens)
-        scored.append((score, r))
+        scored.append((score, c))
 
-    scored.sort(
-        key=lambda t: (t[0], t[1].created_at or utcnow_naive()), reverse=True)
-    top = [r for (s, r) in scored if s > 0][:limit]
+    scored.sort(key=lambda t: (t[0], t[1].get("created_at") or ""),
+                reverse=True)
+    top = [c for (s, c) in scored if s > 0][:limit]
     if not top:
-        top = [r for (s, r) in scored][:limit]
-    return [r.to_dict() for r in top]
+        top = [c for (s, c) in scored][:limit]
+    return top
 
 
 def format_lessons_block(lessons):
@@ -279,6 +302,7 @@ def seed_lessons(owner=None, force=False):
     """
     owner = owner or None
     created = 0
+    touched = []
     db = SessionLocal()
     try:
         existing = {
@@ -295,18 +319,52 @@ def seed_lessons(owner=None, force=False):
                     if force:
                         row.text = text
                         row.tags = json.dumps(tags)
+                        touched.append(row)
                     continue
-                db.add(AgentLesson(
+                row = AgentLesson(
                     id=str(uuid.uuid4()), owner=owner, role=role, title=title,
                     text=text, tags=json.dumps(tags), source="seed",
                     is_active=True,
-                ))
+                )
+                db.add(row)
+                touched.append(row)
                 created += 1
         db.commit()
-        return created
+        indexable = [r.to_dict() for r in touched]
     except Exception as e:
         db.rollback()
         logger.exception("seed_lessons(owner=%s) failed: %s", owner, e)
         raise
     finally:
         db.close()
+    _index_lessons_safe(indexable)
+    return created
+
+
+# --------------------------------------------------------------------------
+# Vector-index write routing — best-effort, never raises into callers.
+# Routes each lesson to its agent's scope (its role). No-op when the vector
+# store (ChromaDB) is unavailable, so the SQLite store stays authoritative.
+# --------------------------------------------------------------------------
+def _index_lesson_safe(lesson):
+    try:
+        from src import agent_kb
+        agent_kb.index_lesson(lesson)
+    except Exception as e:
+        logger.debug("agent_kb index_lesson skipped: %s", e)
+
+
+def _index_lessons_safe(lessons):
+    try:
+        from src import agent_kb
+        agent_kb.index_lessons(lessons)
+    except Exception as e:
+        logger.debug("agent_kb index_lessons skipped: %s", e)
+
+
+def _unindex_lesson_safe(lesson_id, owner):
+    try:
+        from src import agent_kb
+        agent_kb.unindex_lesson(lesson_id, owner)
+    except Exception as e:
+        logger.debug("agent_kb unindex_lesson skipped: %s", e)

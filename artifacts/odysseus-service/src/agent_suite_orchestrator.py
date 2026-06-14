@@ -123,16 +123,26 @@ def _build_worker_prompt(crew, role, owner, objective):
     block = _lessons_block(role, owner, objective)
     if block:
         parts.append(block)
+    # Each agent pulls its own KB (role lessons) plus the SHARED team KB: shared
+    # lessons (via _lessons_block above) and shared project memory (below).
+    # Bounded smaller than the Architect's so it never crowds out a worker's
+    # objective. Hardened, injection-resistant framing is applied inside
+    # project_memory.memory_context_block.
+    mem = _memory_block(owner, limit=12, max_chars=1500)
+    if mem:
+        parts.append(mem)
     return "\n\n".join(parts) or "You are an autonomous worker agent. Complete the objective using available tools."
 
 
-def _memory_block(owner):
-    """Project-memory context for the Architect (P8). Trusted, best-effort."""
+def _memory_block(owner, limit=50, max_chars=4000):
+    """Shared project-memory context, trusted + best-effort. Defaults match the
+    Architect's full view (P8); workers pass smaller bounds."""
     try:
         from src import project_memory
-        return project_memory.memory_context_block(owner) or ""
+        return project_memory.memory_context_block(
+            owner, limit=limit, max_chars=max_chars) or ""
     except Exception as e:
-        logger.debug("architect memory block failed: %s", e)
+        logger.debug("memory block failed: %s", e)
         return ""
 
 
