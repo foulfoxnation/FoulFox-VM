@@ -64,3 +64,8 @@ externalPort = 3000
 [nix]
 channel = "stable-25_05"
 packages = ["cargo", "libiconv", "libxcrypt", "openssl", "pkg-config", "rustc"]
+
+[userenv]
+
+[userenv.shared]
+FOULFOX_GITHUB_REPO = "foulfoxnation/FoulFox-VM"

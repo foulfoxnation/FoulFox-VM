@@ -24,6 +24,8 @@ const ETCHER_URL = "https://etcher.balena.io/";
 
 export function DownloadTab() {
   const { data: release, isLoading } = useOsRelease();
+  const status =
+    release?.status ?? (release?.available ? "ready" : "unconfigured");
   const available = release?.available ?? false;
   const isoUrl = release?.isoUrl ?? null;
   const sha256Url = release?.sha256Url ?? null;
@@ -54,9 +56,13 @@ export function DownloadTab() {
                   {release?.version ? ` Version ${release.version}.` : ""}
                 </CardDescription>
               </div>
-              {isLoading ? null : available ? (
+              {isLoading ? null : status === "ready" ? (
                 <Badge variant="secondary" className="shrink-0">
                   Ready
+                </Badge>
+              ) : status === "building" ? (
+                <Badge variant="outline" className="shrink-0 gap-1.5">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Building…
                 </Badge>
               ) : (
                 <Badge variant="outline" className="shrink-0">
@@ -71,7 +77,7 @@ export function DownloadTab() {
                 <Loader2 className="h-4 w-4 animate-spin" /> Checking for the latest
                 image…
               </div>
-            ) : available && isoUrl ? (
+            ) : status === "ready" && isoUrl ? (
               <>
                 <Button
                   asChild
@@ -100,6 +106,8 @@ export function DownloadTab() {
                   </p>
                 ) : null}
               </>
+            ) : status === "building" ? (
+              <BuildingNotice repo={release?.repo ?? null} />
             ) : (
               <SetupNotice />
             )}
@@ -180,6 +188,44 @@ function StepCard({
         <p className="text-sm text-muted-foreground">{desc}</p>
       </CardContent>
     </Card>
+  );
+}
+
+function BuildingNotice({ repo }: { repo: string | null }) {
+  const actionsUrl = repo
+    ? `https://github.com/${repo}/actions`
+    : "https://github.com";
+  return (
+    <div className="space-y-3 rounded-md border border-dashed p-4">
+      <div className="flex items-center gap-2 font-medium">
+        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        Your FoulFox OS image is being built
+      </div>
+      <p className="text-sm text-muted-foreground">
+        A free GitHub cloud build is assembling the latest bootable image — this
+        usually takes about 30–90 minutes. This page checks on its own, so the
+        download button switches on by itself the moment it's ready. No refresh
+        needed.
+      </p>
+      <p className="text-sm text-muted-foreground">
+        Haven't kicked off a build yet? On GitHub open{" "}
+        <span className="font-medium text-foreground">
+          Actions → Build FoulFox OS ISO → Run workflow
+        </span>
+        .
+      </p>
+      <Button asChild variant="outline" size="sm">
+        <a
+          href={actionsUrl}
+          target="_blank"
+          rel="noreferrer"
+          data-testid="link-actions"
+        >
+          <Github className="mr-2 h-4 w-4" /> View build on GitHub
+          <ExternalLink className="ml-2 h-3.5 w-3.5" />
+        </a>
+      </Button>
+    </div>
   );
 }
 

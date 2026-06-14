@@ -130,6 +130,7 @@ export async function fetchOsImages(): Promise<OsImage[]> {
 // When unavailable, the Download tab shows one-time setup steps instead.
 export interface OsReleaseInfo {
   available: boolean;
+  status: "ready" | "building" | "unconfigured";
   isoUrl: string | null;
   sha256Url: string | null;
   repo: string | null;

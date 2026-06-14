@@ -9,7 +9,12 @@ import { Router, type IRouter } from "express";
 //   1. FOULFOX_ISO_URL        — an explicit direct download URL (wins if set).
 //   2. FOULFOX_GITHUB_REPO    — "owner/repo": construct the GitHub Actions rolling
 //      release links (foulfox-os-latest) the cloud build publishes.
-//   3. neither set            — available:false, so the tab shows setup steps.
+//   3. neither set            — status "unconfigured", so the tab shows setup steps.
+//
+// When a URL is resolved we additionally probe whether the file actually exists
+// yet (the cloud build may still be running), so the tab can show "building"
+// instead of handing out a link that 404s. The probe is cached so polling clients
+// don't hammer GitHub.
 
 const ROLLING_TAG = "foulfox-os-latest";
 const ROLLING_ISO = "foulfox-os-latest.iso";
@@ -41,9 +46,49 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+// ── availability probe (cached) ───────────────────────────────────────────────
+type CacheEntry = { ok: boolean; expires: number };
+const availabilityCache = new Map<string, CacheEntry>();
+const OK_TTL_MS = 5 * 60_000; // it exists — re-confirm every 5 min
+const MISS_TTL_MS = 30_000; // not there yet — re-check every 30s so it flips on fast
+const PROBE_TIMEOUT_MS = 6_000;
+
+async function isoExists(url: string): Promise<boolean> {
+  const now = Date.now();
+  const cached = availabilityCache.get(url);
+  if (cached && cached.expires > now) return cached.ok;
+
+  let ok = false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  try {
+    let resp = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    // Some CDNs/edges refuse HEAD — fall back to a 1-byte ranged GET.
+    if (resp.status === 403 || resp.status === 405) {
+      resp = await fetch(url, {
+        method: "GET",
+        redirect: "follow",
+        headers: { Range: "bytes=0-0" },
+        signal: controller.signal,
+      });
+    }
+    ok = resp.status >= 200 && resp.status < 300;
+  } catch {
+    ok = false;
+  } finally {
+    clearTimeout(timer);
+  }
+  availabilityCache.set(url, { ok, expires: now + (ok ? OK_TTL_MS : MISS_TTL_MS) });
+  return ok;
+}
+
 const router: IRouter = Router();
 
-router.get("/os/release-info", (_req, res) => {
+router.get("/os/release-info", async (_req, res) => {
   const explicitIsoRaw = process.env.FOULFOX_ISO_URL?.trim();
   const explicitShaRaw = process.env.FOULFOX_ISO_SHA256_URL?.trim();
   const repoEnv = process.env.FOULFOX_GITHUB_REPO?.trim();
@@ -68,8 +113,20 @@ router.get("/os/release-info", (_req, res) => {
     source = "github";
   }
 
+  // status: ready (file is downloadable now) | building (configured, not published
+  // yet) | unconfigured (no repo/url wired in).
+  let status: "ready" | "building" | "unconfigured";
+  let available = false;
+  if (isoUrl) {
+    available = await isoExists(isoUrl);
+    status = available ? "ready" : "building";
+  } else {
+    status = "unconfigured";
+  }
+
   res.json({
-    available: Boolean(isoUrl),
+    available,
+    status,
     isoUrl,
     sha256Url,
     repo,
