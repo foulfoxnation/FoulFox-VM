@@ -5,3 +5,7 @@
 - [FoulFox VM rebrand scope](foulfox-rebrand-scope.md) — Odysseus→FoulFox VM: which strings are user-visible brand vs load-bearing identifiers (X-Odysseus-* headers, reminder subject marker, env vars) that must NOT be renamed.
 - [VM snapshot bridge](vm-snapshot-bridge.md) — qemu-img only when VM fully stopped (else corrupts qcow2); cross-service VM POST needs shared ODYSSEUS_INTERNAL_TOKEN; no-KVM here → honest failures.
 - [Odysseus agent suite](odysseus-agent-suite.md) — 3-role suite + Architect review loop: sequential, worker=tools/architect=tool-free JSON; stream_agent_loop does NOT persist session history.
+- [VM agent targeting](vm-agent-targeting.md) — agent targets a VM via process-global select_vm (not per-call param); routable tools→base64-wrapped shell over /api/shell/exec bridge; interception after security gates.
+- [noVNC + Vite CJS TLA pitfall](novnc-vite-cjs-tla.md) — pin @novnc/novnc to 1.4.0 ESM core/; 1.5+ CJS lib/ has a top-level await that crashes esbuild dep prebundle.
+- [api-server dev no-watch](apiserver-dev-no-watch.md) — dev = build+start, no watcher; restart the API Server workflow after backend edits or endpoints serve a stale build.
+- [FoulFox bootable-OS target](foulfox-bootable-os.md) — product aims to boot from USB on bare metal (KVM-native host); mutable VM state must live under ODYSSEUS_DATA_DIR (persistent partition), not tmpfs $HOME.

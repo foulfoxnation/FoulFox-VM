@@ -109,12 +109,11 @@ app.use("/api/shell/history", localhostOnly);
 // File explorer + USB frontload endpoints: localhost + token (powerful FS access)
 app.use("/api/files", localhostOnly, requireShellToken);
 
-// VM mutation endpoints: localhost + token
-app.use("/api/vm/start", localhostOnly, requireVmToken);
-app.use("/api/vm/stop", localhostOnly, requireVmToken);
-app.use("/api/vm/restart", localhostOnly, requireVmToken);
-app.use("/api/vm/snapshot", localhostOnly, requireVmToken);
-app.use("/api/vm/config", localhostOnly, requireVmToken);
+// All VM endpoints: localhost only. requireVmToken lets read-only GET/HEAD
+// through (status, list, capabilities, provision SSE) but requires the session
+// token for every state-changing call — including the multi-VM create/lifecycle
+// and per-VM (/api/vm/:id/...) routes.
+app.use("/api/vm", localhostOnly, requireVmToken);
 
 // Shell session token endpoint — localhost only so remote callers can't obtain it
 app.get("/api/shell/session-token", localhostOnly, (_req, res) => {

@@ -1952,6 +1952,325 @@ def _internal_headers(owner: Optional[str] = None) -> Dict[str, str]:
     return headers
 
 
+# ---------------------------------------------------------------------------
+# VM targeting — run the agent's shell + filesystem tools ON A VM
+# ---------------------------------------------------------------------------
+# The agent can scope bash/python/read_file/write_file/edit_file/ls/glob/grep to
+# a specific VM (instead of the host) with select_vm. The selected VM id is a
+# process-global (src.vm_target). When set, the tool dispatcher routes those
+# tools to do_vm_tool(), which translates each into a single shell command and
+# runs it on the VM over the api-server /api/shell/exec bridge ({"command","vm"}).
+# Auth reuses the existing cross-service bridge header (_internal_headers).
+#
+# On a host without hardware virtualization no VM reaches "running", so the
+# bridge returns a non-zero exit with "VM is not running" and every VM-targeted
+# call fails honestly — the identical code path connects for real on a host with
+# KVM/Hyper-V/HVF.
+
+
+async def _vm_shell_exec(
+    vm_id: str, command: str, owner: Optional[str] = None, timeout_ms: int = 60000
+) -> Dict[str, Any]:
+    """Run a single shell command on a VM via the api-server exec bridge.
+
+    Returns the bridge JSON (stdout/stderr/exit_code) or, on transport failure,
+    an ``{"error", "exit_code"}`` dict.
+    """
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=(timeout_ms / 1000) + 15) as client:
+            r = await client.post(
+                f"{_SHELL_EXEC_BASE}/api/shell/exec",
+                json={"command": command, "vm": vm_id, "timeoutMs": timeout_ms},
+                headers=_internal_headers(owner),
+            )
+        if r.status_code >= 400:
+            return {"error": f"shell/exec HTTP {r.status_code}: {r.text[:300]}", "exit_code": 1}
+        data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        return data if isinstance(data, dict) else {}
+    except Exception as e:  # noqa: BLE001 - surface transport errors honestly
+        return {"error": f"VM exec failed: {e}", "exit_code": 1}
+
+
+async def _vm_list_raw(owner: Optional[str] = None) -> Dict[str, Any]:
+    """Fetch the VM registry list ({"vms":[...]}) from the api-server."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(f"{_SHELL_EXEC_BASE}/api/vm/list", headers=_internal_headers(owner))
+    if r.status_code >= 400:
+        raise RuntimeError(f"vm/list HTTP {r.status_code}: {r.text[:200]}")
+    data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+    return data if isinstance(data, dict) else {}
+
+
+async def do_list_vms(content: str = "", owner: Optional[str] = None) -> Dict[str, Any]:
+    """List the registered VMs (id, name, OS, state, SSH port)."""
+    from src.vm_target import get_selected_vm
+
+    try:
+        data = await _vm_list_raw(owner)
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"Failed to list VMs: {e}", "exit_code": 1}
+    vms = [v for v in (data.get("vms") or []) if isinstance(v, dict)]
+    selected = get_selected_vm()
+    if not vms:
+        return {"output": "No VMs are registered. Use the '+' button to provision one.", "exit_code": 0}
+    lines = []
+    for vm in vms:
+        ports = vm.get("ports") if isinstance(vm.get("ports"), dict) else {}
+        ssh = ports.get("ssh") or vm.get("sshPort")
+        mark = "  <- selected" if vm.get("id") == selected else ""
+        lines.append(
+            f"- {vm.get('id')}: {vm.get('name')} "
+            f"[{vm.get('osKind')}] state={vm.get('state')} ssh_port={ssh}{mark}"
+        )
+    tip = (
+        ""
+        if selected
+        else "\n(No VM selected — shell/file tools run on the host. Use select_vm to target one.)"
+    )
+    return {"output": "VMs:\n" + "\n".join(lines) + tip, "exit_code": 0}
+
+
+async def do_select_vm(content: str = "", owner: Optional[str] = None) -> Dict[str, Any]:
+    """Choose which machine the agent's shell + file tools operate on.
+
+    Pass a VM id or name to target that VM; pass host/none/clear (or empty) to
+    go back to the local host.
+    """
+    from src.vm_target import set_selected_vm
+
+    raw = (content or "").strip()
+    if raw.startswith("{"):
+        try:
+            raw = str((json.loads(raw) or {}).get("vm", "")).strip()
+        except (ValueError, TypeError):
+            raw = ""
+    low = raw.lower()
+    if low in ("", "host", "none", "local", "localhost", "clear", "off", "null"):
+        set_selected_vm(None)
+        return {"output": "Target cleared — shell and file tools now run on the host.", "exit_code": 0}
+
+    try:
+        data = await _vm_list_raw(owner)
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"Failed to verify VM: {e}", "exit_code": 1}
+    vms = [v for v in (data.get("vms") or []) if isinstance(v, dict)]
+    match = next(
+        (v for v in vms if v.get("id") == raw or str(v.get("name") or "").lower() == low),
+        None,
+    )
+    if not match:
+        ids = ", ".join(str(v.get("id")) for v in vms) or "(none registered)"
+        return {"error": f"No VM matching {raw!r}. Known VMs: {ids}. Call list_vms.", "exit_code": 1}
+    set_selected_vm(match.get("id"))
+    note = (
+        ""
+        if match.get("state") == "running"
+        else f" (currently {match.get('state')} — commands will fail until it is running)"
+    )
+    return {
+        "output": (
+            f"Target set to '{match.get('id')}' ({match.get('name')}, {match.get('osKind')}){note}. "
+            "Shell and file tools now run on this VM."
+        ),
+        "exit_code": 0,
+    }
+
+
+async def do_vm_tool(
+    vm_id: str, tool: str, content: str, owner: Optional[str] = None
+) -> Dict[str, Any]:
+    """Translate a shell/filesystem tool call into a command and run it on a VM."""
+    import base64
+    import shlex
+    from src.tool_utils import _truncate
+
+    content = content or ""
+
+    def _q(s: str) -> str:
+        return shlex.quote(s)
+
+    def _pyrun(code: str) -> str:
+        b64 = base64.b64encode(code.encode("utf-8")).decode("ascii")
+        # b64 is [A-Za-z0-9+/=] only -> safe inside the single-quoted literal.
+        return "python3 -c \"import base64; exec(base64.b64decode('" + b64 + "').decode())\""
+
+    command: Optional[str] = None
+
+    if tool == "bash":
+        # Remote background jobs aren't supported over the bridge; strip a
+        # leading #!bg marker and run synchronously on the VM.
+        try:
+            _is_bg, cmd = _split_bg_marker(content)
+        except Exception:  # noqa: BLE001
+            cmd = content
+        cmd = (cmd or content).strip()
+        if not cmd:
+            return {"error": "bash: empty command", "exit_code": 1}
+        command = cmd
+
+    elif tool == "python":
+        if not content.strip():
+            return {"error": "python: empty code", "exit_code": 1}
+        command = _pyrun(content)
+
+    elif tool == "read_file":
+        path, offset, limit = "", 0, 0
+        s = content.strip()
+        if s.startswith("{"):
+            try:
+                a = json.loads(s)
+                path = str(a.get("path", "")).strip()
+                offset = int(a.get("offset") or 0)
+                limit = int(a.get("limit") or 0)
+            except (ValueError, TypeError):
+                path = s.split("\n", 1)[0].strip()
+        else:
+            path = s.split("\n", 1)[0].strip()
+        if not path:
+            return {"error": "read_file: path is required", "exit_code": 1}
+        if offset > 0 or limit > 0:
+            start = max(offset, 1)
+            end = str(start + limit - 1) if limit > 0 else "$"
+            command = f"sed -n {_q(str(start) + ',' + end + 'p')} {_q(path)}"
+        else:
+            command = f"cat -- {_q(path)}"
+
+    elif tool == "write_file":
+        head, _, body = content.partition("\n")
+        path = head.strip()
+        if not path:
+            return {"error": "write_file: path is required", "exit_code": 1}
+        pb = base64.b64encode(path.encode("utf-8")).decode("ascii")
+        bb = base64.b64encode(body.encode("utf-8")).decode("ascii")
+        code = (
+            "import base64,os;"
+            "p=base64.b64decode('" + pb + "').decode();"
+            "d=base64.b64decode('" + bb + "');"
+            "os.makedirs(os.path.dirname(p) or '.',exist_ok=True);"
+            "open(p,'wb').write(d);"
+            "print('Wrote %d bytes to %s'%(len(d),p))"
+        )
+        command = _pyrun(code)
+
+    elif tool == "edit_file":
+        try:
+            a = json.loads(content) if content.strip().startswith("{") else {}
+        except (ValueError, TypeError):
+            a = {}
+        path = str(a.get("path", "")).strip()
+        old = a.get("old_string", "")
+        new = a.get("new_string", "")
+        replace_all = bool(a.get("replace_all", False))
+        if not path:
+            return {"error": "edit_file: path is required", "exit_code": 1}
+        if old == "":
+            return {"error": "edit_file: old_string is required (use write_file to create a file)", "exit_code": 1}
+        if old == new:
+            return {"error": "edit_file: old_string and new_string are identical", "exit_code": 1}
+        pb = base64.b64encode(path.encode("utf-8")).decode("ascii")
+        ob = base64.b64encode(old.encode("utf-8")).decode("ascii")
+        nb = base64.b64encode(new.encode("utf-8")).decode("ascii")
+        code = (
+            "import base64,sys;"
+            "p=base64.b64decode('" + pb + "').decode();"
+            "o=base64.b64decode('" + ob + "').decode();"
+            "n=base64.b64decode('" + nb + "').decode();"
+            "s=open(p,encoding='utf-8').read();"
+            "c=s.count(o);"
+            "ra=" + ("True" if replace_all else "False") + ";"
+            "sys.exit('EDIT_NOT_FOUND') if c==0 else None;"
+            "sys.exit('EDIT_NOT_UNIQUE:%d'%c) if (c>1 and not ra) else None;"
+            "u=s.replace(o,n) if ra else s.replace(o,n,1);"
+            "open(p,'w',encoding='utf-8').write(u);"
+            "print('Edited %s (%d replacement(s))'%(p,c))"
+        )
+        command = _pyrun(code)
+
+    elif tool == "ls":
+        s = content.strip()
+        path = ""
+        if s.startswith("{"):
+            try:
+                path = str((json.loads(s) or {}).get("path", "")).strip()
+            except (ValueError, TypeError):
+                path = ""
+        else:
+            path = s.split("\n", 1)[0].strip()
+        command = f"ls -la -- {_q(path)}" if path else "ls -la"
+
+    elif tool == "glob":
+        s = content.strip()
+        if s.startswith("{"):
+            try:
+                a = json.loads(s)
+            except (ValueError, TypeError):
+                a = {"pattern": s}
+        else:
+            a = {"pattern": s}
+        pattern = str(a.get("pattern", "")).strip()
+        if not pattern:
+            return {"error": "glob: pattern is required", "exit_code": 1}
+        base = str(a.get("path", "")).strip() or "."
+        name = pattern.rsplit("/", 1)[-1]  # find -name matches the basename pattern
+        command = f"find {_q(base)} -type f -name {_q(name)} 2>/dev/null | head -n 200"
+
+    elif tool == "grep":
+        s = content.strip()
+        if s.startswith("{"):
+            try:
+                a = json.loads(s)
+            except (ValueError, TypeError):
+                a = {"pattern": s}
+        else:
+            a = {"pattern": s}
+        pattern = str(a.get("pattern", "")).strip()
+        if not pattern:
+            return {"error": "grep: pattern is required", "exit_code": 1}
+        path = str(a.get("path", "")).strip() or "."
+        flags = "-rnE"
+        if a.get("ignore_case"):
+            flags += "i"
+        inc = ""
+        g = str(a.get("glob", "") or "").strip()
+        if g:
+            inc = f"--include={_q(g)} "
+        try:
+            mx = max(1, min(int(a.get("max_results") or 200), 200))
+        except (TypeError, ValueError):
+            mx = 200
+        command = f"grep {flags} {inc}-e {_q(pattern)} {_q(path)} 2>/dev/null | head -n {mx}"
+
+    else:
+        return {"error": f"{tool}: not supported on a VM target", "exit_code": 1}
+
+    data = await _vm_shell_exec(vm_id, command, owner=owner)
+    if "error" in data and "stdout" not in data:
+        return {"error": data["error"], "exit_code": data.get("exit_code", 1)}
+
+    stdout = data.get("stdout", "") or ""
+    stderr = data.get("stderr", "") or ""
+    exit_code = data.get("exit_code", data.get("exitCode", 0))
+
+    # Map the remote edit_file sentinels back to the local tool's error messages.
+    if tool == "edit_file" and exit_code not in (0, None):
+        es = stderr.strip()
+        if "EDIT_NOT_FOUND" in es:
+            return {"error": "edit_file: old_string not found in the file. Read it and match exactly.", "exit_code": 1}
+        if "EDIT_NOT_UNIQUE" in es:
+            n = es.split("EDIT_NOT_UNIQUE:", 1)[1].strip() if "EDIT_NOT_UNIQUE:" in es else "?"
+            return {"error": f"edit_file: old_string is not unique ({n} matches). Add context or set replace_all=true.", "exit_code": 1}
+
+    if exit_code in (0, None):
+        out = stdout if stdout else (stderr if stderr else "(no output)")
+        return {"output": _truncate(out), "exit_code": 0}
+    msg = (stderr or stdout or "command failed").strip()
+    return {"error": _truncate(msg), "exit_code": exit_code}
+
+
 async def _cookbook_servers() -> Dict[str, Any]:
     """Return the cookbook's configured servers + the currently-selected
     default host. Shape: {default_host, hosts: [{host, platform, env, envPath}]}.

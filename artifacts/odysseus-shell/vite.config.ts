@@ -42,6 +42,12 @@ export default defineConfig({
     },
     dedupe: ["react", "react-dom"],
   },
+  // Pin to noVNC 1.4.0's ESM build (core/); the 1.5+ CJS lib/ build has a
+  // top-level await that esbuild can't prebundle via require(). Pre-bundle the
+  // deep ESM entry so the default RFB export resolves cleanly.
+  optimizeDeps: {
+    include: ["@novnc/novnc/core/rfb.js"],
+  },
   root: path.resolve(import.meta.dirname),
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),

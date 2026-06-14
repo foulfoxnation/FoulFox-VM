@@ -42,6 +42,10 @@ ALWAYS_AVAILABLE = frozenset({
     "ask_user",
     # Write back to the active plan (tick steps done / revise) during execution.
     "update_plan",
+    # VM targeting is core to this product: the agent should always be able to
+    # discover the registered VMs and pick which one its shell + file tools run on.
+    "list_vms",
+    "select_vm",
 })
 
 # Tools that the Personal Assistant always has access to during scheduled
@@ -134,6 +138,8 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "app_api": "Generic loopback to allowed Odysseus internal endpoints. Use this when the user wants something the UI can do but there's no named tool for it. Covers calendar, gallery, library/documents, memory, notes, tasks, settings, research, compare, cookbook GPUs/state — allowed UI buttons hit /api/* endpoints and you can hit them too. Sensitive auth/user/admin/shell paths and host-control Cookbook mutation routes are blocked; do NOT use app_api for shell commands, package installs, engine rebuilds, or PID signalling. Use named command tooling for shell commands. action='endpoints' with filter=<keyword> lists available endpoints. action='call' takes method+path+body. Hits same routes the UI uses — auth flows free. NOTE: themes are NOT an API endpoint — use the ui_control tool (create_theme / set_theme), not app_api. SESSIONS/CHATS: do NOT use app_api for these — GET /api/sessions returns EMPTY for tool calls (it's owner-filtered and tool calls authenticate as a different identity). EMAIL ACCOUNTS: do NOT use /api/email/accounts via app_api; use list_email_accounts, list_emails, and read_email instead. To list/rename/archive/delete/fork chats use the list_sessions and manage_session tools instead.",
     "edit_image": "Edit an image in the gallery: upscale (increase resolution), remove background (rembg), inpaint (fill selected area), or harmonize (blend edits). Specify image ID and action.",
     "trigger_research": "Start a deep research job on any topic — appears in the Deep Research sidebar, streams progress, produces a detailed report. Use for 'research X', 'look into Y', 'do deep research on Z', 'investigate'. NOT a scheduled task — it runs now and surfaces in the sidebar.",
+    "list_vms": "List the registered virtual machines (id, name, OS, running state, SSH port). Use to see which VMs exist and which is running before targeting one with select_vm.",
+    "select_vm": "Choose which machine your shell + file tools operate on. Pass a VM id (or name) to run bash/python/read_file/write_file/edit_file/ls/glob/grep ON THAT VM (over SSH); pass 'host' (or clear) to go back to the local host. Call list_vms first to see ids. The VM must be running for commands to succeed.",
 }
 
 
@@ -340,6 +346,10 @@ class ToolIndex:
 
     # Keyword hints: if the query mentions these words, force-include the tools.
     _KEYWORD_HINTS = {
+        frozenset({"vm", "vms", "virtual machine", "virtual machines", "guest os",
+                   "windows vm", "linux vm", "mac vm", "macos vm", "qemu",
+                   "select vm", "switch vm", "target vm", "on the vm", "inside the vm"}):
+            {"list_vms", "select_vm"},
         # NOTE: "tell" was removed from this set. It fired on any "tell me ..."
         # request (e.g. "visit <url> and tell me the title"), force-including the
         # whole email toolset and crowding out the relevant tools — the model then

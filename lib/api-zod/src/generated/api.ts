@@ -126,7 +126,8 @@ export const UpdateVmConfigResponse = zod.object({
  */
 export const ExecShellCommandBody = zod.object({
   "command": zod.string(),
-  "timeoutMs": zod.number().optional().describe('Max ms to wait for output (default 10000)')
+  "timeoutMs": zod.number().optional().describe('Max ms to wait for output (default 10000)'),
+  "vm": zod.string().nullish().describe('Target VM id to run the command on (over SSH when the VM is running). Omit or null = the host shell.')
 })
 
 export const ExecShellCommandResponse = zod.object({

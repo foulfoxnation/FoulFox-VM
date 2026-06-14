@@ -1,33 +1,24 @@
-import fs from "fs";
-import path from "path";
-import { type ChildProcess } from "child_process";
+// Backwards-compatibility shim.
+//
+// The single-VM in-memory singleton was replaced by the persistent multi-VM
+// registry (vm-registry.ts). This module preserves the original exports
+// (`vmRuntime`, `loadVmConfig`, `saveVmConfig`) so existing callers — notably
+// shell.ts and the default-VM route wrappers — keep working unchanged. They all
+// operate on the registry's "default" VM.
 
-export type VmState = "stopped" | "starting" | "running" | "stopping" | "error";
-export type ConnectionMode = "serial" | "ssh";
+import {
+  DEFAULT_VM_ID,
+  getRuntime,
+  getVmConfig,
+  updateVmConfig,
+  type VmConfigData,
+  type VmState,
+  type ConnectionMode,
+} from "./vm-registry";
+
+export type { VmConfigData, VmState, ConnectionMode };
+
 export type DisplayMode = "headless" | "spice" | "vnc";
-
-export interface VmConfigData {
-  isoPath: string | null;
-  diskPath: string | null;
-  ramGb: number;
-  cpuCores: number;
-  gpuPassthrough: string | null;
-  connectionMode: ConnectionMode;
-  sshPort: number;
-  sshUser: string | null;
-  sshPassword: string | null;
-  // ── FoulFox OS appliance display + driver options ──────────────────────────
-  // Optional in practice: the dev default keeps the VM headless, while the
-  // appliance writes these into its on-disk config so a fullscreen SPICE/VNC
-  // viewer can attach and the virtio-win drivers are offered to the guest.
-  virtioIsoPath: string | null;
-  displayMode: DisplayMode;
-  spicePort: number;
-  vncDisplay: number;
-  usbPassthrough: string[];
-}
-
-const CONFIG_PATH = path.join(process.env.HOME || "/tmp", ".odysseus-vm-config.json");
 
 const DEFAULT_CONFIG: VmConfigData = {
   isoPath: null,
@@ -47,23 +38,13 @@ const DEFAULT_CONFIG: VmConfigData = {
 };
 
 export function loadVmConfig(): VmConfigData {
-  try {
-    if (fs.existsSync(CONFIG_PATH)) {
-      return { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) };
-    }
-  } catch {
-    // ignore
-  }
-  return { ...DEFAULT_CONFIG };
+  return getVmConfig(DEFAULT_VM_ID) ?? { ...DEFAULT_CONFIG };
 }
 
 export function saveVmConfig(config: VmConfigData): void {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+  updateVmConfig(DEFAULT_VM_ID, config);
 }
 
-// Shared mutable VM runtime state (single-process module singleton)
-export const vmRuntime = {
-  process: null as ChildProcess | null,
-  state: "stopped" as VmState,
-  startTime: null as number | null,
-};
+// The default VM's runtime object. getRuntime returns a stable reference, so
+// mutations made by vm-launch (state/process/startTime) are observed here.
+export const vmRuntime = getRuntime(DEFAULT_VM_ID);

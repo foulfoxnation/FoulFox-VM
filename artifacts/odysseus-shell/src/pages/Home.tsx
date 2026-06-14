@@ -1,17 +1,30 @@
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SettingsModal } from "@/components/SettingsModal";
 import { SetupWizard } from "@/components/SetupWizard";
 import { SnapshotModal } from "@/components/SnapshotModal";
-import { VmControls } from "@/components/VmControls";
 import { Terminal, type TerminalHandle } from "@/components/Terminal";
 import { OdysseusTab } from "@/components/OdysseusTab";
 import { ShellHistoryPanel } from "@/components/ShellHistoryPanel";
 import { FileExplorer } from "@/components/FileExplorer";
+import { VmTab } from "@/components/VmTab";
+import { OsPicker } from "@/components/OsPicker";
 import foxLogo from "@assets/FoxQuest_Logo_1781378611335.png";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { useShellToken } from "@/hooks/use-shell-token";
-import { Terminal as TermIcon, MonitorDot, Command, Trash2, Send, FolderOpen } from "lucide-react";
+import { useVmList } from "@/hooks/use-vms";
+import { DEFAULT_VM_ID, type OsKind } from "@/lib/vm-api";
+import {
+  Terminal as TermIcon,
+  MonitorDot,
+  Command,
+  Trash2,
+  Send,
+  FolderOpen,
+  Plus,
+  Monitor,
+  Apple,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -20,16 +33,43 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 
+const TAB_TRIGGER =
+  "relative h-12 flex items-center rounded-none border-b-2 border-b-transparent bg-transparent px-4 pb-3 pt-2 font-medium text-muted-foreground shadow-none transition-none data-[state=active]:border-b-primary data-[state=active]:text-foreground data-[state=active]:shadow-none";
+const TAB_CONTENT =
+  "flex-1 m-0 p-0 border-0 outline-none h-full data-[state=inactive]:hidden";
+
+const OS_ICON: Record<OsKind, typeof Monitor> = {
+  linux: TermIcon,
+  windows: Monitor,
+  macos: Apple,
+};
+const STATE_DOT: Record<string, string> = {
+  running: "bg-green-500",
+  starting: "bg-amber-500",
+  stopping: "bg-amber-500",
+  stopped: "bg-zinc-500",
+  error: "bg-red-500",
+};
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState("odysseus");
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Terminal context pending delivery to the Odysseus chat UI via iframe postMessage.
-  // Set when the user clicks "Send to Odysseus"; cleared once OdysseusTab confirms delivery.
   const [pendingOdysseusContext, setPendingOdysseusContext] = useState<string | null>(null);
 
   const { data: health } = useHealthCheck();
   const { data: shellToken } = useShellToken();
+  const { data: vms = [] } = useVmList();
   const terminalRef = useRef<TerminalHandle>(null);
   const { toast } = useToast();
+
+  // If the active VM tab disappears (e.g. deleted), fall back to the workspace tab.
+  useEffect(() => {
+    if (activeTab.startsWith("vm:")) {
+      const id = activeTab.slice(3);
+      if (vms.length > 0 && !vms.some((v) => v.id === id)) setActiveTab("odysseus");
+    }
+  }, [vms, activeTab]);
 
   const handleClearTerminal = () => {
     terminalRef.current?.clear();
@@ -41,11 +81,6 @@ export default function Home() {
       toast({ title: "No terminal output to send", variant: "destructive", duration: 2000 });
       return;
     }
-
-    // Store terminal output as pending context.  OdysseusTab will pick this up
-    // on its next iframe load (or immediately if already loaded) and forward it
-    // to the Odysseus chat UI via postMessage, injecting it into the active chat
-    // thread so the user sees the AI's response inline.
     setPendingOdysseusContext(lastOutput);
     setActiveTab("odysseus");
     toast({
@@ -58,6 +93,14 @@ export default function Home() {
   return (
     <div className="flex h-screen w-full flex-col bg-background text-foreground overflow-hidden">
       <SetupWizard />
+      <OsPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        onCreated={(id) => {
+          setPickerOpen(false);
+          setActiveTab(`vm:${id}`);
+        }}
+      />
       <div className="flex items-center justify-between gap-4 border-b bg-card px-4 py-2 shadow-sm z-10">
         <div className="flex items-center gap-3 shrink-0">
           <img src={foxLogo} alt="FoulFox VM" className="h-8 w-8 rounded-md object-cover" />
@@ -70,8 +113,6 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
-          <VmControls />
-          <div className="h-6 w-px bg-border" />
           <SnapshotModal />
           <SettingsModal />
         </div>
@@ -80,34 +121,51 @@ export default function Home() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-1 flex-col overflow-hidden">
         <div className="border-b px-4 bg-muted/20">
           <TabsList className="h-12 w-full justify-start rounded-none border-b-0 bg-transparent p-0">
-            <TabsTrigger
-              value="odysseus"
-              className="relative h-12 rounded-none border-b-2 border-b-transparent bg-transparent px-4 pb-3 pt-2 font-medium text-muted-foreground shadow-none transition-none data-[state=active]:border-b-primary data-[state=active]:text-foreground data-[state=active]:shadow-none"
-              data-testid="tab-odysseus"
-            >
+            <TabsTrigger value="odysseus" className={TAB_TRIGGER} data-testid="tab-odysseus">
               <MonitorDot className="mr-2 h-4 w-4" />
               FoulFox VM Workspace
             </TabsTrigger>
-            <TabsTrigger
-              value="shell"
-              className="relative h-12 rounded-none border-b-2 border-b-transparent bg-transparent px-4 pb-3 pt-2 font-medium text-muted-foreground shadow-none transition-none data-[state=active]:border-b-primary data-[state=active]:text-foreground data-[state=active]:shadow-none"
-              data-testid="tab-shell"
-            >
+            <TabsTrigger value="shell" className={TAB_TRIGGER} data-testid="tab-shell">
               <TermIcon className="mr-2 h-4 w-4" />
-              Shell Terminal
+              Host Shell
             </TabsTrigger>
             <TabsTrigger
               value="files"
-              className="relative h-12 rounded-none border-b-2 border-b-transparent bg-transparent px-4 pb-3 pt-2 font-medium text-muted-foreground shadow-none transition-none data-[state=active]:border-b-primary data-[state=active]:text-foreground data-[state=active]:shadow-none"
+              className={TAB_TRIGGER}
               data-testid="tab-files"
             >
               <FolderOpen className="mr-2 h-4 w-4" />
               File Explorer
             </TabsTrigger>
+
+            {vms.map((vm) => {
+              const Icon = OS_ICON[vm.osKind] ?? Monitor;
+              return (
+                <TabsTrigger key={vm.id} value={`vm:${vm.id}`} className={TAB_TRIGGER} data-testid={`tab-vm-${vm.id}`}>
+                  <Icon className="mr-2 h-4 w-4" />
+                  <span className="max-w-[140px] truncate">{vm.name}</span>
+                  <span
+                    className={`ml-2 h-2 w-2 rounded-full ${STATE_DOT[vm.state] ?? "bg-zinc-500"}`}
+                    title={vm.state}
+                  />
+                </TabsTrigger>
+              );
+            })}
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-1 h-8 self-center px-2 text-muted-foreground hover:text-foreground"
+              onClick={() => setPickerOpen(true)}
+              title="New VM"
+              data-testid="button-add-vm"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
           </TabsList>
         </div>
 
-        <TabsContent value="odysseus" className="flex-1 m-0 p-0 border-0 outline-none h-full data-[state=inactive]:hidden">
+        <TabsContent value="odysseus" className={TAB_CONTENT}>
           <OdysseusTab
             pendingContext={pendingOdysseusContext}
             onContextConsumed={() => setPendingOdysseusContext(null)}
@@ -115,7 +173,7 @@ export default function Home() {
           />
         </TabsContent>
 
-        <TabsContent value="shell" className="flex-1 m-0 p-0 border-0 outline-none h-full data-[state=inactive]:hidden">
+        <TabsContent value="shell" className={TAB_CONTENT}>
           <div className="flex flex-col h-full">
             {/* Quick-actions toolbar */}
             <div className="flex items-center gap-2 border-b bg-muted/30 px-4 py-1.5" data-testid="shell-quick-actions">
@@ -163,9 +221,14 @@ export default function Home() {
           </div>
         </TabsContent>
 
-        <TabsContent value="files" className="flex-1 m-0 p-0 border-0 outline-none h-full data-[state=inactive]:hidden">
+        <TabsContent value="files" className={TAB_CONTENT}>
           <FileExplorer />
         </TabsContent>
+        {vms.map((vm) => (
+          <TabsContent key={vm.id} value={`vm:${vm.id}`} className={TAB_CONTENT}>
+            <VmTab vm={vm} isDefault={vm.id === DEFAULT_VM_ID} onDeleted={() => setActiveTab("odysseus")} />
+          </TabsContent>
+        ))}
       </Tabs>
     </div>
   );

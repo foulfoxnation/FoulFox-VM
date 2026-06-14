@@ -355,6 +355,9 @@ components:
         timeoutMs:
           type: integer
           description: Max ms to wait for output (default 10000)
+        vm:
+          type: ["string", "null"]
+          description: Target VM id to run the command on (over SSH when the VM is running). Omit or null = the host shell.
       required:
         - command
 

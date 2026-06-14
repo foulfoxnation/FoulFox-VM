@@ -61,6 +61,8 @@
     "clsx": "catalog:",
     "cmdk": "^1.1.1",
     "date-fns": "^3.6.0",
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.0",
     "embla-carousel-react": "^8.6.0",
     "framer-motion": "catalog:",
     "input-otp": "^1.4.2",
@@ -80,8 +82,9 @@
     "vaul": "^1.1.2",
     "vite": "catalog:",
     "wouter": "^3.3.5",
-    "zod": "catalog:",
-    "electron": "^35.0.0",
-    "electron-builder": "^26.0.0"
+    "zod": "catalog:"
+  },
+  "dependencies": {
+    "@novnc/novnc": "1.4.0"
   }
 }

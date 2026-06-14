@@ -114,6 +114,11 @@ export interface ShellCommandInput {
   command: string;
   /** Max ms to wait for output (default 10000) */
   timeoutMs?: number;
+  /**
+     * Target VM id to run the command on (over SSH when the VM is running). Omit or null = the host shell.
+     * @nullable
+     */
+  vm?: string | null;
 }
 
 export interface ShellCommandResult {

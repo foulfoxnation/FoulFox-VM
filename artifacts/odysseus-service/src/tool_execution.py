@@ -305,6 +305,15 @@ _ADMIN_TOOLS = {
 }
 
 
+# Shell + filesystem tools that run on the SELECTED VM (src.vm_target) instead
+# of the host when the agent has chosen one via select_vm. get_workspace stays
+# host-side: it reports the agent's local workspace confinement, which has no VM
+# analogue.
+_VM_ROUTABLE_TOOLS = {
+    "bash", "python", "read_file", "write_file", "edit_file", "ls", "glob", "grep",
+}
+
+
 def _owner_is_admin(owner: Optional[str]) -> bool:
     """Mirror route-level admin behavior for agent tool execution."""
     return owner_is_admin_or_single_user(owner)
@@ -554,6 +563,7 @@ async def _execute_tool_block_impl(
         do_manage_contact,
         do_vault_search, do_vault_get, do_vault_unlock,
         do_app_api,
+        do_list_vms, do_select_vm, do_vm_tool,
     )
 
     tool = block.tool_type
@@ -618,6 +628,24 @@ async def _execute_tool_block_impl(
         }
         logger.warning("Public tool policy blocked owner=%r tool=%s", owner, tool)
         return desc, result
+
+    # ── VM targeting ────────────────────────────────────────────────────────
+    # When the agent has selected a VM (via select_vm), route its shell +
+    # filesystem tools to that VM over the api-server /api/shell/exec bridge
+    # instead of running on the host. Placed AFTER the disabled/policy/admin/
+    # public gates so they all still apply; UI-marker tools (ask_user/update_plan)
+    # and every non-routable tool are untouched (not in _VM_ROUTABLE_TOOLS). On a
+    # host without hardware virtualization the VM never reaches "running", so these
+    # calls fail honestly (e.g. "VM is not running").
+    if tool in _VM_ROUTABLE_TOOLS:
+        from src.vm_target import get_selected_vm
+
+        _vm = get_selected_vm()
+        if _vm:
+            result = await do_vm_tool(_vm, tool, content, owner=owner)
+            desc = f"{tool} @ {_vm}: {content.split(chr(10))[0][:80]}"
+            logger.info(f"Tool executed (vm={_vm}): {desc} -> exit_code={result.get('exit_code', 'n/a')}")
+            return desc, result
 
     # ask_user: the agent poses a multiple-choice question to the user to get a
     # decision/clarification. This is a pure UI-control marker — no subprocess,
@@ -827,6 +855,12 @@ async def _execute_tool_block_impl(
     elif tool == "list_cookbook_servers":
         desc = "list_cookbook_servers"
         result = await do_list_cookbook_servers(content, owner=owner)
+    elif tool == "list_vms":
+        desc = "list_vms"
+        result = await do_list_vms(content, owner=owner)
+    elif tool == "select_vm":
+        desc = "select_vm"
+        result = await do_select_vm(content, owner=owner)
     elif tool == "edit_image":
         desc = "edit_image"
         result = await do_edit_image(content, owner=owner)

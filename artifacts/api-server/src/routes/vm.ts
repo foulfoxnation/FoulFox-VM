@@ -1,6 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { spawn } from "child_process";
-import fs from "fs";
 import {
   GetVmStatusResponse,
   GetVmConfigResponse,
@@ -11,364 +10,388 @@ import {
   UpdateVmConfigBody,
   SnapshotVmBody,
 } from "@workspace/api-zod";
-import { vmRuntime, loadVmConfig, saveVmConfig } from "../lib/vm-state";
-import { buildQemuArgs } from "../lib/qemu-args";
+import {
+  DEFAULT_VM_ID,
+  getVm,
+  getRuntime,
+  listVms,
+  createVm,
+  deleteVm,
+  updateVmConfig,
+  type VmRecord,
+} from "../lib/vm-registry";
+import { startVm, stopVm, writeMonitor } from "../lib/vm-launch";
+import {
+  detectHostCapabilities,
+  isValidVmId,
+  isValidVmName,
+  isValidSnapshotName,
+  isOsKind,
+  type OsKind,
+} from "../lib/vm-capabilities";
+import { startProvisioning, subscribeProvisioning } from "../lib/vm-provision";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
-// GET /vm/status
-router.get("/vm/status", (_req: Request, res: Response) => {
-  const config = loadVmConfig();
-  const uptime = vmRuntime.startTime ? Math.floor((Date.now() - vmRuntime.startTime) / 1000) : null;
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-  const status = GetVmStatusResponse.parse({
-    state: vmRuntime.state,
-    pid: vmRuntime.process?.pid ?? null,
+function statusPayload(vm: VmRecord) {
+  const rt = getRuntime(vm.id);
+  const uptime = rt.startTime ? Math.floor((Date.now() - rt.startTime) / 1000) : null;
+  return {
+    id: vm.id,
+    name: vm.name,
+    osKind: vm.osKind,
+    state: rt.state,
+    pid: rt.process?.pid ?? null,
     uptime,
-    isoPath: config.isoPath,
-    diskPath: config.diskPath,
-    ramGb: config.ramGb,
-    cpuCores: config.cpuCores,
-    gpuPassthrough: config.gpuPassthrough,
-    connectionMode: config.connectionMode,
-    sshPort: config.sshPort,
-  });
+    isoPath: vm.config.isoPath,
+    diskPath: vm.config.diskPath,
+    ramGb: vm.config.ramGb,
+    cpuCores: vm.config.cpuCores,
+    gpuPassthrough: vm.config.gpuPassthrough,
+    connectionMode: vm.config.connectionMode,
+    sshPort: vm.config.sshPort,
+    ports: vm.ports,
+    provisioning: vm.provisioning,
+    displayToken: vm.displayToken,
+  };
+}
 
-  res.json(status);
-});
-
-// GET /vm/capabilities — honestly report whether THIS host can boot a VM.
-// Used by the setup wizard so it never promises a VM the host can't run.
-router.get("/vm/capabilities", async (_req: Request, res: Response) => {
-  const kvm = detectKvm();
-  const [qemuSystem, qemuImg] = await Promise.all([
-    binaryExists("qemu-system-x86_64"),
-    binaryExists("qemu-img"),
-  ]);
-  const canBootVm = kvm.available && qemuSystem;
-  let message: string;
-  if (canBootVm) {
-    message = "This machine can boot a Windows VM (KVM acceleration + QEMU available).";
-  } else if (!kvm.available && !qemuSystem) {
-    message = "Cannot boot a VM here: no KVM acceleration and QEMU is not installed. Run FoulFox VM on your own machine with hardware virtualization enabled.";
-  } else if (!kvm.available) {
-    message = `Cannot boot a VM here: ${kvm.reason}. Snapshot/config still work, but booting needs a host with KVM (your own machine).`;
-  } else {
-    message = "QEMU is not installed. Install qemu-system-x86_64 (and qemu-img) to boot the VM.";
+function requireVm(req: Request, res: Response): VmRecord | null {
+  const id = req.params.id;
+  if (!isValidVmId(id)) {
+    res.status(400).json({ error: "Invalid VM id" });
+    return null;
   }
-  res.json({
-    canBootVm,
-    kvm: kvm.available,
-    kvmReason: kvm.reason,
-    qemuSystem,
-    qemuImg,
-    platform: process.platform,
-    arch: process.arch,
-    message,
-  });
+  const vm = getVm(id);
+  if (!vm) {
+    res.status(404).json({ error: `VM '${id}' not found` });
+    return null;
+  }
+  return vm;
+}
+
+// ── Multi-VM endpoints ─────────────────────────────────────────────────────────
+
+// GET /vm/list — all VMs with live status.
+router.get("/vm/list", (_req: Request, res: Response) => {
+  res.json({ vms: listVms().map(statusPayload) });
 });
 
-// POST /vm/start
-router.post("/vm/start", (_req: Request, res: Response) => {
-  if (vmRuntime.state === "running" || vmRuntime.state === "starting") {
-    res.json(StartVmResponse.parse({ success: false, message: "VM is already running", state: vmRuntime.state }));
+// POST /vm/create — register a new VM and kick off auto-provisioning.
+// Body: { name, osKind, ramGb?, cpuCores?, diskGb? }
+router.post("/vm/create", async (req: Request, res: Response) => {
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  const osKind = req.body?.osKind;
+  if (!isValidVmName(name)) {
+    res.status(400).json({ error: "Invalid VM name (allowed: letters, digits, space . _ -, max 64 chars)" });
+    return;
+  }
+  if (!isOsKind(osKind)) {
+    res.status(400).json({ error: "Invalid osKind (expected linux, windows or macos)" });
     return;
   }
 
-  const config = loadVmConfig();
-
-  if (!config.diskPath && !config.isoPath) {
-    res.json(StartVmResponse.parse({
-      success: false,
-      message: "No ISO or disk image configured. Open Settings to configure the VM.",
-      state: vmRuntime.state,
-    }));
+  // Honest capability + guardrail checks before creating anything.
+  const caps = await detectHostCapabilities();
+  if (!caps.osSupport[osKind as OsKind].supported) {
+    res.status(409).json({ error: caps.osSupport[osKind as OsKind].reason });
     return;
   }
+  const existing = listVms();
+  if (existing.length >= caps.cpuCount && existing.length >= 8) {
+    res.status(409).json({ error: "Maximum number of VMs reached." });
+    return;
+  }
+  const ramGb = clampInt(req.body?.ramGb, 1, Math.max(2, Math.floor(caps.totalRamGb * 0.5)), osKind === "windows" ? 4 : 2);
+  const cpuCores = clampInt(req.body?.cpuCores, 1, Math.max(1, caps.cpuCount), 2);
+  const diskGb = clampInt(req.body?.diskGb, 8, 256, osKind === "windows" ? 64 : 32);
 
-  vmRuntime.state = "starting";
-
-  const args = buildQemuArgs(config);
+  // Aggregate-resource guardrails across all VMs.
+  const totalRam = existing.reduce((s, v) => s + v.config.ramGb, 0) + ramGb;
+  if (totalRam > Math.max(2, Math.floor(caps.totalRamGb * 0.75))) {
+    res.status(409).json({ error: `Not enough RAM: this VM would push total allocation to ${totalRam}GB, above the ${Math.floor(caps.totalRamGb * 0.75)}GB cap.` });
+    return;
+  }
 
   try {
-    vmRuntime.process = spawn("qemu-system-x86_64", args, {
-      detached: false,
-      stdio: "pipe",
-    });
-
-    vmRuntime.process.on("error", (err) => {
-      logger.error({ err }, "QEMU process error");
-      vmRuntime.state = "error";
-      vmRuntime.process = null;
-      vmRuntime.startTime = null;
-    });
-
-    vmRuntime.process.on("exit", (code) => {
-      logger.info({ code }, "QEMU process exited");
-      vmRuntime.state = "stopped";
-      vmRuntime.process = null;
-      vmRuntime.startTime = null;
-    });
-
-    // Promote to "running" after 3s if process is still alive
-    setTimeout(() => {
-      if (vmRuntime.process && !vmRuntime.process.killed) {
-        vmRuntime.state = "running";
-        vmRuntime.startTime = Date.now();
-      }
-    }, 3000);
-
-    res.json(StartVmResponse.parse({
-      success: true,
-      message: "VM starting with KVM acceleration. Connect via SSH once it's ready.",
-      state: vmRuntime.state,
-    }));
+    const vm = await createVm({ name, osKind: osKind as OsKind, ramGb, cpuCores, diskGb });
+    // Fire-and-forget provisioning; the UI subscribes to progress via SSE.
+    startProvisioning(vm.id).catch((err) => logger.error({ err, vm: vm.id }, "Provisioning failed to start"));
+    res.json({ vm: statusPayload(vm) });
   } catch (err) {
-    vmRuntime.state = "error";
-    logger.error({ err }, "Failed to start QEMU");
-    res.json(StartVmResponse.parse({
-      success: false,
-      message: `Failed to start VM: ${err instanceof Error ? err.message : String(err)}`,
-      state: vmRuntime.state,
-    }));
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
 
-// POST /vm/stop
-router.post("/vm/stop", (_req: Request, res: Response) => {
-  if (!vmRuntime.process || vmRuntime.state === "stopped") {
-    res.json(StopVmResponse.parse({ success: false, message: "VM is not running", state: "stopped" }));
-    return;
-  }
-
-  vmRuntime.state = "stopping";
-  vmRuntime.process.kill("SIGTERM");
-
-  setTimeout(() => {
-    if (vmRuntime.process) vmRuntime.process.kill("SIGKILL");
-  }, 10000);
-
-  res.json(StopVmResponse.parse({ success: true, message: "VM shutting down", state: vmRuntime.state }));
+// GET /vm/:id/status
+router.get("/vm/:id/status", (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  res.json(statusPayload(vm));
 });
 
-// POST /vm/restart
-router.post("/vm/restart", (_req: Request, res: Response) => {
-  if (vmRuntime.process) {
-    vmRuntime.process.kill("SIGTERM");
-    vmRuntime.process = null;
-  }
-  vmRuntime.state = "stopped";
-  vmRuntime.startTime = null;
+// POST /vm/:id/start
+router.post("/vm/:id/start", (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  const r = startVm(vm);
+  res.json({ success: r.ok, message: r.message, state: r.state });
+});
 
-  res.json(RestartVmResponse.parse({
-    success: true,
-    message: "VM stopped. Restarting... (call /vm/start if not automatic)",
-    state: "stopped",
-  }));
+// POST /vm/:id/stop
+router.post("/vm/:id/stop", (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  const r = stopVm(vm);
+  res.json({ success: r.ok, message: r.message, state: r.state });
+});
 
-  // Auto-start after brief delay
+// POST /vm/:id/restart
+router.post("/vm/:id/restart", (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  stopVm(vm);
   setTimeout(() => {
-    const config = loadVmConfig();
-    if (!config.diskPath && !config.isoPath) return;
-
-    vmRuntime.state = "starting";
-    const args = buildQemuArgs(config);
-
-    vmRuntime.process = spawn("qemu-system-x86_64", args, { detached: false, stdio: "pipe" });
-    vmRuntime.process.on("error", (err) => {
-      logger.error({ err }, "QEMU restart error");
-      vmRuntime.state = "error";
-      vmRuntime.process = null;
-    });
-    vmRuntime.process.on("exit", (code) => {
-      logger.info({ code }, "QEMU restarted process exited");
-      vmRuntime.state = "stopped";
-      vmRuntime.process = null;
-      vmRuntime.startTime = null;
-    });
-    setTimeout(() => {
-      if (vmRuntime.process && !vmRuntime.process.killed) {
-        vmRuntime.state = "running";
-        vmRuntime.startTime = Date.now();
-      }
-    }, 3000);
+    const fresh = getVm(vm.id);
+    if (fresh) startVm(fresh);
   }, 1500);
+  res.json({ success: true, message: "VM restarting", state: "stopping" });
 });
 
-// POST /vm/snapshot
-router.post("/vm/snapshot", (req: Request, res: Response) => {
-  const parsed = SnapshotVmBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+// DELETE /vm/:id — stop and remove a non-default VM.
+router.delete("/vm/:id", (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  if (vm.id === DEFAULT_VM_ID) {
+    res.status(400).json({ error: "The default VM cannot be deleted." });
     return;
   }
-
-  if (vmRuntime.state !== "running" || !vmRuntime.process) {
-    res.json(SnapshotVmResponse.parse({ success: false, message: "VM must be running to take a snapshot", state: vmRuntime.state }));
-    return;
-  }
-
-  const { name } = parsed.data;
-  if (!isValidSnapshotName(name)) {
-    res.status(400).json({ error: "Invalid snapshot name (allowed: letters, digits, . _ -, max 128 chars)" });
-    return;
-  }
-  if (vmRuntime.process.stdin) {
-    vmRuntime.process.stdin.write(`savevm ${name}\n`);
-    res.json(SnapshotVmResponse.parse({ success: true, message: `Snapshot '${name}' requested`, state: vmRuntime.state }));
-  } else {
-    res.json(SnapshotVmResponse.parse({ success: false, message: "Cannot communicate with VM monitor", state: vmRuntime.state }));
-  }
+  stopVm(vm);
+  const ok = deleteVm(vm.id);
+  res.json({ success: ok });
 });
 
-// GET /vm/snapshot/list — list snapshots stored in the qcow2 disk.
-// qemu-img can only safely read the image while the VM is stopped.
-router.get("/vm/snapshot/list", async (_req: Request, res: Response) => {
-  const config = loadVmConfig();
-  if (!config.diskPath) {
-    res.json({ success: true, snapshots: [], message: "No disk image configured" });
-    return;
-  }
-  if (!canRunOfflineImg()) {
-    res.json({ success: false, snapshots: [], message: `Stop the VM fully to list snapshots (current state: ${vmRuntime.state})` });
-    return;
-  }
-  const r = await runQemuImg(["snapshot", "-l", config.diskPath]);
-  if (!r.ok) {
-    res.json({ success: false, snapshots: [], message: r.error || "Failed to list snapshots" });
-    return;
-  }
+// GET /vm/:id/config
+router.get("/vm/:id/config", (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  res.json(GetVmConfigResponse.parse(vm.config));
+});
+
+// PUT /vm/:id/config
+router.put("/vm/:id/config", (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  const parsed = UpdateVmConfigBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const updated = updateVmConfig(vm.id, parsed.data);
+  res.json(GetVmConfigResponse.parse(updated!.config));
+});
+
+// Snapshot ops (id-scoped)
+router.post("/vm/:id/snapshot", (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : req.body?.name;
+  if (!isValidSnapshotName(name)) { res.status(400).json({ error: "Invalid snapshot name" }); return; }
+  const ok = writeMonitor(vm.id, `savevm ${name}`);
+  res.json({ success: ok, message: ok ? `Snapshot '${name}' requested` : "VM must be running to take a snapshot", state: getRuntime(vm.id).state });
+});
+
+router.get("/vm/:id/snapshot/list", async (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  if (!vm.config.diskPath) { res.json({ success: true, snapshots: [], message: "No disk image configured" }); return; }
+  if (!canRunOfflineImg(vm.id)) { res.json({ success: false, snapshots: [], message: `Stop the VM fully to list snapshots (state: ${getRuntime(vm.id).state})` }); return; }
+  const r = await runQemuImg(["snapshot", "-l", vm.config.diskPath]);
+  if (!r.ok) { res.json({ success: false, snapshots: [], message: r.error || "Failed to list snapshots" }); return; }
   res.json({ success: true, snapshots: parseSnapshotList(r.stdout) });
 });
 
-// POST /vm/snapshot/restore { name } — load a snapshot.
-// Running VM: via the QEMU monitor (loadvm). Stopped VM: via qemu-img -a.
+router.post("/vm/:id/snapshot/restore", async (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : req.body?.name;
+  if (!isValidSnapshotName(name)) { res.status(400).json({ success: false, message: "Invalid snapshot name" }); return; }
+  if (writeMonitor(vm.id, `loadvm ${name}`)) { res.json({ success: true, message: `Restore of '${name}' requested`, state: getRuntime(vm.id).state }); return; }
+  if (!canRunOfflineImg(vm.id) || !vm.config.diskPath) { res.json({ success: false, message: `Stop the VM fully before restoring offline`, state: getRuntime(vm.id).state }); return; }
+  const r = await runQemuImg(["snapshot", "-a", name, vm.config.diskPath]);
+  res.json(r.ok ? { success: true, message: `Snapshot '${name}' restored`, state: getRuntime(vm.id).state } : { success: false, message: r.error || "Failed to restore", state: getRuntime(vm.id).state });
+});
+
+router.post("/vm/:id/snapshot/delete", async (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : req.body?.name;
+  if (!isValidSnapshotName(name)) { res.status(400).json({ success: false, message: "Invalid snapshot name" }); return; }
+  if (writeMonitor(vm.id, `delvm ${name}`)) { res.json({ success: true, message: `Delete of '${name}' requested`, state: getRuntime(vm.id).state }); return; }
+  if (!canRunOfflineImg(vm.id) || !vm.config.diskPath) { res.json({ success: false, message: `Stop the VM fully before deleting offline`, state: getRuntime(vm.id).state }); return; }
+  const r = await runQemuImg(["snapshot", "-d", name, vm.config.diskPath]);
+  res.json(r.ok ? { success: true, message: `Snapshot '${name}' deleted`, state: getRuntime(vm.id).state } : { success: false, message: r.error || "Failed to delete", state: getRuntime(vm.id).state });
+});
+
+// GET /vm/:id/provision/stream — SSE progress for auto-provisioning.
+router.get("/vm/:id/provision/stream", (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+  res.write(`data: ${JSON.stringify(getVm(vm.id)?.provisioning)}\n\n`);
+  const unsub = subscribeProvisioning(vm.id, (state) => {
+    res.write(`data: ${JSON.stringify(state)}\n\n`);
+  });
+  req.on("close", () => { unsub(); res.end(); });
+});
+
+// POST /vm/:id/provision — (re)start provisioning for a VM.
+router.post("/vm/:id/provision", (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  startProvisioning(vm.id).catch((err) => logger.error({ err, vm: vm.id }, "Provisioning failed"));
+  res.json({ success: true });
+});
+
+// ── Capabilities (honest, multi-OS) ────────────────────────────────────────────
+router.get("/vm/capabilities", async (_req: Request, res: Response) => {
+  const caps = await detectHostCapabilities();
+  // Backward-compatible fields (used by the legacy setup wizard) preserved
+  // alongside the richer multi-OS capability report.
+  const canBootVm = caps.accelerator.hardware && caps.qemuSystem;
+  let message: string;
+  if (canBootVm) {
+    message = `This machine can boot VMs (${caps.accelerator.accel.toUpperCase()} acceleration + QEMU available).`;
+  } else if (!caps.qemuSystem) {
+    message = "QEMU is not installed. Install qemu-system-x86_64 (and qemu-img) to boot VMs.";
+  } else {
+    message = `Cannot hardware-accelerate VMs here: ${caps.accelerator.reason}. VMs would run under slow software emulation.`;
+  }
+  res.json({
+    canBootVm,
+    kvm: caps.accelerator.accel === "kvm" && caps.accelerator.hardware,
+    kvmReason: caps.accelerator.reason,
+    qemuSystem: caps.qemuSystem,
+    qemuImg: caps.qemuImg,
+    platform: caps.platform,
+    arch: caps.arch,
+    message,
+    accelerator: caps.accelerator,
+    appleHost: caps.appleHost,
+    totalRamGb: caps.totalRamGb,
+    cpuCount: caps.cpuCount,
+    osSupport: caps.osSupport,
+  });
+});
+
+// ── Legacy default-VM endpoints (preserved exactly) ────────────────────────────
+// These continue to operate on the "default" VM so existing clients keep working.
+
+router.get("/vm/status", (_req: Request, res: Response) => {
+  const vm = getVm(DEFAULT_VM_ID);
+  if (!vm) { res.status(503).json({ error: "Default VM not initialized" }); return; }
+  const rt = getRuntime(DEFAULT_VM_ID);
+  const uptime = rt.startTime ? Math.floor((Date.now() - rt.startTime) / 1000) : null;
+  res.json(GetVmStatusResponse.parse({
+    state: rt.state,
+    pid: rt.process?.pid ?? null,
+    uptime,
+    isoPath: vm.config.isoPath,
+    diskPath: vm.config.diskPath,
+    ramGb: vm.config.ramGb,
+    cpuCores: vm.config.cpuCores,
+    gpuPassthrough: vm.config.gpuPassthrough,
+    connectionMode: vm.config.connectionMode,
+    sshPort: vm.config.sshPort,
+  }));
+});
+
+router.post("/vm/start", (_req: Request, res: Response) => {
+  const vm = getVm(DEFAULT_VM_ID);
+  if (!vm) { res.json(StartVmResponse.parse({ success: false, message: "Default VM not initialized", state: "error" })); return; }
+  const r = startVm(vm);
+  res.json(StartVmResponse.parse({ success: r.ok, message: r.message, state: r.state }));
+});
+
+router.post("/vm/stop", (_req: Request, res: Response) => {
+  const vm = getVm(DEFAULT_VM_ID);
+  if (!vm) { res.json(StopVmResponse.parse({ success: false, message: "Default VM not initialized", state: "error" })); return; }
+  const r = stopVm(vm);
+  res.json(StopVmResponse.parse({ success: r.ok, message: r.message, state: r.state }));
+});
+
+router.post("/vm/restart", (_req: Request, res: Response) => {
+  const vm = getVm(DEFAULT_VM_ID);
+  if (!vm) { res.json(RestartVmResponse.parse({ success: false, message: "Default VM not initialized", state: "error" })); return; }
+  stopVm(vm);
+  res.json(RestartVmResponse.parse({ success: true, message: "VM stopped. Restarting...", state: "stopped" }));
+  setTimeout(() => {
+    const fresh = getVm(DEFAULT_VM_ID);
+    if (fresh) startVm(fresh);
+  }, 1500);
+});
+
+router.post("/vm/snapshot", (req: Request, res: Response) => {
+  const parsed = SnapshotVmBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const { name } = parsed.data;
+  if (!isValidSnapshotName(name)) { res.status(400).json({ error: "Invalid snapshot name (allowed: letters, digits, . _ -, max 128 chars)" }); return; }
+  const rt = getRuntime(DEFAULT_VM_ID);
+  const ok = writeMonitor(DEFAULT_VM_ID, `savevm ${name}`);
+  res.json(SnapshotVmResponse.parse({ success: ok, message: ok ? `Snapshot '${name}' requested` : "VM must be running to take a snapshot", state: rt.state }));
+});
+
+router.get("/vm/snapshot/list", async (_req: Request, res: Response) => {
+  const vm = getVm(DEFAULT_VM_ID);
+  if (!vm?.config.diskPath) { res.json({ success: true, snapshots: [], message: "No disk image configured" }); return; }
+  if (!canRunOfflineImg(DEFAULT_VM_ID)) { res.json({ success: false, snapshots: [], message: `Stop the VM fully to list snapshots (current state: ${getRuntime(DEFAULT_VM_ID).state})` }); return; }
+  const r = await runQemuImg(["snapshot", "-l", vm.config.diskPath]);
+  if (!r.ok) { res.json({ success: false, snapshots: [], message: r.error || "Failed to list snapshots" }); return; }
+  res.json({ success: true, snapshots: parseSnapshotList(r.stdout) });
+});
+
 router.post("/vm/snapshot/restore", async (req: Request, res: Response) => {
   const name = typeof req.body?.name === "string" ? req.body.name.trim() : req.body?.name;
-  if (!isValidSnapshotName(name)) {
-    res.status(400).json({ success: false, message: "Invalid snapshot name (allowed: letters, digits, . _ -, max 128 chars)" });
-    return;
-  }
-  if (vmRuntime.state === "running" && vmRuntime.process?.stdin) {
-    vmRuntime.process.stdin.write(`loadvm ${name}\n`);
-    res.json({ success: true, message: `Restore of '${name}' requested`, state: vmRuntime.state });
-    return;
-  }
-  if (!canRunOfflineImg()) {
-    res.json({ success: false, message: `VM is busy (state: ${vmRuntime.state}); stop it fully before restoring a snapshot offline`, state: vmRuntime.state });
-    return;
-  }
-  const config = loadVmConfig();
-  if (!config.diskPath) {
-    res.json({ success: false, message: "No disk image configured", state: vmRuntime.state });
-    return;
-  }
-  const r = await runQemuImg(["snapshot", "-a", name, config.diskPath]);
-  res.json(r.ok
-    ? { success: true, message: `Snapshot '${name}' restored`, state: vmRuntime.state }
-    : { success: false, message: r.error || "Failed to restore snapshot", state: vmRuntime.state });
+  if (!isValidSnapshotName(name)) { res.status(400).json({ success: false, message: "Invalid snapshot name" }); return; }
+  const rt = getRuntime(DEFAULT_VM_ID);
+  if (writeMonitor(DEFAULT_VM_ID, `loadvm ${name}`)) { res.json({ success: true, message: `Restore of '${name}' requested`, state: rt.state }); return; }
+  const vm = getVm(DEFAULT_VM_ID);
+  if (!canRunOfflineImg(DEFAULT_VM_ID) || !vm?.config.diskPath) { res.json({ success: false, message: `VM is busy; stop it fully before restoring a snapshot offline`, state: rt.state }); return; }
+  const r = await runQemuImg(["snapshot", "-a", name, vm.config.diskPath]);
+  res.json(r.ok ? { success: true, message: `Snapshot '${name}' restored`, state: rt.state } : { success: false, message: r.error || "Failed to restore snapshot", state: rt.state });
 });
 
-// POST /vm/snapshot/delete { name } — delete a snapshot.
-// Running VM: via the QEMU monitor (delvm). Stopped VM: via qemu-img -d.
 router.post("/vm/snapshot/delete", async (req: Request, res: Response) => {
   const name = typeof req.body?.name === "string" ? req.body.name.trim() : req.body?.name;
-  if (!isValidSnapshotName(name)) {
-    res.status(400).json({ success: false, message: "Invalid snapshot name (allowed: letters, digits, . _ -, max 128 chars)" });
-    return;
-  }
-  if (vmRuntime.state === "running" && vmRuntime.process?.stdin) {
-    vmRuntime.process.stdin.write(`delvm ${name}\n`);
-    res.json({ success: true, message: `Delete of '${name}' requested`, state: vmRuntime.state });
-    return;
-  }
-  if (!canRunOfflineImg()) {
-    res.json({ success: false, message: `VM is busy (state: ${vmRuntime.state}); stop it fully before deleting a snapshot offline`, state: vmRuntime.state });
-    return;
-  }
-  const config = loadVmConfig();
-  if (!config.diskPath) {
-    res.json({ success: false, message: "No disk image configured", state: vmRuntime.state });
-    return;
-  }
-  const r = await runQemuImg(["snapshot", "-d", name, config.diskPath]);
-  res.json(r.ok
-    ? { success: true, message: `Snapshot '${name}' deleted`, state: vmRuntime.state }
-    : { success: false, message: r.error || "Failed to delete snapshot", state: vmRuntime.state });
+  if (!isValidSnapshotName(name)) { res.status(400).json({ success: false, message: "Invalid snapshot name" }); return; }
+  const rt = getRuntime(DEFAULT_VM_ID);
+  if (writeMonitor(DEFAULT_VM_ID, `delvm ${name}`)) { res.json({ success: true, message: `Delete of '${name}' requested`, state: rt.state }); return; }
+  const vm = getVm(DEFAULT_VM_ID);
+  if (!canRunOfflineImg(DEFAULT_VM_ID) || !vm?.config.diskPath) { res.json({ success: false, message: `VM is busy; stop it fully before deleting a snapshot offline`, state: rt.state }); return; }
+  const r = await runQemuImg(["snapshot", "-d", name, vm.config.diskPath]);
+  res.json(r.ok ? { success: true, message: `Snapshot '${name}' deleted`, state: rt.state } : { success: false, message: r.error || "Failed to delete snapshot", state: rt.state });
 });
 
-// GET /vm/config
 router.get("/vm/config", (_req: Request, res: Response) => {
-  res.json(GetVmConfigResponse.parse(loadVmConfig()));
+  const vm = getVm(DEFAULT_VM_ID);
+  if (!vm) { res.status(503).json({ error: "Default VM not initialized" }); return; }
+  res.json(GetVmConfigResponse.parse(vm.config));
 });
 
-// PUT /vm/config
 router.put("/vm/config", (req: Request, res: Response) => {
   const parsed = UpdateVmConfigBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
-
-  const updated = { ...loadVmConfig(), ...parsed.data };
-  saveVmConfig(updated);
-  res.json(GetVmConfigResponse.parse(updated));
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const updated = updateVmConfig(DEFAULT_VM_ID, parsed.data);
+  if (!updated) { res.status(503).json({ error: "Default VM not initialized" }); return; }
+  res.json(GetVmConfigResponse.parse(updated.config));
 });
 
-// Snapshot names go into QEMU monitor stdin (newline-delimited) and qemu-img
-// argv, so restrict to a safe charset to prevent monitor-command injection.
-const SNAPSHOT_NAME_RE = /^[A-Za-z0-9._-]{1,128}$/;
-function isValidSnapshotName(name: unknown): name is string {
-  return typeof name === "string" && SNAPSHOT_NAME_RE.test(name);
+// ── Shared offline-image helpers ───────────────────────────────────────────────
+
+// qemu-img may only touch a qcow2 when no QEMU process holds it open, else it can
+// corrupt the active disk. Allow offline ops strictly when fully stopped.
+function canRunOfflineImg(vmId: string): boolean {
+  const rt = getRuntime(vmId);
+  return rt.state === "stopped" && !rt.process;
 }
 
-// qemu-img may only touch the qcow2 when no QEMU process holds it open, else it
-// can corrupt an active disk. Allow offline image ops strictly when fully
-// stopped with no live process (rejects starting/stopping/error/live-process).
-function canRunOfflineImg(): boolean {
-  return vmRuntime.state === "stopped" && !vmRuntime.process;
+function clampInt(v: unknown, min: number, max: number, dflt: number): number {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return Math.min(Math.max(dflt, min), max);
+  return Math.min(Math.max(Math.floor(n), min), max);
 }
 
-// Honest KVM detection: /dev/kvm must exist AND be read/write accessible.
-function detectKvm(): { available: boolean; reason: string } {
-  if (!fs.existsSync("/dev/kvm")) {
-    return { available: false, reason: "/dev/kvm is not present (no hardware virtualization, e.g. a cloud/container host)" };
-  }
-  try {
-    fs.accessSync("/dev/kvm", fs.constants.R_OK | fs.constants.W_OK);
-    return { available: true, reason: "/dev/kvm is present and accessible" };
-  } catch {
-    return { available: false, reason: "/dev/kvm exists but is not readable/writable by this process (check kvm group/permissions)" };
-  }
-}
-
-// Whether a binary is on PATH. Spawns `<cmd> --version`; ENOENT/timeout => false.
-function binaryExists(cmd: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    let proc: ReturnType<typeof spawn>;
-    try {
-      proc = spawn(cmd, ["--version"], { stdio: "ignore" });
-    } catch {
-      resolve(false);
-      return;
-    }
-    let settled = false;
-    const finish = (v: boolean) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(v);
-    };
-    const timer = setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* ignore */ } finish(false); }, 5000);
-    proc.on("error", () => finish(false)); // ENOENT => not installed
-    proc.on("close", () => finish(true));  // ran at all => exists
-  });
-}
-
-// Helper: run qemu-img and capture output. Resolves (never rejects); reports
-// ENOENT honestly so callers can surface "not installed" (e.g. no-KVM host).
-// A timeout guards against missing/hung tooling stalling the request.
 function runQemuImg(
   args: string[],
   timeoutMs = 30000,
@@ -397,25 +420,14 @@ function runQemuImg(
     proc.stdout?.on("data", (d) => { stdout += d.toString(); });
     proc.stderr?.on("data", (d) => { stderr += d.toString(); });
     proc.on("error", (err: NodeJS.ErrnoException) => {
-      done({
-        ok: false,
-        stdout,
-        stderr,
-        error: err.code === "ENOENT" ? "qemu-img not installed in this environment" : err.message,
-      });
+      done({ ok: false, stdout, stderr, error: err.code === "ENOENT" ? "qemu-img not installed in this environment" : err.message });
     });
     proc.on("close", (code) => {
-      done({
-        ok: code === 0,
-        stdout,
-        stderr,
-        error: code === 0 ? undefined : (stderr.trim() || `qemu-img exited ${code}`),
-      });
+      done({ ok: code === 0, stdout, stderr, error: code === 0 ? undefined : (stderr.trim() || `qemu-img exited ${code}`) });
     });
   });
 }
 
-// Parse `qemu-img snapshot -l` table output into [{ id, name }].
 function parseSnapshotList(stdout: string): Array<{ id: string; name: string }> {
   const out: Array<{ id: string; name: string }> = [];
   for (const raw of stdout.split("\n")) {

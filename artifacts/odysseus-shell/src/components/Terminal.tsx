@@ -10,7 +10,12 @@ export interface TerminalHandle {
   getLastOutput: () => string;
 }
 
-export const Terminal = forwardRef<TerminalHandle>((_, ref) => {
+interface TerminalProps {
+  /** Scopes this terminal to a specific VM. Agent VM-targeting is wired in Phase 4. */
+  vmId?: string;
+}
+
+export const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ vmId }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -51,9 +56,10 @@ export const Terminal = forwardRef<TerminalHandle>((_, ref) => {
     // Include the session token as a query param — WebSocket API doesn't support
     // custom headers, so ?token= is the standard workaround for token auth on WS.
     // apiWsUrl handles both browser (relative) and Electron file:// (absolute) modes.
-    const ws = new WebSocket(
-      apiWsUrl(`/api/shell/ws?token=${encodeURIComponent(shellToken)}`),
-    );
+    const wsPath = vmId
+      ? `/api/shell/ws?token=${encodeURIComponent(shellToken)}&vm=${encodeURIComponent(vmId)}`
+      : `/api/shell/ws?token=${encodeURIComponent(shellToken)}`;
+    const ws = new WebSocket(apiWsUrl(wsPath));
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -101,7 +107,7 @@ export const Terminal = forwardRef<TerminalHandle>((_, ref) => {
       ws.close();
       term.dispose();
     };
-  }, [shellToken]); // re-run if token changes (e.g. API server restart)
+  }, [shellToken, vmId]); // re-run if token changes (e.g. API server restart) or VM target changes
 
   return (
     <div ref={containerRef} className="h-full w-full overflow-hidden" data-testid="terminal-container" />
