@@ -14,6 +14,7 @@ a Linux host; the appliance itself is validated by booting it on real hardware.
 os/
 ├── README.md                     ← you are here
 ├── docs/
+│   ├── cloud-build.md            ← click-to-build the ISO on GitHub (no Linux box)
 │   ├── build.md                  ← build the ISO on a Linux host
 │   ├── flash.md                  ← write the ISO to USB (Windows / macOS / Linux)
 │   ├── first-boot.md             ← boot + first-run guide (incl. frontload)
@@ -57,6 +58,14 @@ and the VM launcher read from there. This is the manual escape hatch for every
 "it didn't auto-detect" situation.
 
 ## Build it
+
+### In the cloud (recommended — no Linux machine needed)
+
+Push this repo to GitHub and use the **Build FoulFox OS ISO** GitHub Action: click
+**Run workflow** any time and it builds the latest committed code into a
+downloadable `.iso`. See **docs/cloud-build.md**.
+
+### On your own Linux host
 
 ```bash
 # On an amd64 Debian/Ubuntu host:

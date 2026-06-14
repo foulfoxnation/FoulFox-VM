@@ -1,0 +1,170 @@
+name: Build FoulFox OS ISO
+
+# Generate a fresh, bootable FoulFox OS .iso from the LATEST code on demand.
+#
+# How to run it (the "click"):
+#   GitHub -> Actions tab -> "Build FoulFox OS ISO" -> "Run workflow".
+# It checks out whatever branch you pick (HEAD of that branch), builds the
+# appliance image, and gives you the .iso to download:
+#   - as a build "Artifact" on the run (timestamped, kept 30 days), and
+#   - as a stable asset on the rolling "foulfox-os-latest" pre-release, whose
+#     download link always points at the newest build.
+#
+# It always builds the current committed code, so tomorrow's build picks up
+# tomorrow's work automatically -- just commit + push first, then click.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Also publish to the rolling 'foulfox-os-latest' release"
+        type: boolean
+        default: true
+  push:
+    tags:
+      - "os-v*"
+
+# One global build at a time so two runs can't clobber the shared rolling
+# release; let an in-flight build finish rather than cancelling it.
+concurrency:
+  group: foulfox-os-iso
+  cancel-in-progress: false
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write # required to create/update the rolling release
+
+    steps:
+      - name: Check out latest code on this ref
+        uses: actions/checkout@v4
+
+      - name: Free up disk space (live-build needs ~15-20 GB)
+        run: |
+          echo "Disk before:"; df -h /
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /usr/local/.ghcup \
+            /usr/local/share/boost \
+            "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}" || true
+          sudo apt-get clean
+          echo "Disk after:"; df -h /
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            live-build \
+            rsync \
+            xorriso \
+            squashfs-tools \
+            isolinux \
+            syslinux-common \
+            mtools \
+            dosfstools \
+            shellcheck \
+            ca-certificates
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable pnpm (corepack)
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+          pnpm --version
+
+      - name: Build the FoulFox OS image
+        run: |
+          chmod +x os/scripts/*.sh
+          os/scripts/build-image.sh
+
+      - name: Collect ISO + checksums
+        id: iso
+        run: |
+          set -euo pipefail
+          SRC="$(ls -1 os/live-build/*.iso 2>/dev/null | head -n1 || true)"
+          if [ -z "$SRC" ]; then
+            echo "::error::No .iso produced -- see the uploaded build log."
+            exit 1
+          fi
+          mkdir -p out
+          STAMP="$(date -u +%Y%m%d-%H%M%S)"
+          SHORT="$(git rev-parse --short HEAD)"
+          # Timestamped copy for the run artifact (the guaranteed download)...
+          cp "$SRC" "out/foulfox-os_${STAMP}_${SHORT}.iso"
+          # ...and a stable name for the rolling release (convenience link).
+          cp "$SRC" "out/foulfox-os-latest.iso"
+          cd out
+          sha256sum foulfox-os_*.iso > "foulfox-os_${STAMP}_${SHORT}.iso.sha256"
+          sha256sum foulfox-os-latest.iso > foulfox-os-latest.iso.sha256
+          SIZE="$(stat -c%s foulfox-os-latest.iso)"
+          SIZE_H="$(numfmt --to=iec "$SIZE" 2>/dev/null || echo "${SIZE}B")"
+          # GitHub Release assets are capped at ~2 GiB per file; Actions
+          # artifacts are not. Only publish the release when the ISO fits.
+          LIMIT=$((2 * 1024 * 1024 * 1024))
+          if [ "$SIZE" -lt "$LIMIT" ]; then RELEASE_OK=true; else RELEASE_OK=false; fi
+          echo "stamp=${STAMP}" >> "$GITHUB_OUTPUT"
+          echo "short=${SHORT}" >> "$GITHUB_OUTPUT"
+          echo "size_h=${SIZE_H}" >> "$GITHUB_OUTPUT"
+          echo "release_ok=${RELEASE_OK}" >> "$GITHUB_OUTPUT"
+          echo "ISO size: ${SIZE_H} (release_ok=${RELEASE_OK})"
+          ls -lh
+
+      - name: Upload ISO as run artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: foulfox-os-iso-${{ steps.iso.outputs.stamp }}-${{ steps.iso.outputs.short }}
+          path: |
+            out/foulfox-os_*.iso
+            out/foulfox-os_*.iso.sha256
+          retention-days: 14
+          # The ISO is already compressed (squashfs) -- don't waste minutes
+          # re-zipping multiple GB for ~no size win.
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Upload build log if the build failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: os/live-build/build.log
+          if-no-files-found: ignore
+
+      - name: Publish/refresh the rolling "latest" release
+        if: ${{ success() && (github.event_name == 'push' || inputs.publish_release) && steps.iso.outputs.release_ok == 'true' }}
+        # Never let a release hiccup turn a good build red -- the run artifact
+        # above is the guaranteed download.
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: foulfox-os-latest
+          name: FoulFox OS - latest build
+          prerelease: true
+          body: |
+            Automated FoulFox OS appliance build.
+
+            - Commit: `${{ github.sha }}`
+            - Built (UTC): `${{ steps.iso.outputs.stamp }}`
+            - Image size: `${{ steps.iso.outputs.size_h }}`
+
+            Download `foulfox-os-latest.iso`, verify it against
+            `foulfox-os-latest.iso.sha256`, then flash it to a USB stick
+            (see `os/docs/flash.md`) and boot. This release's assets are
+            replaced on every build, so this link is always the newest image.
+          files: |
+            out/foulfox-os-latest.iso
+            out/foulfox-os-latest.iso.sha256
+
+      - name: Note when the ISO is too large for a GitHub Release
+        if: ${{ success() && steps.iso.outputs.release_ok != 'true' }}
+        run: |
+          echo "::notice::ISO is ${{ steps.iso.outputs.size_h }}, above GitHub's ~2 GiB Release asset limit, so the rolling release was skipped. Download it from this run's 'foulfox-os-iso-*' artifact instead."
