@@ -77,7 +77,12 @@ jobs:
       - name: Enable pnpm (corepack)
         run: |
           corepack enable
-          corepack prepare pnpm@latest --activate
+          # Pin pnpm to the version that generated pnpm-lock.yaml (also set in
+          # package.json "packageManager"). pnpm@latest can be a newer MAJOR
+          # whose lockfile format differs, making `pnpm install --frozen-lockfile`
+          # fail fast on a clean checkout before the build even starts.
+          corepack prepare pnpm@10.26.1 --activate
+          node --version
           pnpm --version
 
       - name: Build the FoulFox OS image

@@ -19,8 +19,19 @@ command -v pnpm >/dev/null 2>&1 || { echo "pnpm not found (corepack enable && co
 echo "[stage-app] Installing workspace dependencies..."
 pnpm install --frozen-lockfile
 
+# Build/validate the shared @workspace/* libraries (the TypeScript project
+# references db, api-zod, api-client-react) before the app artifacts, in
+# dependency order. `tsc --build` emits each lib's gitignored dist/ declarations
+# and type-checks the libraries, so on a clean CI checkout any library error
+# fails fast here -- before the long live-build stage -- instead of surfacing
+# later or leaving stale build output.
+echo "[stage-app] Building workspace libraries (@workspace/*)..."
+pnpm run typecheck:libs
+
 echo "[stage-app] Building the shell (BASE_PATH=/ for same-origin serving)..."
-BASE_PATH=/ pnpm --filter @workspace/odysseus-shell run build
+# This is the only place the shell's production Vite/Rollup build runs (dev uses
+# the Vite dev server), and the bundle is large -- give Node extra heap headroom.
+NODE_OPTIONS=--max-old-space-size=4096 BASE_PATH=/ pnpm --filter @workspace/odysseus-shell run build
 
 echo "[stage-app] Building the api-server..."
 pnpm --filter @workspace/api-server run build
