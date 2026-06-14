@@ -1,4 +1,4 @@
-"""Sub-agent fan-out + user-initiated self-repair (Task #12).
+"""Sub-agent fan-out + user-initiated self-repair.
 
 Gives the suite agents (windows / game / architect) main-agent-like reach:
 
@@ -22,7 +22,9 @@ Safety model:
 - Endpoint/model are inherited from the parent turn's ``agent_ctx``; if absent we
   fall back to the configured utility-model chain.
 - Self-repair is admin-gated (``_ADMIN_TOOLS`` in ``tool_execution``) AND requires
-  an explicit ``user_requested`` flag so it can never fire silently.
+  a TRUSTED consent bit (``agent_ctx["self_repair_authorized"]``, set server-side
+  from the ``self_repair_enabled`` setting); model-supplied flags cannot authorize
+  it, so it can never fire silently or self-authorize.
 """
 from __future__ import annotations
 
@@ -493,8 +495,10 @@ async def handle_self_repair(
     """``self_repair`` dispatch entrypoint (admin-gated upstream).
 
     Spawns a worker confined to ``BASE_DIR``, runs the required check command to
-    verify the fix INDEPENDENTLY, and returns a staged restart signal. Requires
-    an explicit ``user_requested`` flag so it can never fire silently.
+    verify the fix INDEPENDENTLY, and returns a staged restart signal.
+    Authorization is the TRUSTED ``agent_ctx["self_repair_authorized"]`` bit (set
+    server-side from the ``self_repair_enabled`` setting); model-supplied flags
+    such as ``user_requested`` are ignored, so the model cannot self-authorize.
     """
     ctx = agent_ctx or {}
     if int(ctx.get("depth") or 0) >= 1:
@@ -512,18 +516,25 @@ async def handle_self_repair(
     check_command = str(
         args.get("check_command") or args.get("check") or args.get("test_command") or ""
     ).strip()
-    user_requested = bool(args.get("user_requested") or args.get("confirm") or args.get("authorized"))
     do_restart = bool(args.get("restart"))
     service_name = str(args.get("service") or "Odysseus AI Service").strip() or "Odysseus AI Service"
+
+    # Authorization comes ONLY from the trusted, server-set ctx bit (sourced from
+    # a settings flag at the route), never from the model-generated tool payload.
+    # A model that emits {"user_requested": true} CANNOT self-authorize — that
+    # field is deliberately ignored here.
+    authorized = bool(ctx.get("self_repair_authorized"))
 
     if not objective:
         return {"error": "self_repair needs an `objective` describing the fix.", "exit_code": 1}
     if not check_command:
         return {"error": "self_repair needs a `check_command` (e.g. the pytest command) to "
                          "verify the fix before any restart.", "exit_code": 1}
-    if not user_requested:
-        return {"error": "self_repair must be explicitly authorized: set \"user_requested\": true "
-                         "only when the user asked FoulFox to repair its own code.", "exit_code": 1}
+    if not authorized:
+        return {"error": "self_repair is not authorized. The user must explicitly enable "
+                         "self-repair (server-side `self_repair_enabled` setting) before "
+                         "FoulFox may edit its own code; the model cannot authorize this "
+                         "itself.", "exit_code": 1}
 
     endpoint_url, model, _, _ = _resolve_endpoint(ctx, owner)
     if not endpoint_url or not model:

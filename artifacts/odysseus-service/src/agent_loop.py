@@ -1792,6 +1792,7 @@ async def stream_agent_loop(
     _is_teacher_run: bool = False,
     subagent_depth: int = 0,
     parent_role: Optional[str] = None,
+    self_repair_authorized: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
 
@@ -2723,6 +2724,11 @@ async def stream_agent_loop(
                     "depth": subagent_depth,
                     "owner": owner,
                     "parent_role": parent_role,
+                    # TRUSTED consent bit: sourced from a server-side setting at
+                    # the route, NOT from model-generated tool args. self_repair
+                    # reads this (never the tool payload) so the model cannot
+                    # self-authorize editing FoulFox's own code.
+                    "self_repair_authorized": bool(self_repair_authorized),
                 }
 
                 async def _run_tool():

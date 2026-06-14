@@ -42,16 +42,29 @@ Architect-review loop's "worker output is untrusted" framing.
 smuggle instructions back into the parent.
 
 ## self_repair: gated, confined, and NEVER self-killing
-- Double-gated: admin-only (`_ADMIN_TOOLS`) AND an explicit `user_requested`
-  flag — it can never fire silently from model text alone.
+- Double-gated: admin-only (`_ADMIN_TOOLS`) AND a TRUSTED consent bit
+  `agent_ctx["self_repair_authorized"]`. That bit is set server-side at the chat
+  route from the `self_repair_enabled` setting and threaded
+  `stream_agent_loop(self_repair_authorized=...)` -> `_agent_ctx`. Authorization
+  is read ONLY from that ctx bit; model-supplied payload flags (`user_requested`,
+  `confirm`, `authorized`) are deliberately ignored.
 - Worker is confined to repo root (`BASE_DIR` from `src/constants.py`).
 - Verification runs an independent `check_command` (e.g. focused pytest).
 - Restart is STAGED: returns a `restart_required` / `restart_method` signal.
   Calls an api-server lifecycle bridge only if `ODYSSEUS_SHELL_EXEC_BASE` is
   set; otherwise returns manual/workflow. It must NEVER kill the running uvicorn
   from the request path.
-**Why:** self-killing the process from inside the request that triggered it
-drops the response and can wedge the service; a human/bridge owns the restart.
+**Why:** the model authors the tool payload, so a model-supplied "user_requested"
+flag lets the model self-authorize repairing its own code — that is not
+user-initiation. Consent must come from a signal the model cannot forge (a
+server-set setting read at the route). Self-killing the process from inside the
+request that triggered it drops the response and can wedge the service; a
+human/bridge owns the restart.
+**How to apply:** never re-introduce a model-payload field as the auth source.
+Other `stream_agent_loop` callers (subagents, task_scheduler, teacher, bg_monitor,
+orchestrator, skills routes) omit the flag -> default False -> no autonomous
+self-repair. The "model can't self-authorize" guarantee is locked by
+`test_self_repair_model_cannot_self_authorize`.
 
 ## Progress trace: backend -> UI contract lives in chat.js
 Progress events stream via `progress_cb`. The agent loop drains them and yields

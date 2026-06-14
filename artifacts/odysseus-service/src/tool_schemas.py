@@ -1335,10 +1335,12 @@ FUNCTION_TOOL_SCHEMAS = [
                 "USER-INITIATED repair of FoulFox's OWN source code. Spawns a "
                 "worker confined to the FoulFox repo to make the smallest fix for "
                 "the objective, then runs the provided check_command to verify it "
-                "INDEPENDENTLY before reporting a staged restart. Only call this "
-                "when the user explicitly asked FoulFox to fix its own code, and "
-                "set user_requested=true. A check_command (e.g. the pytest command) "
-                "is REQUIRED. It never restarts the service itself from this call."
+                "INDEPENDENTLY before reporting a staged restart. Only usable when "
+                "the user has explicitly enabled self-repair (a trusted server-side "
+                "setting); you CANNOT authorize it yourself, and the call is "
+                "rejected when it is not enabled. A check_command (e.g. the pytest "
+                "command) is REQUIRED. It never restarts the service itself from "
+                "this call."
             ),
             "parameters": {
                 "type": "object",
@@ -1347,14 +1349,12 @@ FUNCTION_TOOL_SCHEMAS = [
                                    "description": "The fix to make in FoulFox's own codebase."},
                     "check_command": {"type": "string",
                                        "description": "Shell command that verifies the fix (e.g. a focused pytest run). Exit 0 = pass."},
-                    "user_requested": {"type": "boolean",
-                                        "description": "Must be true; set only when the user explicitly authorized self-repair."},
                     "restart": {"type": "boolean",
                                  "description": "If true, request a staged restart of the impacted service after checks pass."},
                     "service": {"type": "string",
                                  "description": "Service/workflow name to restart (default: 'Odysseus AI Service')."},
                 },
-                "required": ["objective", "check_command", "user_requested"],
+                "required": ["objective", "check_command"],
             },
         },
     },

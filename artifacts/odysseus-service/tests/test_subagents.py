@@ -1,4 +1,4 @@
-"""Sub-agent fan-out + user-initiated self-repair (Task #12).
+"""Sub-agent fan-out + user-initiated self-repair.
 
 The agent loop itself is mocked: every test swaps ``stream_agent_loop`` for a
 fake async generator so we exercise ``src.subagents`` in isolation (no real
@@ -80,6 +80,10 @@ CTX = {
     "owner": None,
     "parent_role": "windows",
 }
+
+# Same context but carrying the TRUSTED, server-set self-repair consent bit. Only
+# this (never the model-supplied tool payload) authorizes self_repair.
+AUTH_CTX = dict(CTX, self_repair_authorized=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -245,8 +249,7 @@ async def test_self_repair_emits_progress_trace(monkeypatch):
     await subagents.handle_self_repair(json.dumps({
         "objective": "fix the bug",
         "check_command": "python -m pytest -q",
-        "user_requested": True,
-    }), owner="u1", agent_ctx=CTX, progress_cb=cb)
+    }), owner="u1", agent_ctx=AUTH_CTX, progress_cb=cb)
     by_event = {e.get("event"): e for e in events if e.get("phase") == "self_repair"}
     assert {"start", "check", "done"} <= set(by_event)
     assert "objective" in by_event["start"] and "workspace" in by_event["start"]
@@ -273,18 +276,28 @@ async def test_spawn_invalid_schema_returns_error(monkeypatch):
 # self_repair — gating, BASE_DIR confinement, staged restart
 # --------------------------------------------------------------------------- #
 async def test_self_repair_requires_objective_check_and_authorization():
-    # missing objective
+    # missing objective (checked before authorization)
     out = await subagents.handle_self_repair(
-        json.dumps({"check_command": "true", "user_requested": True}), agent_ctx=CTX)
+        json.dumps({"check_command": "true"}), agent_ctx=AUTH_CTX)
     assert out["exit_code"] == 1 and "objective" in out["error"]
     # missing check_command
     out = await subagents.handle_self_repair(
-        json.dumps({"objective": "fix", "user_requested": True}), agent_ctx=CTX)
+        json.dumps({"objective": "fix"}), agent_ctx=AUTH_CTX)
     assert out["exit_code"] == 1 and "check_command" in out["error"]
-    # not user-authorized
+    # complete payload but NO trusted consent bit in ctx -> rejected
     out = await subagents.handle_self_repair(
         json.dumps({"objective": "fix", "check_command": "true"}), agent_ctx=CTX)
     assert out["exit_code"] == 1 and "authorized" in out["error"]
+
+
+async def test_self_repair_model_cannot_self_authorize():
+    # The model controls the tool payload; forging consent there must NOT work.
+    # Only the trusted agent_ctx["self_repair_authorized"] bit authorizes repair.
+    for forged in ("user_requested", "confirm", "authorized"):
+        out = await subagents.handle_self_repair(
+            json.dumps({"objective": "fix", "check_command": "true", forged: True}),
+            agent_ctx=CTX)
+        assert out["exit_code"] == 1 and "authorized" in out["error"], forged
 
 
 async def test_self_repair_blocked_at_depth_1():
@@ -308,8 +321,7 @@ async def test_self_repair_confines_worker_to_base_dir_and_passes_checks(monkeyp
     out = await subagents.handle_self_repair(json.dumps({
         "objective": "fix the bug",
         "check_command": "python -m pytest -q",
-        "user_requested": True,
-    }), owner="u1", agent_ctx=CTX)
+    }), owner="u1", agent_ctx=AUTH_CTX)
 
     assert out["exit_code"] == 0
     assert out["repair"]["checks_pass"] is True
@@ -333,8 +345,8 @@ async def test_self_repair_failed_checks_block_restart(monkeypatch):
 
     out = await subagents.handle_self_repair(json.dumps({
         "objective": "fix", "check_command": "false",
-        "user_requested": True, "restart": True,
-    }), agent_ctx=CTX)
+        "restart": True,
+    }), agent_ctx=AUTH_CTX)
 
     assert out["exit_code"] == 1
     assert out["repair"]["checks_pass"] is False
@@ -352,8 +364,8 @@ async def test_self_repair_staged_restart_without_bridge(monkeypatch):
 
     out = await subagents.handle_self_repair(json.dumps({
         "objective": "fix", "check_command": "true",
-        "user_requested": True, "restart": True,
-    }), agent_ctx=CTX)
+        "restart": True,
+    }), agent_ctx=AUTH_CTX)
 
     assert out["exit_code"] == 0
     assert out["repair"]["restart_required"] is True   # staged, never self-killed

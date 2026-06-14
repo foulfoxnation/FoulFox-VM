@@ -1164,6 +1164,12 @@ def setup_chat_routes(
                         _max_rounds = _DEFAULT_ROUNDS
                     _max_rounds = max(1, min(_max_rounds, 200))
 
+                    # TRUSTED self-repair consent: read server-side from a setting
+                    # the admin/user must explicitly enable. This bit (NOT the
+                    # model's tool args) is what authorizes self_repair, so the
+                    # model can never self-authorize editing FoulFox's own code.
+                    _self_repair_ok = bool(get_setting("self_repair_enabled", False))
+
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
                         sess.model,
@@ -1184,6 +1190,7 @@ def setup_chat_routes(
                         plan_mode=plan_mode,
                         approved_plan=approved_plan or None,
                         workspace=workspace or None,
+                        self_repair_authorized=_self_repair_ok,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:
