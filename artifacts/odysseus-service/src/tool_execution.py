@@ -563,7 +563,7 @@ async def _execute_tool_block_impl(
         do_manage_contact,
         do_vault_search, do_vault_get, do_vault_unlock,
         do_app_api,
-        do_list_vms, do_select_vm, do_vm_tool, do_vm_computer,
+        do_list_vms, do_select_vm, do_vm_tool, do_vm_computer, do_vm_app,
     )
 
     tool = block.tool_type
@@ -877,6 +877,15 @@ async def _execute_tool_block_impl(
         else:
             result = await do_vm_computer(_vm, content, owner=owner)
             desc = f"vm_computer @ {_vm}: {result.get('output', result.get('error', ''))[:80]}"
+    elif tool == "vm_app":
+        # Install/launch/operate apps + engines inside the SELECTED VM. The
+        # 'playbook' action is pure text and needs no VM, so resolve the
+        # selection but let do_vm_app decide whether a VM is required.
+        from src.vm_target import get_selected_vm
+
+        _vm = get_selected_vm()
+        result = await do_vm_app(_vm, content, owner=owner)
+        desc = f"vm_app @ {_vm or 'none'}: {result.get('output', result.get('error', ''))[:80]}"
     elif tool == "edit_image":
         desc = "edit_image"
         result = await do_edit_image(content, owner=owner)

@@ -48,6 +48,9 @@ ALWAYS_AVAILABLE = frozenset({
     "select_vm",
     # See + control the selected VM's desktop (screenshot + mouse/keyboard).
     "vm_computer",
+    # Install + operate apps/engines inside the selected VM (winget installs,
+    # launch, processes, per-engine playbooks, secret-assisted activation).
+    "vm_app",
 })
 
 # Tools that the Personal Assistant always has access to during scheduled
@@ -143,6 +146,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "list_vms": "List the registered virtual machines (id, name, OS, running state, SSH port). Use to see which VMs exist and which is running before targeting one with select_vm.",
     "select_vm": "Choose which machine your shell + file tools operate on. Pass a VM id (or name) to run bash/python/read_file/write_file/edit_file/ls/glob/grep ON THAT VM (over SSH); pass 'host' (or clear) to go back to the local host. Call list_vms first to see ids. The VM must be running for commands to succeed.",
     "vm_computer": "See and control the selected VM's graphical desktop. action='screenshot' returns the screen as an image; then move/click/double_click/right_click/drag/scroll the mouse or type/key the keyboard at pixel coordinates from that screenshot. Use for GUI work the shell can't do (clicking buttons, installers, browsers, games). Select the VM with select_vm first.",
+    "vm_app": "Install and operate apps and game engines inside the selected VM (Windows). actions: install (known app like chrome/unity-hub/epic/unreal/git/vscode, or any winget 'id'), launch (a known app, an absolute .exe 'path', or the user's FoulFox Engine), list_installed, processes, kill, playbook (step-by-step guide for overview/unity/unreal/chrome/foulfox — needs no VM), type_secret (type an allowlisted credential into the focused field without logging it). Select the VM with select_vm first; use vm_computer for GUI steps.",
 }
 
 
@@ -358,6 +362,11 @@ class ToolIndex:
                    "keyboard", "type", "desktop", "gui", "see the screen",
                    "control the vm", "computer use", "drag", "scroll"}):
             {"vm_computer", "select_vm"},
+        # Installing / running real software + engines inside the VM.
+        frozenset({"install", "winget", "launch", "unity", "unreal", "epic",
+                   "engine", "foulfox", "chrome", "browser", "game engine",
+                   "app", "application", "playbook", "uninstall"}):
+            {"vm_app", "select_vm", "vm_computer"},
         # NOTE: "tell" was removed from this set. It fired on any "tell me ..."
         # request (e.g. "visit <url> and tell me the title"), force-including the
         # whole email toolset and crowding out the relevant tools — the model then

@@ -2005,6 +2005,54 @@ async def _vm_list_raw(owner: Optional[str] = None) -> Dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+# osKind ('windows'|'linux'|'macos') is fixed for the life of a VM, so cache it
+# after the first lookup to avoid a /vm/list round-trip on every routed call.
+_os_kind_cache: Dict[str, str] = {}
+
+
+async def _vm_os_kind(vm_id: str, owner: Optional[str] = None) -> str:
+    """Return a VM's guest OS family ('windows'|'linux'|'macos'), cached.
+
+    Returns "" (treated as POSIX) when the registry can't be reached, so a
+    transient list failure never silently swaps a Linux guest onto the Windows
+    command path.
+    """
+    if not vm_id:
+        return ""
+    # Key by (owner, vm_id) in case VM ids are not globally unique across owners,
+    # so one owner's OS routing can never be served from another's cache entry.
+    ck = f"{owner or ''}:{vm_id}"
+    cached = _os_kind_cache.get(ck)
+    if cached is not None:
+        return cached
+    try:
+        data = await _vm_list_raw(owner)
+    except Exception:  # noqa: BLE001 - unknown OS just falls back to POSIX
+        return ""
+    kind = ""
+    for vm in (data.get("vms") or []):
+        if isinstance(vm, dict) and vm.get("id") == vm_id:
+            kind = str(vm.get("osKind") or "").strip().lower()
+            break
+    if kind:
+        _os_kind_cache[ck] = kind
+    return kind
+
+
+def _ps_encoded(script: str) -> str:
+    """Wrap a PowerShell script as one self-contained ``powershell`` command.
+
+    Windows OpenSSH runs the SSH command through cmd.exe, which then launches
+    PowerShell — quoting across those hops is a minefield. ``-EncodedCommand``
+    takes a base64 of the UTF-16LE script and is parsed by PowerShell directly
+    with no further shell re-interpretation, the one robust channel here.
+    """
+    import base64
+
+    b64 = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    return f"powershell -NoProfile -NonInteractive -EncodedCommand {b64}"
+
+
 async def do_list_vms(content: str = "", owner: Optional[str] = None) -> Dict[str, Any]:
     """List the registered VMs (id, name, OS, state, SSH port)."""
     from src.vm_target import get_selected_vm
@@ -2066,15 +2114,23 @@ async def do_select_vm(content: str = "", owner: Optional[str] = None) -> Dict[s
         ids = ", ".join(str(v.get("id")) for v in vms) or "(none registered)"
         return {"error": f"No VM matching {raw!r}. Known VMs: {ids}. Call list_vms.", "exit_code": 1}
     set_selected_vm(match.get("id"))
+    osk = str(match.get("osKind") or "").strip().lower()
     note = (
         ""
         if match.get("state") == "running"
         else f" (currently {match.get('state')} — commands will fail until it is running)"
     )
+    shell_note = (
+        " This is a Windows VM: the bash/python and file tools run as PowerShell over "
+        "SSH, so write PowerShell syntax. Use the vm_app tool to install and launch apps "
+        "and game engines (Unity, Unreal, Chrome, FoulFox), and vm_app playbook for steps."
+        if osk == "windows"
+        else ""
+    )
     return {
         "output": (
             f"Target set to '{match.get('id')}' ({match.get('name')}, {match.get('osKind')}){note}. "
-            "Shell and file tools now run on this VM."
+            "Shell and file tools now run on this VM." + shell_note
         ),
         "exit_code": 0,
     }
@@ -2229,6 +2285,189 @@ async def do_vm_computer(vm_id: str, content: str, owner: Optional[str] = None) 
     }
 
 
+def _win_tool_command(tool: str, content: str) -> Any:
+    """Build one Windows PowerShell command for a routed shell/file tool call.
+
+    Mirrors the POSIX translations in do_vm_tool but targets a Windows guest;
+    every command is wrapped with _ps_encoded so it survives the SSH→cmd.exe→
+    PowerShell hops. Returns the command string, or an ``{"error","exit_code"}``
+    dict when arguments are invalid (same contract as the POSIX branches). The
+    edit_file branch emits the same EDIT_NOT_FOUND / EDIT_NOT_UNIQUE sentinels
+    so do_vm_tool's shared result handling maps them identically.
+    """
+    import base64
+
+    def _b64(s: str) -> str:
+        return base64.b64encode(s.encode("utf-8")).decode("ascii")
+
+    def _u(s: str) -> str:
+        # PowerShell expression decoding a UTF-8 base64 literal back to a string.
+        return "[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + _b64(s) + "'))"
+
+    if tool == "bash":
+        try:
+            _is_bg, cmd = _split_bg_marker(content)
+        except Exception:  # noqa: BLE001
+            cmd = content
+        cmd = (cmd or content).strip()
+        if not cmd:
+            return {"error": "bash: empty command", "exit_code": 1}
+        # The agent's command IS PowerShell when a Windows VM is selected.
+        return _ps_encoded(cmd)
+
+    if tool == "python":
+        if not content.strip():
+            return {"error": "python: empty code", "exit_code": 1}
+        b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        # Requires Python on the guest; honest failure if it isn't installed.
+        ps = "python -c \"import base64;exec(base64.b64decode('" + b64 + "').decode())\""
+        return _ps_encoded(ps)
+
+    if tool == "read_file":
+        path, offset, limit = "", 0, 0
+        s = content.strip()
+        if s.startswith("{"):
+            try:
+                a = json.loads(s)
+                path = str(a.get("path", "")).strip()
+                offset = int(a.get("offset") or 0)
+                limit = int(a.get("limit") or 0)
+            except (ValueError, TypeError):
+                path = s.split("\n", 1)[0].strip()
+        else:
+            path = s.split("\n", 1)[0].strip()
+        if not path:
+            return {"error": "read_file: path is required", "exit_code": 1}
+        guard = "if(!(Test-Path -LiteralPath $p)){[Console]::Error.WriteLine('No such file: '+$p);exit 1};"
+        if offset > 0 or limit > 0:
+            start = max(offset, 1)
+            sel = f"Select-Object -Skip {start - 1}"
+            if limit > 0:
+                sel += f" -First {limit}"
+            ps = f"$p={_u(path)};" + guard + f"Get-Content -LiteralPath $p -Encoding UTF8 | {sel}"
+        else:
+            ps = f"$p={_u(path)};" + guard + "Get-Content -LiteralPath $p -Raw -Encoding UTF8"
+        return _ps_encoded(ps)
+
+    if tool == "write_file":
+        head, _, body = content.partition("\n")
+        path = head.strip()
+        if not path:
+            return {"error": "write_file: path is required", "exit_code": 1}
+        ps = (
+            f"$p={_u(path)};"
+            f"$b=[Convert]::FromBase64String('{_b64(body)}');"
+            "$d=Split-Path -Parent $p;"
+            "if($d){New-Item -ItemType Directory -Force -Path $d | Out-Null};"
+            "[IO.File]::WriteAllBytes($p,$b);"
+            "Write-Output ('Wrote {0} bytes to {1}' -f $b.Length,$p)"
+        )
+        return _ps_encoded(ps)
+
+    if tool == "edit_file":
+        try:
+            a = json.loads(content) if content.strip().startswith("{") else {}
+        except (ValueError, TypeError):
+            a = {}
+        path = str(a.get("path", "")).strip()
+        old = a.get("old_string", "")
+        new = a.get("new_string", "")
+        replace_all = bool(a.get("replace_all", False))
+        if not path:
+            return {"error": "edit_file: path is required", "exit_code": 1}
+        if old == "":
+            return {"error": "edit_file: old_string is required (use write_file to create a file)", "exit_code": 1}
+        if old == new:
+            return {"error": "edit_file: old_string and new_string are identical", "exit_code": 1}
+        ra = "$true" if replace_all else "$false"
+        ps = (
+            f"$p={_u(path)};$o={_u(old)};$n={_u(new)};$ra={ra};"
+            "$s=[IO.File]::ReadAllText($p);"
+            "$c=($s.Split([string[]]@($o),[StringSplitOptions]::None)).Length-1;"
+            "if($c -eq 0){[Console]::Error.WriteLine('EDIT_NOT_FOUND');exit 1};"
+            "if($c -gt 1 -and -not $ra){[Console]::Error.WriteLine('EDIT_NOT_UNIQUE:'+$c);exit 1};"
+            "if($ra){$u=$s.Replace($o,$n)}else{$i=$s.IndexOf($o);$u=$s.Substring(0,$i)+$n+$s.Substring($i+$o.Length)};"
+            "[IO.File]::WriteAllText($p,$u);"
+            "Write-Output ('Edited {0} ({1} replacement(s))' -f $p,$c)"
+        )
+        return _ps_encoded(ps)
+
+    if tool == "ls":
+        s = content.strip()
+        path = ""
+        if s.startswith("{"):
+            try:
+                path = str((json.loads(s) or {}).get("path", "")).strip()
+            except (ValueError, TypeError):
+                path = ""
+        else:
+            path = s.split("\n", 1)[0].strip()
+        pexpr = _u(path) if path else "'.'"
+        ps = (
+            f"$p={pexpr};"
+            "Get-ChildItem -Force -LiteralPath $p | "
+            "Select-Object Mode,Length,LastWriteTime,Name | Format-Table -AutoSize | Out-String"
+        )
+        return _ps_encoded(ps)
+
+    if tool == "glob":
+        s = content.strip()
+        if s.startswith("{"):
+            try:
+                a = json.loads(s)
+            except (ValueError, TypeError):
+                a = {"pattern": s}
+        else:
+            a = {"pattern": s}
+        pattern = str(a.get("pattern", "")).strip()
+        if not pattern:
+            return {"error": "glob: pattern is required", "exit_code": 1}
+        base = str(a.get("path", "")).strip() or "."
+        name = pattern.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        ps = (
+            f"$b={_u(base)};$n={_u(name)};"
+            "Get-ChildItem -LiteralPath $b -Recurse -File -Filter $n -ErrorAction SilentlyContinue | "
+            "Select-Object -First 200 -ExpandProperty FullName"
+        )
+        return _ps_encoded(ps)
+
+    if tool == "grep":
+        s = content.strip()
+        if s.startswith("{"):
+            try:
+                a = json.loads(s)
+            except (ValueError, TypeError):
+                a = {"pattern": s}
+        else:
+            a = {"pattern": s}
+        pattern = str(a.get("pattern", "")).strip()
+        if not pattern:
+            return {"error": "grep: pattern is required", "exit_code": 1}
+        path = str(a.get("path", "")).strip() or "."
+        try:
+            mx = max(1, min(int(a.get("max_results") or 200), 200))
+        except (TypeError, ValueError):
+            mx = 200
+        cs = "" if a.get("ignore_case") else " -CaseSensitive"
+        g = str(a.get("glob", "") or "").strip()
+        filt = ""
+        if g:
+            gname = g.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            filt = " -Filter " + _u(gname)
+        ps = "".join([
+            "$pat=", _u(pattern), ";$path=", _u(path), ";",
+            "$files=if(Test-Path -LiteralPath $path -PathType Container){",
+            "Get-ChildItem -LiteralPath $path -Recurse -File", filt, " -ErrorAction SilentlyContinue",
+            "}else{Get-Item -LiteralPath $path};",
+            "$files | Select-String -Pattern $pat", cs, " -ErrorAction SilentlyContinue | ",
+            "Select-Object -First ", str(mx), " | ",
+            "ForEach-Object {'{0}:{1}:{2}' -f $_.Path,$_.LineNumber,($_.Line.Trim())}",
+        ])
+        return _ps_encoded(ps)
+
+    return {"error": f"{tool}: not supported on a VM target", "exit_code": 1}
+
+
 async def do_vm_tool(
     vm_id: str, tool: str, content: str, owner: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -2249,7 +2488,16 @@ async def do_vm_tool(
 
     command: Optional[str] = None
 
-    if tool == "bash":
+    # Windows guests run the agent's shell/file tools through PowerShell (the SSH
+    # default shell is cmd.exe, so each call is wrapped as an encoded PS command).
+    # The POSIX translations below are unchanged for Linux/macOS guests.
+    oskind = await _vm_os_kind(vm_id, owner=owner)
+    if oskind == "windows":
+        built = _win_tool_command(tool, content)
+        if isinstance(built, dict):
+            return built
+        command = built
+    elif tool == "bash":
         # Remote background jobs aren't supported over the bridge; strip a
         # leading #!bg marker and run synchronously on the VM.
         try:
@@ -2418,6 +2666,272 @@ async def do_vm_tool(
         return {"output": _truncate(out), "exit_code": 0}
     msg = (stderr or stdout or "command failed").strip()
     return {"error": _truncate(msg), "exit_code": exit_code}
+
+
+# ---------------------------------------------------------------------------
+# vm_app — install & operate apps/engines inside the selected (Windows) VM
+# ---------------------------------------------------------------------------
+# Higher-level companion to the routed shell/file tools. It knows how to install
+# named apps via winget, launch them (including the user's FoulFox Engine from a
+# local path), inspect/kill processes, hand the agent a per-engine playbook, and
+# type an allowlisted secret into a focused GUI field WITHOUT ever logging it or
+# embedding it in a command (credentials would otherwise leak into the
+# /api/shell/exec history and the guest process list). Every guest command runs
+# as encoded PowerShell, so this targets a Windows guest.
+
+_VM_APP_KNOWN: Dict[str, Dict[str, str]] = {
+    "chrome":    {"winget": "Google.Chrome", "launch": "chrome"},
+    "unity-hub": {"winget": "Unity.UnityHub", "launch": r"C:\Program Files\Unity Hub\Unity Hub.exe"},
+    "unity":     {"winget": "Unity.UnityHub", "launch": r"C:\Program Files\Unity Hub\Unity Hub.exe"},
+    "epic":      {"winget": "EpicGames.EpicGamesLauncher", "launch": r"C:\Program Files (x86)\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe"},
+    "unreal":    {"winget": "EpicGames.EpicGamesLauncher", "launch": r"C:\Program Files (x86)\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe"},
+    "git":       {"winget": "Git.Git", "launch": ""},
+    "vscode":    {"winget": "Microsoft.VisualStudioCode", "launch": "code"},
+    "vs":        {"winget": "Microsoft.VisualStudio.2022.Community", "launch": ""},
+}
+
+# Only these env vars may ever be typed into a guest by type_secret. The explicit
+# allowlist stops the agent from exfiltrating arbitrary host secrets (internal
+# tokens, etc.) into a VM text field.
+_VM_APP_SECRET_ALLOWLIST = {
+    "UNITY_EMAIL", "UNITY_PASSWORD", "UNITY_SERIAL",
+    "EPIC_EMAIL", "EPIC_PASSWORD",
+}
+
+
+def _ps_sq(s: str) -> str:
+    """Quote a string as a PowerShell single-quoted literal (doubling quotes)."""
+    return "'" + str(s).replace("'", "''") + "'"
+
+
+def _vm_app_result(data: Dict[str, Any], label: str) -> Dict[str, Any]:
+    """Map a _vm_shell_exec result into the {output|error, exit_code} shape."""
+    from src.tool_utils import _truncate
+
+    if "error" in data and "stdout" not in data:
+        return {"error": data["error"], "exit_code": data.get("exit_code", 1)}
+    stdout = data.get("stdout", "") or ""
+    stderr = data.get("stderr", "") or ""
+    exit_code = data.get("exit_code", data.get("exitCode", 0))
+    if exit_code in (0, None):
+        out = stdout if stdout.strip() else (stderr if stderr.strip() else label)
+        return {"output": _truncate(out), "exit_code": 0}
+    msg = (stderr or stdout or f"{label} failed").strip()
+    return {"error": _truncate(msg), "exit_code": exit_code}
+
+
+async def do_vm_app(vm_id: Optional[str], content: str, owner: Optional[str] = None) -> Dict[str, Any]:
+    """Install / launch / inspect apps & engines inside the selected Windows VM."""
+    raw = (content or "").strip()
+    try:
+        args = json.loads(raw) if raw.startswith("{") else {}
+    except (ValueError, TypeError):
+        args = {}
+    if not isinstance(args, dict):
+        args = {}
+    action = str(args.get("action") or "").strip().lower()
+    if not action:
+        return {
+            "error": "vm_app requires an 'action' (install, launch, list_installed, "
+                     "processes, kill, playbook, type_secret).",
+            "exit_code": 1,
+        }
+
+    # playbook is pure text and needs no VM.
+    if action == "playbook":
+        engine = str(args.get("engine") or args.get("app") or "overview").strip().lower()
+        text = _VM_APP_PLAYBOOKS.get(engine)
+        if text is None:
+            avail = ", ".join(sorted(_VM_APP_PLAYBOOKS))
+            return {"error": f"vm_app playbook: unknown topic {engine!r}. Available: {avail}.", "exit_code": 1}
+        return {"output": text, "exit_code": 0}
+
+    if not vm_id:
+        return {"error": "vm_app: no VM selected. Call select_vm <id> first.", "exit_code": 1}
+
+    # Every operational action below targets a Windows guest (winget + encoded
+    # PowerShell). type_secret is the exception — it only injects keystrokes via
+    # the input bridge, so it works on any guest. Guard the rest so a Linux/macOS
+    # VM fails with a clear message instead of a confusing "powershell not found".
+    if action != "type_secret":
+        oskind = await _vm_os_kind(vm_id, owner=owner)
+        if oskind and oskind != "windows":
+            return {
+                "error": f"vm_app '{action}' targets a Windows guest, but the selected VM is "
+                         f"{oskind}. Use the bash/file tools (via select_vm) for non-Windows VMs.",
+                "exit_code": 1,
+            }
+
+    # type_secret routes the value through the keyboard input bridge, NEVER a
+    # command or a log line. The agent must first focus the field (click it with
+    # vm_computer); this only sends the keystrokes.
+    if action == "type_secret":
+        which = str(args.get("which") or args.get("name") or args.get("key") or "").strip().upper()
+        if which not in _VM_APP_SECRET_ALLOWLIST:
+            allowed = ", ".join(sorted(_VM_APP_SECRET_ALLOWLIST))
+            return {"error": f"vm_app type_secret: {which!r} is not an allowed secret. Allowed: {allowed}.", "exit_code": 1}
+        value = os.environ.get(which) or ""
+        if not value:
+            return {"error": f"vm_app type_secret: secret {which} is not set. Ask the user to add it in the Secrets pane.", "exit_code": 1}
+        res = await _vm_input(vm_id, [{"type": "type", "text": value}], owner=owner)
+        if isinstance(res, dict) and res.get("error"):
+            return {"error": f"vm_app type_secret: {res['error']}", "exit_code": 1}
+        return {"output": f"Typed secret {which} into the focused field on VM '{vm_id}'.", "exit_code": 0}
+
+    if action == "install":
+        app = str(args.get("app") or "").strip().lower()
+        wid = str(args.get("id") or "").strip()
+        if not wid and app:
+            known = _VM_APP_KNOWN.get(app)
+            if known:
+                wid = known["winget"]
+        if not wid:
+            known_keys = ", ".join(sorted(_VM_APP_KNOWN))
+            return {"error": f"vm_app install: pass a known app ({known_keys}) or an explicit winget 'id'.", "exit_code": 1}
+        ps = (
+            "winget install --id " + _ps_sq(wid) + " -e --source winget --silent "
+            "--accept-package-agreements --accept-source-agreements | Out-String"
+        )
+        # Installs are slow; give the bridge a generous budget (no host-side cap).
+        data = await _vm_shell_exec(vm_id, _ps_encoded(ps), owner=owner, timeout_ms=1_200_000)
+        return _vm_app_result(data, f"Installed {wid}")
+
+    if action == "launch":
+        path = str(args.get("path") or "").strip()
+        app = str(args.get("app") or "").strip().lower()
+        if not path:
+            if app == "foulfox":
+                path = (os.environ.get("FOULFOX_ENGINE_PATH") or "").strip()
+                if not path:
+                    return {"error": "vm_app launch: FoulFox Engine path unknown. Set the FOULFOX_ENGINE_PATH secret to the engine .exe path inside the VM, or pass 'path'.", "exit_code": 1}
+            elif app:
+                known = _VM_APP_KNOWN.get(app)
+                if known and known.get("launch"):
+                    path = known["launch"]
+                else:
+                    return {"error": f"vm_app launch: don't know how to launch {app!r}; pass an absolute 'path' to the .exe.", "exit_code": 1}
+            else:
+                return {"error": "vm_app launch: pass 'app' (a known app) or 'path' (absolute .exe path).", "exit_code": 1}
+        extra = args.get("args")
+        arglist = ""
+        if isinstance(extra, list) and extra:
+            items = ",".join(_ps_sq(str(x)) for x in extra)
+            arglist = f" -ArgumentList @({items})"
+        ps = f"Start-Process -FilePath {_ps_sq(path)}{arglist}; Write-Output ('Launched ' + {_ps_sq(path)})"
+        data = await _vm_shell_exec(vm_id, _ps_encoded(ps), owner=owner, timeout_ms=60_000)
+        return _vm_app_result(data, f"Launched {path}")
+
+    if action == "list_installed":
+        ps = "winget list --accept-source-agreements | Out-String"
+        data = await _vm_shell_exec(vm_id, _ps_encoded(ps), owner=owner, timeout_ms=120_000)
+        return _vm_app_result(data, "winget list")
+
+    if action == "processes":
+        ps = (
+            "Get-Process | Sort-Object -Property WS -Descending | Select-Object -First 50 "
+            "Name,Id,@{n='WS_MB';e={[math]::Round($_.WS/1MB,1)}} | Format-Table -AutoSize | Out-String"
+        )
+        data = await _vm_shell_exec(vm_id, _ps_encoded(ps), owner=owner, timeout_ms=60_000)
+        return _vm_app_result(data, "processes")
+
+    if action == "kill":
+        name = str(args.get("name") or "").strip()
+        pid = args.get("pid")
+        if pid not in (None, ""):
+            try:
+                pid_i = int(pid)
+            except (TypeError, ValueError):
+                return {"error": "vm_app kill: 'pid' must be an integer.", "exit_code": 1}
+            ps = f"Stop-Process -Id {pid_i} -Force; Write-Output 'Killed PID {pid_i}'"
+            label = f"killed PID {pid_i}"
+        elif name:
+            n = name[:-4] if name.lower().endswith(".exe") else name
+            ps = f"Stop-Process -Name {_ps_sq(n)} -Force; Write-Output ('Killed ' + {_ps_sq(n)})"
+            label = f"killed {n}"
+        else:
+            return {"error": "vm_app kill: pass 'name' (process name) or 'pid'.", "exit_code": 1}
+        data = await _vm_shell_exec(vm_id, _ps_encoded(ps), owner=owner, timeout_ms=30_000)
+        return _vm_app_result(data, label)
+
+    return {"error": f"vm_app: unknown action {action!r}.", "exit_code": 1}
+
+
+# Per-engine playbooks returned by vm_app action='playbook'. Plain text the agent
+# follows step by step, combining vm_app (install/launch/processes) with
+# vm_computer (screenshot/click/type/key) and type_secret for credentials.
+_VM_APP_PLAYBOOKS: Dict[str, str] = {
+    "overview": (
+        "FoulFox in-VM app & engine toolkit — overview\n"
+        "1. select_vm <id> to target the Windows VM (it must be running). Afterwards\n"
+        "   bash/python/file tools run as PowerShell on that guest.\n"
+        "2. vm_app install {app|id} installs software with winget (known apps: chrome,\n"
+        "   unity-hub, epic/unreal, git, vscode; or pass any winget 'id').\n"
+        "3. vm_app launch {app|path} starts an app, or the FoulFox Engine from a local\n"
+        "   .exe path (FOULFOX_ENGINE_PATH secret, or pass 'path').\n"
+        "4. vm_computer screenshot, then click/type/key to drive GUIs (engine sign-in,\n"
+        "   project setup). Screenshot before and after each action.\n"
+        "5. vm_app type_secret {which} types an allowlisted credential into the field you\n"
+        "   just clicked — the value is never shown or logged. Allowed: UNITY_EMAIL,\n"
+        "   UNITY_PASSWORD, UNITY_SERIAL, EPIC_EMAIL, EPIC_PASSWORD.\n"
+        "6. vm_app processes / kill to inspect or stop running programs.\n"
+        "Get a focused guide with vm_app playbook {engine}: unity, unreal, chrome, foulfox.\n"
+        "Secrets the user must add for activation: see each engine's playbook."
+    ),
+    "unity": (
+        "Unity playbook (lightest engine to automate — recommended first)\n"
+        "Secrets to add (Secrets pane): UNITY_EMAIL, UNITY_PASSWORD, and UNITY_SERIAL if\n"
+        "using a Plus/Pro serial (Personal needs no serial).\n"
+        "1. vm_app install unity-hub  (winget id Unity.UnityHub).\n"
+        "2. vm_app launch unity-hub, then vm_computer screenshot to see the Hub.\n"
+        "3. Sign in: click the account/profile field, vm_app type_secret UNITY_EMAIL,\n"
+        "   Tab or click the password field, vm_app type_secret UNITY_PASSWORD, then click\n"
+        "   Sign in. Complete any 2FA via the GUI (the user may need to approve).\n"
+        "4. Activate license in Hub > Preferences > Licenses > Add. For Personal pick the\n"
+        "   free option; for Plus/Pro choose serial and vm_app type_secret UNITY_SERIAL.\n"
+        "5. Install an Editor: Hub > Installs > Install Editor; pick an LTS version and the\n"
+        "   build modules you need (e.g. Windows Build Support), then Continue.\n"
+        "6. Create a project: Hub > Projects > New project, choose a template, set a name,\n"
+        "   Create. Drive all of this with vm_computer.\n"
+        "7. Build/run: open the project, use File > Build Settings to build, or press Play.\n"
+        "   Verify with screenshots."
+    ),
+    "unreal": (
+        "Unreal Engine playbook (via Epic Games Launcher — mostly GUI)\n"
+        "Secrets to add: EPIC_EMAIL, EPIC_PASSWORD. Note: Epic has no headless login, so\n"
+        "sign-in is done through the GUI with type_secret.\n"
+        "1. vm_app install epic  (winget id EpicGames.EpicGamesLauncher).\n"
+        "2. vm_app launch epic, then vm_computer screenshot.\n"
+        "3. Sign in: click the email field, vm_app type_secret EPIC_EMAIL, click password,\n"
+        "   vm_app type_secret EPIC_PASSWORD, click Sign In; approve any 2FA via GUI.\n"
+        "4. Install the engine: Unreal Engine tab > Library > '+' > pick a version >\n"
+        "   Install (this is large and slow). Watch progress with screenshots.\n"
+        "5. Launch the engine, create a project from a template in the Unreal Project\n"
+        "   Browser, then build/run via the editor toolbar. Drive with vm_computer."
+    ),
+    "chrome": (
+        "Google Chrome playbook\n"
+        "1. vm_app install chrome  (winget id Google.Chrome).\n"
+        "2. vm_app launch chrome (or launch with a URL: pass app='chrome' and\n"
+        "   args=['https://example.com']).\n"
+        "3. Drive the browser with vm_computer (screenshot, click the address bar, type a\n"
+        "   URL, key Return). Useful for downloading installers or engine assets the\n"
+        "   package manager doesn't cover."
+    ),
+    "foulfox": (
+        "FoulFox Engine playbook (run the user's own local build)\n"
+        "The FoulFox Engine is the user's build, not a public package — it must already be\n"
+        "inside the VM. Get the build into the guest first:\n"
+        "1. Copy the build into the VM (e.g. the VM 'frontload' shared folder, or download\n"
+        "   it with Chrome inside the guest), then note the full path to its .exe.\n"
+        "2. Tell the tool where it is: either set the FOULFOX_ENGINE_PATH secret to that\n"
+        "   .exe path, or pass 'path' to launch each time.\n"
+        "3. vm_app launch foulfox   (uses FOULFOX_ENGINE_PATH), or\n"
+        "   vm_app launch with path='C:\\\\path\\\\to\\\\FoulFoxEngine.exe'.\n"
+        "4. Drive the engine UI with vm_computer; open or create a project and build/run.\n"
+        "5. If it needs an account, click the field and use vm_app type_secret for any\n"
+        "   allowlisted credential, or type non-secret values with vm_computer."
+    ),
+}
 
 
 async def _cookbook_servers() -> Dict[str, Any]:

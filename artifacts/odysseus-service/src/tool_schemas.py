@@ -25,7 +25,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "bash",
-            "description": "Run a shell command (full access). Prefer a dedicated tool whenever one fits the job (reading, writing, editing, searching, or listing files); use bash only for what no dedicated tool covers (installs, git, builds, running programs, system info). Do NOT create or edit files via bash redirects/heredocs/sed -- use the dedicated file tools. Runs on the host by default; if a VM is selected via select_vm, it runs on that VM over SSH instead.",
+            "description": "Run a shell command (full access). Prefer a dedicated tool whenever one fits the job (reading, writing, editing, searching, or listing files); use bash only for what no dedicated tool covers (installs, git, builds, running programs, system info). Do NOT create or edit files via bash redirects/heredocs/sed -- use the dedicated file tools. Runs on the host by default; if a VM is selected via select_vm, it runs on that VM over SSH instead. If the selected VM is Windows, the command runs in PowerShell (use PowerShell syntax, not bash).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -39,7 +39,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "python",
-            "description": "Execute Python code to compute a result or test something. Prefer a dedicated tool whenever one fits the job (reading, writing, or searching files); use python only for computation, data processing, or scripting no dedicated tool covers. Runs on the host by default; if a VM is selected via select_vm, it runs on that VM (requires python3 there).",
+            "description": "Execute Python code to compute a result or test something. Prefer a dedicated tool whenever one fits the job (reading, writing, or searching files); use python only for computation, data processing, or scripting no dedicated tool covers. Runs on the host by default; if a VM is selected via select_vm, it runs on that VM (requires python3 on Linux, or python on the PATH on Windows).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -203,6 +203,45 @@ FUNCTION_TOOL_SCHEMAS = [
                     "key": {"type": "string", "description": "A single key to press, e.g. 'Return', 'Escape', 'Tab' (action=key)."},
                     "amount": {"type": "integer", "description": "Scroll amount in wheel clicks (action=scroll, default 3)."},
                     "direction": {"type": "string", "enum": ["up", "down"], "description": "Scroll direction (action=scroll, default down)."}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "vm_app",
+            "description": (
+                "Install and operate applications and game engines inside the selected VM "
+                "(Windows guest; call select_vm first). Pairs with vm_computer for GUI steps. "
+                "Actions: 'install' an app via winget (known: chrome, unity-hub, unity, epic, "
+                "unreal, git, vscode — or pass an explicit winget 'id'); 'launch' a known app, "
+                "an absolute .exe 'path', or the user's FoulFox Engine (app='foulfox', from the "
+                "FOULFOX_ENGINE_PATH secret or a 'path'); 'list_installed' (winget list); "
+                "'processes' (top processes); 'kill' a process by 'name' or 'pid'; 'playbook' "
+                "to get a step-by-step guide (engine=overview|unity|unreal|chrome|foulfox — needs "
+                "no VM); 'type_secret' to type an allowlisted credential (which=UNITY_EMAIL, "
+                "UNITY_PASSWORD, UNITY_SERIAL, EPIC_EMAIL, EPIC_PASSWORD) into the field you "
+                "focused with vm_computer — the value is never shown or logged."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["install", "launch", "list_installed", "processes",
+                                 "kill", "playbook", "type_secret"],
+                        "description": "What to do."
+                    },
+                    "app": {"type": "string", "description": "A known app name (chrome, unity-hub, unity, epic, unreal, git, vscode, or 'foulfox' for launch)."},
+                    "id": {"type": "string", "description": "An explicit winget package id for action=install (e.g. 'Google.Chrome')."},
+                    "path": {"type": "string", "description": "Absolute path to an .exe for action=launch (e.g. the FoulFox Engine build)."},
+                    "args": {"type": "array", "items": {"type": "string"}, "description": "Optional command-line arguments passed to the launched program (action=launch)."},
+                    "name": {"type": "string", "description": "Process name to kill (action=kill)."},
+                    "pid": {"type": "integer", "description": "Process id to kill (action=kill)."},
+                    "engine": {"type": "string", "description": "Which playbook to return (overview, unity, unreal, chrome, foulfox) for action=playbook."},
+                    "which": {"type": "string", "description": "Which allowlisted secret to type (action=type_secret): UNITY_EMAIL, UNITY_PASSWORD, UNITY_SERIAL, EPIC_EMAIL, EPIC_PASSWORD."}
                 },
                 "required": ["action"]
             }
@@ -1320,6 +1359,8 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
     elif tool_type == "select_vm":
         content = json.dumps({"vm": args.get("vm") or args.get("target") or args.get("id") or ""})
     elif tool_type == "vm_computer":
+        content = json.dumps(args) if args else "{}"
+    elif tool_type == "vm_app":
         content = json.dumps(args) if args else "{}"
     elif tool_type == "write_file":
         content = args.get("path", "") + "\n" + args.get("content", "")
