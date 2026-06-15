@@ -50,3 +50,40 @@ def test_get_chroma_client_does_not_cache_when_unreachable(monkeypatch):
     # A failed connection must leave the singleton unset so a later call
     # (once ChromaDB is up) can succeed.
     assert cc._client is None
+
+
+def test_use_http_selection(monkeypatch):
+    for var in ("CHROMADB_HOST", "CHROMADB_MODE", "CHROMADB_SERVER"):
+        monkeypatch.delenv(var, raising=False)
+    # No env -> embedded default (not HTTP).
+    assert cc._use_http() is False
+    monkeypatch.setenv("CHROMADB_MODE", "http")
+    assert cc._use_http() is True
+    monkeypatch.delenv("CHROMADB_MODE")
+    monkeypatch.setenv("CHROMADB_SERVER", "true")
+    assert cc._use_http() is True
+    monkeypatch.delenv("CHROMADB_SERVER")
+    monkeypatch.setenv("CHROMADB_HOST", "example.invalid")
+    assert cc._use_http() is True
+
+
+def test_get_chroma_client_embedded_default(monkeypatch, tmp_path):
+    """With no HTTP env, the default is an embedded on-disk store that never
+    probes a TCP port and can create/query a collection locally."""
+    pytest.importorskip("chromadb")
+    cc.reset_client()
+    for var in ("CHROMADB_HOST", "CHROMADB_MODE", "CHROMADB_SERVER"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(cc, "CHROMA_DIR", str(tmp_path / "chroma"))
+
+    def _no_probe(*_a, **_k):
+        raise AssertionError("embedded mode must not probe a TCP port")
+
+    monkeypatch.setattr(cc, "_port_open", _no_probe)
+
+    client = cc.get_chroma_client()
+    assert cc._client is client
+    col = client.get_or_create_collection("kb_smoke")
+    col.add(ids=["a"], documents=["hello world"], metadatas=[{"k": "v"}])
+    assert col.count() == 1
+    cc.reset_client()

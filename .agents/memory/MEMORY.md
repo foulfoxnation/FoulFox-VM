@@ -1,5 +1,6 @@
 - [Python deps install in this repl](python-deps-install.md) — pip/`installLanguagePackages`/`uv add` fail (immutable Nix store); use `uv pip install --target .pythonlibs/...`.
 - [Odysseus embedding](odysseus-embedding.md) — bundled Odysseus FastAPI app (artifacts/odysseus-service) embedded via api-server proxy; uses local SQLite, root-absolute URLs rewritten in proxy.
+- [Odysseus vector store](odysseus-vector-store.md) — semantic knowledge = full `chromadb` (embedded PersistentClient by default, HTTP only if CHROMADB_HOST/MODE set) + local fastembed; keep one process per data dir.
 - [Vite keep-awake](vite-keep-awake.md) — Replit Vite preview white-pages on long/idle sessions (HMR WS dies under throttling); fix = worker heartbeat + wake lock, no reload.
 - [FoulFox OS ISO build](foulfox-os-iso-build.md) — pin pnpm in CI (`@latest` drifts major → frozen-lockfile fails); @workspace libs export src (dist = only `.d.ts`); verify heavy builds on CI, not this repl.
 - [Odysseus sub-agents & self-repair](odysseus-subagents.md) — spawn_subagents/self_repair: depth-1 recursion lock, inherit parent agent_ctx, self-repair double-gated + never self-kills uvicorn.
