@@ -1,0 +1,69 @@
+name: Build check (fast)
+
+# Catch production-build breakages in minutes instead of hours.
+#
+# The shell's Vite/Rollup production build and the api-server's esbuild bundle
+# only ever run inside the heavy "Build FoulFox OS ISO" workflow, whose bulk is
+# the multi-GB Debian live-build stage. A production-build-only breakage (a
+# Rollup static-import error, a browser-incompatible Node import, a clean-
+# checkout install/typecheck failure) therefore stays hidden until someone
+# triggers a full ISO build and waits hours.
+#
+# This workflow does ONLY the fast part -- pin pnpm, frozen install, build the
+# shared libraries, then both artifact production builds -- and deliberately
+# never runs live-build or produces an .iso. It mirrors the exact build commands
+# in os/scripts/stage-app.sh so a green run here means the ISO build's app stage
+# will succeed too.
+
+on:
+  push:
+  pull_request:
+
+# Don't pile up redundant runs on the same ref; a newer push supersedes an
+# in-flight check.
+concurrency:
+  group: build-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out latest code on this ref
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable pnpm (corepack)
+        run: |
+          corepack enable
+          # Pin pnpm to the version that generated pnpm-lock.yaml (also set in
+          # package.json "packageManager"). pnpm@latest can be a newer MAJOR
+          # whose lockfile format differs, making `pnpm install --frozen-lockfile`
+          # fail fast on a clean checkout before the build even starts.
+          corepack prepare pnpm@10.26.1 --activate
+          node --version
+          pnpm --version
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace libraries (@workspace/*)
+        # Emits each lib's gitignored dist/ declarations and type-checks the
+        # TypeScript project references, in dependency order -- so a clean-
+        # checkout library error fails here, before the app builds.
+        run: pnpm run typecheck:libs
+
+      - name: Build the shell (production, BASE_PATH=/)
+        # The only place the shell's production Vite/Rollup build runs outside the
+        # ISO workflow (dev uses the Vite dev server). The bundle is large, so
+        # give Node extra heap headroom -- same as stage-app.sh.
+        run: NODE_OPTIONS=--max-old-space-size=4096 BASE_PATH=/ pnpm --filter @workspace/odysseus-shell run build
+
+      - name: Build the api-server (production, esbuild)
+        run: pnpm --filter @workspace/api-server run build
