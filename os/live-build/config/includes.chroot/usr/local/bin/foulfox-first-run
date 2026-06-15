@@ -11,7 +11,9 @@ set -euo pipefail
 # shellcheck disable=SC1091
 [ -f /etc/foulfox/foulfox.env ] && . /etc/foulfox/foulfox.env
 
-FOULFOX_HOME="${HOME:-/var/lib/foulfox}"
+# Keep this aligned with foulfox-patcher's FF_HOME (ODYSSEUS_DATA_DIR wins) so both
+# create/own/prune the SAME updater root even when the data dir is a separate mount.
+FOULFOX_HOME="${ODYSSEUS_DATA_DIR:-${HOME:-/var/lib/foulfox}}"
 STAGING="${FRONTLOAD_STAGING_DIR:-$FOULFOX_HOME/frontload}"
 VM_DIR="$FOULFOX_HOME/vm"
 CONFIG="$FOULFOX_HOME/.odysseus-vm-config.json"
@@ -24,9 +26,66 @@ SPICE_PORT="${VM_SPICE_PORT:-5930}"
 
 mkdir -p "$STAGING/drivers" "$STAGING/isos" "$STAGING/files" "$VM_DIR" "$FOULFOX_HOME/logs"
 
-# Ensure the appliance user (and the kvm group, for /dev/kvm) own runtime state.
+# Updater state the patcher mutates AS ROOT (downloaded bundles, extracted
+# releases, shared venvs, and the status/rollback/boot-recovery markers) stays
+# root-owned so the unprivileged 'foulfox' service user — which runs the
+# network-facing api-server and can invoke the patcher via sudo — cannot tamper
+# with a verified release or forge the boot-recovery marker. Create them root-owned
+# now and EXCLUDE them from the recursive chown below.
+UPDATE_DIRS="$FOULFOX_HOME/releases $FOULFOX_HOME/venvs $FOULFOX_HOME/update-staging $FOULFOX_HOME/updates"
+# shellcheck disable=SC2086  # deliberate word-splitting of the dir list
+mkdir -p $UPDATE_DIRS
+# shellcheck disable=SC2086
+chown root:root $UPDATE_DIRS 2>/dev/null || true
+# shellcheck disable=SC2086
+chmod 755 $UPDATE_DIRS 2>/dev/null || true
+
+# ── App release indirection (live-update support) ────────────────────────────
+# The systemd services run from $FOULFOX_HOME/app-current (a symlink) rather than
+# the baked /opt/foulfox/app, so foulfox-patcher can atomically swap in a new app
+# release and roll back. The baked app is "release 0": (re)create the pointer when
+# it is missing or dangling (e.g. a release was pruned or persistence was lost) so
+# the device always boots a known-good stack. A valid pointer — including one a
+# successful update set to a dir under $FOULFOX_HOME/releases — is left untouched
+# so updates survive reboot.
+APP_CURRENT="$FOULFOX_HOME/app-current"
+if [ ! -e "$APP_CURRENT" ]; then
+  ln -sfn /opt/foulfox/app "$APP_CURRENT"
+  echo "[foulfox-first-run] app-current -> /opt/foulfox/app (baked release 0)"
+fi
+
+# ── Interrupted-update recovery (power-loss safety) ──────────────────────────
+# foulfox-patcher arms a "pending" marker before it flips app-current to a new
+# release and clears it only once that release passes its health check. If the
+# marker is still present now, the last update was cut short (e.g. power loss)
+# before it could verify or roll back — revert to the recorded last-known-good
+# app BEFORE the services start (this unit is ordered Before them), so a
+# half-applied release can never boot-loop the appliance. Runs as root here, so
+# the status file it writes is fixed up by the chown below. No-op when no marker.
+if [ -x /usr/local/sbin/foulfox-patcher ]; then
+  # boot-recover returns non-zero ONLY when a recovery marker is armed (an update
+  # was cut short) AND it could not flip app-current back to the last-known-good
+  # release — i.e. the still-current release is unverified/bad. Fail this oneshot:
+  # foulfox-api.service and odysseus-service.service both Require= this unit, so a
+  # failure here STOPS them from starting the bad release. The marker is left armed,
+  # so a later boot retries recovery. (No marker / successful recovery => exit 0.)
+  if ! /usr/local/sbin/foulfox-patcher boot-recover; then
+    echo "[foulfox-first-run] FATAL: interrupted-update recovery could not restore the last-known-good release; refusing to start the app stack (recovery marker left armed for retry)" >&2
+    exit 1
+  fi
+fi
+
+# Ensure the appliance user (and the kvm group, for /dev/kvm) own runtime state —
+# but DO NOT descend into the updater dirs created above: those stay root-owned so
+# foulfox cannot tamper with verified releases, the staging bundle, or the
+# boot-recovery marker. -prune skips both the dirs and everything under them, and
+# chown -h never follows app-current (or any symlink) to the baked app it targets.
 if id foulfox >/dev/null 2>&1; then
-  chown -R foulfox:foulfox "$FOULFOX_HOME" 2>/dev/null || true
+  find "$FOULFOX_HOME" \
+    \( -path "$FOULFOX_HOME/releases" -o -path "$FOULFOX_HOME/venvs" \
+       -o -path "$FOULFOX_HOME/update-staging" -o -path "$FOULFOX_HOME/updates" \) -prune \
+    -o -print0 2>/dev/null \
+    | xargs -0r chown -h foulfox:foulfox 2>/dev/null || true
   usermod -aG kvm foulfox 2>/dev/null || true
 fi
 

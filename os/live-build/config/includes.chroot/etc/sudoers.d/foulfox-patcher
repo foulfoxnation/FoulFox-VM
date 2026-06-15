@@ -1,0 +1,7 @@
+# Let the appliance service user drive the live updater (foulfox-patcher).
+# The api-server runs as 'foulfox' and shells out to apply/rollback updates;
+# those need root to control systemd services and spawn the transient updater
+# unit. Only this single binary is permitted, and the patcher validates its own
+# subcommands. Installed 0440 by the 0030-foulfox-patcher-perms build hook.
+Cmnd_Alias FOULFOX_PATCHER = /usr/local/sbin/foulfox-patcher
+foulfox ALL=(root) NOPASSWD: FOULFOX_PATCHER

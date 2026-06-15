@@ -6,6 +6,7 @@ import odysseusProxyRouter from "./odysseus-proxy";
 import odysseusLifecycleRouter from "./odysseus-lifecycle";
 import filesRouter from "./files";
 import releaseRouter from "./release";
+import osUpdateRouter from "./os-update";
 
 const router: IRouter = Router();
 
@@ -14,6 +15,7 @@ router.use(shellRouter);
 router.use(vmRouter);
 router.use(filesRouter);
 router.use(releaseRouter);
+router.use(osUpdateRouter);
 router.use(odysseusLifecycleRouter);
 router.use(odysseusProxyRouter);
 

@@ -1,0 +1,638 @@
+#!/usr/bin/env bash
+# foulfox-patcher — live, atomic, rollback-safe app updates for FoulFox OS.
+#
+# WHY: the appliance is an immutable live-build image; without this, every code
+# change means re-flashing a USB stick. This pulls a pre-built, checksummed app
+# bundle from a release channel and swaps it into the running system WITHOUT a
+# reflash, with automatic rollback so a bad bundle can never brick the device.
+#
+# WHAT IT TOUCHES (all on the writable foulfox-persist overlay; never the
+# read-only baked /opt/foulfox/app):
+#   $FF_HOME/releases/<version>/app   unpacked app releases (immutable once placed)
+#   $FF_HOME/venvs/<reqs-sha256>      content-addressed shared Python venvs
+#   $FF_HOME/app-current             -> symlink the systemd services run from
+#   $FF_HOME/updates/status.json     machine-readable progress for the shell UI
+#   $FF_HOME/update-staging/         scratch (download + extract)
+#
+# The baked /opt/foulfox/app is "release 0": app-current points there on a fresh
+# device and rollback falls back to it, so there is always a known-good target.
+#
+# COMMANDS:
+#   check        read-only: print {available,currentVersion,latestVersion,...} JSON
+#   status       read-only: print updates/status.json (or an idle stub)
+#   apply        start an update (detaches into a transient systemd unit; root)
+#   rollback     revert to the previous release (detaches; root)
+#   __apply / __rollback   internal runners executed inside the transient unit
+#
+# apply/rollback re-launch the real work via `systemd-run` so that restarting
+# foulfox-api.service (which would otherwise kill a child of the api-server)
+# cannot interrupt the swap. They therefore require root (the api-server invokes
+# them through a narrow sudoers rule). check/status need no privileges.
+#
+# Power-loss safety: the release dir is assembled under a .tmp and atomically
+# rename()d into place; the app-current symlink is flipped with an atomic
+# rename; status.json is written via a temp + os.replace. A crash leaves either
+# the old or the new state, never a half-written one.
+
+set -uo pipefail
+
+# ── Config (foulfox.env supplies the channel + sizing; everything has a default) ──
+# shellcheck disable=SC1091
+[ -f /etc/foulfox/foulfox.env ] && . /etc/foulfox/foulfox.env
+
+FF_HOME="${ODYSSEUS_DATA_DIR:-/var/lib/foulfox}"
+BAKED_APP="/opt/foulfox/app"
+APP_CURRENT="$FF_HOME/app-current"
+RELEASES_DIR="$FF_HOME/releases"
+VENVS_DIR="$FF_HOME/venvs"
+STAGING_DIR="$FF_HOME/update-staging"
+UPDATES_DIR="$FF_HOME/updates"
+STATUS_FILE="$UPDATES_DIR/status.json"
+PREVIOUS_FILE="$UPDATES_DIR/previous"
+PENDING_FILE="$UPDATES_DIR/pending"
+
+KEEP="${FOULFOX_APP_RELEASES_KEEP:-2}"
+API_PORT="${PORT:-8080}"
+ODY_PORT="${ODYSSEUS_PORT:-7000}"
+HEALTH_TIMEOUT="${FOULFOX_UPDATE_HEALTH_TIMEOUT:-120}"
+DOWNLOAD_TIMEOUT="${FOULFOX_UPDATE_DOWNLOAD_TIMEOUT:-1800}"
+TRANSIENT_UNIT="foulfox-update"
+
+# Set by the apply flow so status writes carry the target/previous versions.
+TARGET_VER=""
+PREV_VERSION="${PREV_VERSION:-}"
+
+log() { echo "[foulfox-patcher] $*" >&2; }
+
+# ── Manifest URL resolution (mirrors api-server routes/release.ts) ───────────────
+# Explicit FOULFOX_APP_MANIFEST_URL wins; otherwise derive the rolling channel
+# asset from FOULFOX_GITHUB_REPO ("owner/repo").
+resolve_manifest_url() {
+  local url=""
+  if [ -n "${FOULFOX_APP_MANIFEST_URL:-}" ]; then
+    url="$FOULFOX_APP_MANIFEST_URL"
+  else
+    local repo="${FOULFOX_GITHUB_REPO:-}"
+    [ -n "$repo" ] || return 1
+    repo="$(printf '%s' "$repo" \
+      | sed -E 's#^git@github\.com:##i; s#^https?://github\.com/##i; s/\.git$//i; s#^/+##; s#/+$##')"
+    url="https://github.com/$repo/releases/download/foulfox-app-latest/foulfox-app-latest.json"
+  fi
+  # Signature verification is a deferred seam, so transport security is the only
+  # thing standing between us and a swapped manifest (and thus a swapped sha256 +
+  # bundle URL). Refuse anything but https for the manifest, not just the bundle.
+  case "$url" in https://*) ;; *) return 1;; esac
+  printf '%s\n' "$url"
+}
+
+# ── Version helpers ─────────────────────────────────────────────────────────────
+# The active release records its identity in <app>/.foulfox-app-version (JSON).
+current_version() {
+  local f="$APP_CURRENT/.foulfox-app-version"
+  [ -f "$f" ] || { printf ''; return 0; }
+  python3 -c 'import json,sys
+try:
+    print(json.load(open(sys.argv[1])).get("version","") or "")
+except Exception:
+    print("")' "$f" 2>/dev/null || printf ''
+}
+
+# ── status.json (atomic) ────────────────────────────────────────────────────────
+# Args: phase state message [error]
+write_status() {
+  local phase="$1" state="$2" message="$3" err="${4:-}"
+  # status.json lives under $UPDATES_DIR; never write through it if that dir was
+  # swapped for a symlink (that would be a root write to an attacker-chosen path).
+  [ -L "$UPDATES_DIR" ] && { log "refusing status write: $UPDATES_DIR is a symlink"; return 0; }
+  mkdir -p "$UPDATES_DIR"
+  # Write via an O_EXCL mktemp file (random name) so a pre-planted predictable
+  # "status.json.tmp" symlink can't redirect this root write; os.replace over the
+  # final path then atomically swaps it (overwriting a symlinked target safely).
+  local tmp
+  tmp="$(mktemp "$UPDATES_DIR/.status.XXXXXX" 2>/dev/null)" || return 0
+  CUR="$(current_version)" TGT="$TARGET_VER" PREV="$PREV_VERSION" \
+  python3 -c 'import json,os,sys,time
+phase,state,message,err,path,tmp=sys.argv[1:7]
+data={
+ "phase":phase,"state":state,"message":message,
+ "currentVersion":(os.environ.get("CUR") or None),
+ "targetVersion":(os.environ.get("TGT") or None),
+ "previousVersion":(os.environ.get("PREV") or None),
+ "error":(err or None),
+ "updatedAt":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),
+}
+with open(tmp,"w") as fh: fh.write(json.dumps(data,indent=2))
+os.replace(tmp,path)
+try: os.chmod(path,0o644)
+except OSError: pass
+' "$phase" "$state" "$message" "$err" "$STATUS_FILE" "$tmp" 2>/dev/null || true
+  rm -f "$tmp" 2>/dev/null || true
+}
+
+fail() { write_status "failed" "failed" "${1:-Update failed.}" "${2:-error}"; exit 1; }
+
+# ── Health gate: api-server + served shell + Odysseus agent must all answer ──────
+health_ok() {
+  curl -fsS --max-time 5 "http://127.0.0.1:$API_PORT/api/healthz" >/dev/null 2>&1 || return 1
+  curl -fsS --max-time 5 -o /dev/null "http://127.0.0.1:$API_PORT/" 2>/dev/null || return 1
+  curl -fsS --max-time 5 "http://127.0.0.1:$ODY_PORT/api/health" >/dev/null 2>&1 || return 1
+  return 0
+}
+
+wait_health() {
+  local deadline=$(( $(date +%s) + HEALTH_TIMEOUT ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    health_ok && return 0
+    sleep 3
+  done
+  return 1
+}
+
+restart_services() {
+  systemctl daemon-reload 2>/dev/null || true
+  # Odysseus first (foulfox-api orders After= it); restart never targets the
+  # transient updater unit, so this cannot kill us.
+  systemctl restart odysseus-service.service foulfox-api.service
+}
+
+# Atomically point app-current at $1 (a release's app dir or the baked app).
+set_current() {
+  local target="$1"
+  ln -sfn "$target" "$APP_CURRENT.next" || return 1
+  mv -Tf "$APP_CURRENT.next" "$APP_CURRENT" \
+    || { rm -f "$APP_CURRENT.next" 2>/dev/null || true; return 1; }
+}
+
+# Durable "an unverified release is live" transaction marker, holding the path to
+# revert to. Written + fsync'd BEFORE app-current is flipped and cleared only once
+# the new release passes its health check. foulfox-first-run consults it on every
+# boot: if it survives a reboot, the last apply was interrupted (e.g. power loss)
+# after the flip but before it could verify or roll back — so boot reverts to the
+# recorded last-known-good. This is what stops a half-applied update bricking us.
+# Atomically write a single line to a control file under an updater dir. Uses an
+# O_EXCL mktemp in the SAME dir (random name → a pre-planted predictable "<name>.tmp"
+# symlink can't redirect the write) then mv -Tf over the final path (rename replaces
+# a symlinked target without following it). Refuses if the dir itself is a symlink.
+atomic_write() {
+  local dest="$1" content="$2" dir tmp
+  dir="$(dirname "$dest")"
+  [ -L "$dir" ] && { log "refusing write: $dir is a symlink"; return 1; }
+  mkdir -p "$dir"
+  tmp="$(mktemp "$dir/.tmp.XXXXXX" 2>/dev/null)" || return 1
+  if printf '%s\n' "$content" > "$tmp" && mv -Tf "$tmp" "$dest" 2>/dev/null; then
+    return 0
+  fi
+  rm -f "$tmp" 2>/dev/null || true
+  return 1
+}
+
+mark_pending() {
+  atomic_write "$PENDING_FILE" "$1" || return 1
+  sync
+}
+clear_pending() {
+  rm -f "$PENDING_FILE"
+  sync
+}
+
+# Refuse if any updater dir was replaced by a symlink. Checked WITHOUT writing
+# status — status.json itself lives under $UPDATES_DIR, so writing it could follow
+# the very symlink we're guarding against (a root write to an attacker-chosen path).
+assert_update_dirs_safe() {
+  local d
+  for d in "$UPDATES_DIR" "$RELEASES_DIR" "$VENVS_DIR" "$STAGING_DIR"; do
+    if [ -L "$d" ]; then
+      log "refusing: updater directory $d is a symlink (possible tampering)"
+      return 1
+    fi
+  done
+  return 0
+}
+
+# Keep the dirs the patcher mutates AS ROOT out of the unprivileged service user's
+# reach. The api-server runs as 'foulfox' (network-facing) and can invoke us via
+# sudo; if foulfox could write into these dirs — or swap one for a symlink — it
+# could turn a root extraction or venv build into an arbitrary root write, or forge
+# the boot-recovery marker to make root repoint app-current anywhere. first-run
+# creates them root-owned and prunes them from its recursive chown; re-assert here
+# RECURSIVELY (to reclaim contents an older 'chown -R foulfox $FF_HOME' may have
+# left foulfox-owned) so an apply is safe even on the first run before any reboot.
+# foulfox keeps read+traverse (755 on the top dirs; file modes untouched) so the
+# services can still load the active release and read status.json.
+# Residual: FF_HOME itself must stay foulfox-writable for VM/runtime state, so a
+# determined local attacker could still race-RENAME a whole dir; fully closing that
+# needs a boot-time ownership change best verified on real hardware (follow-up).
+reclaim_update_dirs() {
+  local d
+  for d in "$RELEASES_DIR" "$VENVS_DIR" "$STAGING_DIR" "$UPDATES_DIR"; do
+    mkdir -p "$d"
+    # -R reclaims contents an older first-run left foulfox-owned; -h so we never
+    # follow a symlink (e.g. legitimate pnpm node_modules links) to its target.
+    chown -Rh root:root "$d" 2>/dev/null || true
+    chmod 755 "$d" 2>/dev/null || true
+  done
+}
+
+harden_update_dirs() {
+  if ! assert_update_dirs_safe; then
+    # Do NOT write_status here — status.json lives under the possibly-symlinked
+    # $UPDATES_DIR. Bail loudly without any root write under these dirs.
+    log "aborting: updater directory tampering detected"
+    exit 1
+  fi
+  reclaim_update_dirs
+}
+
+# Content-addressed shared venv keyed by requirements.txt hash. Built once from
+# the bundle's offline wheels, reused (symlinked) by every release with identical
+# deps — so a code-only push needs no rebuild and rollback keeps a valid venv.
+prepare_venv() {
+  local svc="$1"                 # .../artifacts/odysseus-service
+  local req="$svc/requirements.txt"
+  [ -f "$req" ] || return 0      # no python deps declared → nothing to prepare
+  local hash venv
+  hash="$(sha256sum "$req" | awk '{print $1}')"
+  venv="$VENVS_DIR/$hash"
+  if [ ! -f "$venv/.foulfox-deps-installed" ]; then
+    log "building venv $hash"
+    rm -rf "$venv"
+    mkdir -p "$VENVS_DIR"
+    python3 -m venv "$venv" || { rm -rf "$venv"; return 1; }
+    if [ -d "$svc/wheels" ]; then
+      "$venv/bin/pip" install --no-index --find-links "$svc/wheels" -r "$req" \
+        || { rm -rf "$venv"; return 1; }
+    else
+      # No vendored wheels (degraded path): try online, else fail clearly.
+      "$venv/bin/pip" install -r "$req" || { rm -rf "$venv"; return 1; }
+    fi
+    # Tell start.sh the deps are ready so it does not try to reinstall on boot.
+    touch "$venv/.foulfox-deps-installed"
+  fi
+  ln -sfn "$venv" "$svc/.venv"
+}
+
+# Keep the newest $KEEP releases plus whatever current/previous point at; drop
+# the rest, then any venv no surviving release still references.
+prune_releases() {
+  [ -d "$RELEASES_DIR" ] || return 0
+  local keep_paths=() cur prev
+  cur="$(readlink "$APP_CURRENT" 2>/dev/null || true)"
+  prev="$(cat "$PREVIOUS_FILE" 2>/dev/null || true)"
+  local r
+  # Newest-first by mtime.
+  while IFS= read -r r; do
+    [ -n "$r" ] || continue
+    keep_paths+=("$r")
+  done < <(ls -1dt "$RELEASES_DIR"/*/ 2>/dev/null | head -n "$KEEP" | sed 's#/$##')
+  local d base keep
+  for d in "$RELEASES_DIR"/*/; do
+    [ -d "$d" ] || continue
+    base="${d%/}"
+    keep=0
+    for k in "${keep_paths[@]}"; do [ "$base" = "$k" ] && keep=1; done
+    case "$cur" in "$base"/*) keep=1;; esac
+    case "$prev" in "$base"/*) keep=1;; esac
+    if [ "$keep" -eq 0 ]; then
+      log "pruning old release $base"
+      rm -rf "$base"
+    fi
+  done
+  # Drop venvs no surviving release references.
+  if [ -d "$VENVS_DIR" ]; then
+    local v target referenced
+    for v in "$VENVS_DIR"/*/; do
+      [ -d "$v" ] || continue
+      v="${v%/}"
+      referenced=0
+      for d in "$RELEASES_DIR"/*/; do
+        [ -d "$d" ] || continue
+        target="$(readlink "$d/app/artifacts/odysseus-service/.venv" 2>/dev/null || true)"
+        [ "$target" = "$v" ] && referenced=1
+      done
+      [ "$referenced" -eq 0 ] && { log "pruning unused venv $v"; rm -rf "$v"; }
+    done
+  fi
+}
+
+# ── apply (runs inside the transient unit, as root) ─────────────────────────────
+do_apply() {
+  harden_update_dirs
+  # Staging is disposable scratch — clear any leftover/planted control files (e.g. a
+  # symlinked manifest/bundle a dir swap could have left) so root never writes
+  # through them. (reldir.tmp under releases is rm -rf'd before extraction below.)
+  find "$STAGING_DIR" -mindepth 1 -delete 2>/dev/null || true
+
+  # Updates need persistent storage; on a RAM overlay a release would vanish on
+  # reboot and could exhaust memory. Refuse rather than pretend.
+  blkid -L foulfox-persist >/dev/null 2>&1 \
+    || fail "No 'foulfox-persist' partition — live updates need persistent storage." "no-persist"
+
+  local murl
+  murl="$(resolve_manifest_url)" \
+    || fail "No update source configured (set FOULFOX_GITHUB_REPO or FOULFOX_APP_MANIFEST_URL)." "unconfigured"
+
+  write_status "checking" "running" "Fetching update manifest…"
+  local mf="$STAGING_DIR/manifest.json"
+  curl -fsSL --max-time 30 -o "$mf" "$murl" \
+    || fail "Could not download the update manifest." "manifest-download"
+
+  local meta
+  meta="$(python3 -c 'import json,sys
+d=json.load(open(sys.argv[1]))
+print(d.get("version","") or "")
+print(d.get("bundleUrl","") or "")
+print((d.get("sha256","") or "").lower())' "$mf" 2>/dev/null)" \
+    || fail "Update manifest is malformed." "manifest-parse"
+  TARGET_VER="$(printf '%s' "$meta" | sed -n '1p')"
+  local burl bsha
+  burl="$(printf '%s' "$meta" | sed -n '2p')"
+  bsha="$(printf '%s' "$meta" | sed -n '3p')"
+
+  [ -n "$TARGET_VER" ] || fail "Manifest has no version." "manifest-parse"
+  # TARGET_VER becomes a directory name we rm -rf / mkdir / mv AS ROOT under
+  # releases/, so a hostile or buggy manifest must not smuggle '..' or '/' into
+  # it. Tight allowlist: alnum start, then alnum . _ - only (no slash, no dot
+  # start → no traversal, no absolute paths, no hidden escapes).
+  printf '%s' "$TARGET_VER" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' \
+    || fail "Manifest version has an unsafe format." "bad-version"
+  case "$burl" in https://*) ;; *) fail "Manifest bundle URL is not https." "bad-url";; esac
+  printf '%s' "$bsha" | grep -Eq '^[0-9a-f]{64}$' || fail "Manifest has no valid sha256." "manifest-parse"
+
+  local cur; cur="$(current_version)"
+  PREV_VERSION="$cur"
+  if [ -n "$cur" ] && [ "$cur" = "$TARGET_VER" ]; then
+    write_status "success" "success" "Already on the latest version ($cur)."
+    return 0
+  fi
+
+  write_status "downloading" "running" "Downloading update $TARGET_VER…"
+  local bundle="$STAGING_DIR/bundle.tar.gz"
+  rm -f "$bundle" "$bundle.partial"
+  curl -fL --retry 3 --max-time "$DOWNLOAD_TIMEOUT" -o "$bundle.partial" "$burl" \
+    || fail "Download failed (offline or interrupted)." "download"
+  mv -f "$bundle.partial" "$bundle"
+
+  write_status "verifying" "running" "Verifying download…"
+  local got; got="$(sha256sum "$bundle" | awk '{print $1}')"
+  [ "$got" = "$bsha" ] || fail "Checksum mismatch — refusing to install a tampered/corrupt bundle." "sha256"
+  # Signature seam: if a public key is baked at /etc/foulfox/update-pubkey and a
+  # detached signature ships alongside the bundle, verify here before extraction.
+
+  write_status "extracting" "running" "Unpacking $TARGET_VER…"
+  local reldir="$RELEASES_DIR/$TARGET_VER"
+  rm -rf "$reldir.tmp"
+  mkdir -p "$reldir.tmp"
+  # Harden before unpacking AS ROOT. sha256 only proves the bundle matches the
+  # manifest, and an attacker who controls the delivery channel controls both
+  # (signature verification is still a deferred seam), so the archive's structure
+  # must be validated before root extraction. A small Python tarfile preflight
+  # (python3 is in the base image for odysseus-service) inspects every member in a
+  # single pass — avoiding `tar | grep`, which is unsafe under pipefail because
+  # tar's SIGPIPE poisons the pipeline's exit status. It rejects: absolute member
+  # names and any '..' traversal in a name; any member that is not a regular file,
+  # directory, or symlink (i.e. hardlinks, devices, fifos, sockets); and any
+  # symlink whose target — normalized relative to the member's own directory —
+  # escapes the archive root. Relative pnpm node_modules links (targets like
+  # ../.pnpm/...) resolve inside app/, so legitimate bundles pass; an
+  # odysseus-service -> ../../../etc style link is rejected before later root ops
+  # (shape checks, prepare_venv's ln -sfn) could follow it outside the release.
+  if ! python3 - "$bundle" <<'PY'
+import sys, tarfile, posixpath
+try:
+    tf = tarfile.open(sys.argv[1], "r:*")
+    members = tf.getmembers()
+    tf.close()
+except Exception as e:
+    sys.stderr.write("unreadable bundle: %s\n" % e)
+    sys.exit(2)
+errs = []
+for m in members:
+    n = m.name
+    if n.startswith("/") or ".." in n.split("/"):
+        errs.append("unsafe path: " + n); continue
+    if not (m.isreg() or m.isdir() or m.issym()):
+        errs.append("unsafe type (hardlink/device/fifo): " + n); continue
+    if m.issym():
+        t = m.linkname
+        if posixpath.isabs(t):
+            errs.append("absolute symlink: %s -> %s" % (n, t)); continue
+        resolved = posixpath.normpath(posixpath.join(posixpath.dirname(n), t))
+        if resolved == ".." or resolved.startswith("../"):
+            errs.append("escaping symlink: %s -> %s" % (n, t)); continue
+if errs:
+    for e in errs[:20]:
+        sys.stderr.write(e + "\n")
+    sys.exit(1)
+sys.exit(0)
+PY
+  then
+    fail "Bundle failed its safety preflight (unsafe paths, link types, or escaping symlinks) — refusing to extract." "bundle-unsafe"
+  fi
+  tar --no-same-owner --no-same-permissions -xzf "$bundle" -C "$reldir.tmp" \
+    || fail "Could not unpack the bundle." "extract"
+  # Bundle must contain a top-level app/ with all three services built.
+  [ -f "$reldir.tmp/app/artifacts/api-server/dist/index.mjs" ] || fail "Bundle is missing the API server build." "bundle-shape"
+  [ -f "$reldir.tmp/app/artifacts/odysseus-shell/dist/public/index.html" ] || fail "Bundle is missing the shell build." "bundle-shape"
+  [ -d "$reldir.tmp/app/artifacts/odysseus-service" ] || fail "Bundle is missing the Odysseus service." "bundle-shape"
+
+  write_status "preparing" "running" "Preparing the runtime…"
+  prepare_venv "$reldir.tmp/app/artifacts/odysseus-service" \
+    || fail "Could not prepare the Python runtime for $TARGET_VER." "venv"
+
+  # Atomically promote the staged dir to the real release path.
+  rm -rf "$reldir"
+  mv -Tf "$reldir.tmp" "$reldir" || fail "Could not finalize the release directory." "finalize"
+  sync
+
+  # Remember where to roll back to, then flip + restart + health-gate.
+  local prev_target
+  prev_target="$(readlink "$APP_CURRENT" 2>/dev/null || printf '%s' "$BAKED_APP")"
+  atomic_write "$PREVIOUS_FILE" "$prev_target" \
+    || fail "Could not record the rollback target." "previous-write"
+
+  # Arm power-loss recovery: from here until the health check passes, a crash
+  # leaves the marker so the next boot reverts to $prev_target rather than
+  # booting the unverified release. If we can't arm it, abort BEFORE the flip —
+  # flipping without a recovery marker is exactly the brick we're guarding against
+  # (script is set -uo pipefail, no errexit, so this must be checked explicitly).
+  mark_pending "$prev_target" \
+    || fail "Could not arm update recovery marker." "pending-write"
+
+  write_status "applying" "running" "Switching to $TARGET_VER and restarting services…"
+  if ! set_current "$reldir/app"; then
+    # Forward flip failed — app-current still points at the known-good release, so
+    # nothing was switched. Disarm and abort cleanly (no half-applied state).
+    clear_pending
+    fail "Could not switch to the new release." "flip"
+  fi
+
+  if ! restart_services; then
+    write_status "rolling-back" "running" "Restart failed — rolling back…"
+    if set_current "$prev_target"; then
+      clear_pending
+      restart_services || true
+      fail "Services failed to restart; rolled back to $cur." "restart"
+    fi
+    # Rollback flip itself failed: leave the pending marker armed so the next boot
+    # reverts to the known-good target instead of booting the bad release.
+    fail "Services failed to restart and rollback flip failed — recovery armed for next boot." "restart-rollback"
+  fi
+
+  write_status "health-check" "running" "Verifying $TARGET_VER…"
+  if wait_health; then
+    clear_pending
+    write_status "success" "success" "Updated to $TARGET_VER."
+    prune_releases
+    return 0
+  fi
+
+  write_status "rolling-back" "running" "New version failed its health check — rolling back…"
+  if set_current "$prev_target"; then
+    clear_pending
+    if restart_services && wait_health; then
+      fail "Update $TARGET_VER was unhealthy; rolled back to ${cur:-the previous version}." "healthcheck"
+    fi
+    fail "Update $TARGET_VER was unhealthy and rollback is degraded — check journalctl." "healthcheck-rollback"
+  fi
+  # Rollback flip failed: keep the pending marker so boot-recover reverts next boot.
+  fail "Update $TARGET_VER was unhealthy and rollback flip failed — recovery armed for next boot." "healthcheck-rollback"
+}
+
+# ── rollback (runs inside the transient unit, as root) ──────────────────────────
+do_rollback() {
+  harden_update_dirs
+  local target
+  target="$(cat "$PREVIOUS_FILE" 2>/dev/null || true)"
+  [ -n "$target" ] || target="$BAKED_APP"
+  [ -e "$target" ] || target="$BAKED_APP"
+  TARGET_VER=""
+  write_status "rolling-back" "running" "Rolling back to the previous version…"
+  if ! set_current "$target"; then
+    # Flip failed — app-current is unchanged; don't disarm any armed pending marker.
+    fail "Could not switch back to the previous version." "rollback-flip"
+  fi
+  clear_pending
+  if restart_services && wait_health; then
+    write_status "success" "success" "Rolled back to the previous version."
+    return 0
+  fi
+  fail "Rollback restarted but did not pass the health check — check journalctl." "rollback"
+}
+
+# ── boot-recover (root; called by foulfox-first-run before the app services) ─────
+# If a "pending" marker survived a reboot, the previous apply was cut short (e.g.
+# power loss) after flipping app-current but before it could verify or roll back.
+# Revert to the recorded last-known-good app so a broken/unverified release can
+# never start — let alone boot-loop — on the next boot. No-op when no marker.
+do_boot_recover() {
+  harden_update_dirs
+  [ -f "$PENDING_FILE" ] || return 0
+  local good
+  good="$(cat "$PENDING_FILE" 2>/dev/null || true)"
+  [ -n "$good" ] && [ -e "$good" ] || good="$BAKED_APP"
+  log "interrupted update detected at boot — reverting to last known-good: $good"
+  if ! set_current "$good"; then
+    # Could not flip back at boot — keep the marker armed so the next boot retries
+    # rather than silently dropping recovery and leaving the bad release live.
+    log "boot-recover: could not flip app-current to $good — leaving marker armed for retry"
+    sync
+    return 1
+  fi
+  sync
+  clear_pending
+  TARGET_VER=""
+  PREV_VERSION=""
+  write_status "rolled-back" "failed" \
+    "An update was interrupted before it finished (power loss?) and was reverted to the last working version." "interrupted"
+  # Recovery (flip back + disarm) succeeded; a cosmetic status-write failure must
+  # NOT make this return non-zero, or first-run would refuse to boot a good stack.
+  return 0
+}
+
+# ── check (read-only; safe to run unprivileged) ─────────────────────────────────
+do_check() {
+  local murl cur="" latest="" available="false" status="unconfigured"
+  cur="$(current_version)"
+  if murl="$(resolve_manifest_url)"; then
+    local mf; mf="$(mktemp)"
+    if curl -fsSL --max-time 20 -o "$mf" "$murl" 2>/dev/null; then
+      latest="$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1])).get("version","") or "")
+except Exception: print("")' "$mf" 2>/dev/null || true)"
+      if [ -n "$latest" ]; then
+        if [ -n "$cur" ] && [ "$cur" = "$latest" ]; then status="current"; else status="available"; available="true"; fi
+      else
+        status="building"
+      fi
+    else
+      status="building"
+    fi
+    rm -f "$mf"
+  fi
+  python3 -c 'import json,sys
+print(json.dumps({
+ "available": sys.argv[1]=="true",
+ "status": sys.argv[2],
+ "currentVersion": (sys.argv[3] or None),
+ "latestVersion": (sys.argv[4] or None),
+}))' "$available" "$status" "$cur" "$latest"
+}
+
+# ── status (read-only) ──────────────────────────────────────────────────────────
+do_status() {
+  if [ -f "$STATUS_FILE" ]; then
+    cat "$STATUS_FILE"
+    return 0
+  fi
+  TARGET_VER=""
+  python3 -c 'import json,os,sys
+print(json.dumps({
+ "phase":"idle","state":"idle","message":"No update has run yet.",
+ "currentVersion":(sys.argv[1] or None),
+ "targetVersion":None,"previousVersion":None,"error":None,"updatedAt":None,
+}))' "$(current_version)"
+}
+
+# ── Detach apply/rollback into a transient unit (needs root) ─────────────────────
+require_root() {
+  [ "$(id -u)" -eq 0 ] || { echo '{"started":false,"reason":"foulfox-patcher apply/rollback must run as root."}'; exit 1; }
+}
+
+launch_detached() {
+  local runner="$1" startmsg="$2"
+  require_root
+  # Guard the sudo-facing entrypoint before any root write (mkdir/write_status):
+  # if an updater dir was swapped for a symlink, bail with JSON and NO status write.
+  assert_update_dirs_safe || { echo '{"started":false,"reason":"Updater directory tampering detected."}'; return 1; }
+  reclaim_update_dirs
+  if systemctl is-active --quiet "$TRANSIENT_UNIT.service" 2>/dev/null; then
+    echo '{"started":false,"reason":"An update is already in progress."}'
+    return 0
+  fi
+  mkdir -p "$UPDATES_DIR"
+  write_status "checking" "running" "$startmsg"
+  # --collect garbage-collects the unit after exit so the next run is clean.
+  systemd-run --collect --unit="$TRANSIENT_UNIT" \
+    /usr/local/sbin/foulfox-patcher "$runner" >/dev/null 2>&1 \
+    || { write_status "failed" "failed" "Could not start the updater." "spawn"; echo '{"started":false,"reason":"systemd-run failed"}'; return 1; }
+  echo '{"started":true}'
+}
+
+main() {
+  local cmd="${1:-}"
+  case "$cmd" in
+    apply)       launch_detached "__apply" "Starting update…" ;;
+    rollback)    launch_detached "__rollback" "Starting rollback…" ;;
+    __apply)     do_apply ;;
+    __rollback)  do_rollback ;;
+    check)        do_check ;;
+    status)       do_status ;;
+    boot-recover) do_boot_recover ;;
+    *)
+      echo "usage: foulfox-patcher {check|status|apply|rollback|boot-recover}" >&2
+      exit 2
+      ;;
+  esac
+}
+
+main "$@"

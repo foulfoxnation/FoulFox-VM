@@ -22,5 +22,6 @@
 - [noVNC + Vite CJS TLA pitfall](novnc-vite-cjs-tla.md) — pin @novnc/novnc to 1.4.0 ESM core/; 1.5+ CJS lib/ has a top-level await that crashes esbuild dep prebundle.
 - [api-server dev no-watch](apiserver-dev-no-watch.md) — dev = build+start, no watcher; restart the API Server workflow after backend edits or endpoints serve a stale build.
 - [FoulFox bootable-OS target](foulfox-bootable-os.md) — product aims to boot from USB on bare metal (KVM-native host); mutable VM state must live under ODYSSEUS_DATA_DIR (persistent partition), not tmpfs $HOME.
+- [FoulFox live-updater](foulfox-live-updater.md) — pull-based app-stack patcher: anti-brick invariant (clear pending marker ONLY after a confirmed good flip) + fail-CLOSED boot recovery via Requires=foulfox-prepare; signatures/migrations/FF_HOME sticky-bit deferred.
 - [FoulFox first-boot decisions](foulfox-first-boot-decisions.md) — additive SPICE (keep VNC), non-destructive persistence (warn not repartition), offline-safe sentinel-gated start, no network-online wait, single ODYSSEUS_DATA_DIR.
 - [Shell→Python stdin gotcha](shell-python-stdin-heredoc.md) — pipe JSON to `python3 -c`, NOT `python3 - <<EOF` (heredoc steals stdin, pipe is discarded → silent no-op).

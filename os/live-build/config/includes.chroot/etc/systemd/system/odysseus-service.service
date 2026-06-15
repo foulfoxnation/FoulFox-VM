@@ -9,8 +9,10 @@ Type=simple
 User=foulfox
 Group=foulfox
 EnvironmentFile=/etc/foulfox/foulfox.env
-WorkingDirectory=/opt/foulfox/app/artifacts/odysseus-service
-ExecStart=/usr/bin/env bash /opt/foulfox/app/artifacts/odysseus-service/start.sh
+# Run from the active app release (a symlink the patcher flips for live updates);
+# defaults to the baked /opt/foulfox/app. See foulfox-first-run + foulfox-patcher.
+WorkingDirectory=/var/lib/foulfox/app-current/artifacts/odysseus-service
+ExecStart=/usr/bin/env bash /var/lib/foulfox/app-current/artifacts/odysseus-service/start.sh
 Restart=on-failure
 RestartSec=3
 

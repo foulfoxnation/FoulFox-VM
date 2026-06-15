@@ -79,10 +79,10 @@ function requireShellToken(req: Request, res: Response, next: NextFunction) {
   res.status(401).json({ error: "Missing or invalid shell session token" });
 }
 
-// ── VM mutation CSRF protection ───────────────────────────────────────────────
-// State-changing VM endpoints also require the shell token to prevent
-// browser-based CSRF attacks against VM lifecycle operations.
-function requireVmToken(req: Request, res: Response, next: NextFunction) {
+// ── State-change CSRF protection ──────────────────────────────────────────────
+// State-changing endpoints (VM lifecycle, OS live-updates) also require the shell
+// token to prevent browser-based CSRF against them. Read-only GET/HEAD pass.
+function requireStateChangeToken(req: Request, res: Response, next: NextFunction) {
   // Read-only methods don't need CSRF protection
   if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") {
     next();
@@ -98,8 +98,8 @@ function requireVmToken(req: Request, res: Response, next: NextFunction) {
     next();
     return;
   }
-  logger.warn({ url: req.url, method: req.method }, "Rejected VM mutation: invalid token");
-  res.status(401).json({ error: "Missing or invalid session token for VM mutation" });
+  logger.warn({ url: req.url, method: req.method }, "Rejected state-changing request: invalid token");
+  res.status(401).json({ error: "Missing or invalid session token" });
 }
 
 // Apply localhost + token checks to shell execution endpoints
@@ -109,11 +109,17 @@ app.use("/api/shell/history", localhostOnly);
 // File explorer + USB frontload endpoints: localhost + token (powerful FS access)
 app.use("/api/files", localhostOnly, requireShellToken);
 
-// All VM endpoints: localhost only. requireVmToken lets read-only GET/HEAD
-// through (status, list, capabilities, provision SSE) but requires the session
-// token for every state-changing call — including the multi-VM create/lifecycle
-// and per-VM (/api/vm/:id/...) routes.
-app.use("/api/vm", localhostOnly, requireVmToken);
+// All VM endpoints: localhost only. requireStateChangeToken lets read-only
+// GET/HEAD through (status, list, capabilities, provision SSE) but requires the
+// session token for every state-changing call — including the multi-VM
+// create/lifecycle and per-VM (/api/vm/:id/...) routes.
+app.use("/api/vm", localhostOnly, requireStateChangeToken);
+
+// OS live-update endpoints: localhost only. The GET status under this prefix
+// passes through; the apply/rollback POSTs require the shell token (they drive
+// foulfox-patcher via sudo). /api/os/app-update-info is intentionally NOT here —
+// it is a public read-only probe like /api/os/release-info.
+app.use("/api/os/update", localhostOnly, requireStateChangeToken);
 
 // Shell session token endpoint — localhost only so remote callers can't obtain it
 app.get("/api/shell/session-token", localhostOnly, (_req, res) => {

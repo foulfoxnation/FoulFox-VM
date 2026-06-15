@@ -1,0 +1,13 @@
+#!/bin/sh
+# Lock down the live updater + its sudoers drop-in. Git can record the +x bit but
+# not the 0440 mode sudo demands for files in /etc/sudoers.d, so set it here and
+# validate the drop-in so a typo can never lock sudo out at boot.
+set -e
+
+chmod 0755 /usr/local/sbin/foulfox-patcher
+
+if [ -f /etc/sudoers.d/foulfox-patcher ]; then
+  chown root:root /etc/sudoers.d/foulfox-patcher
+  chmod 0440 /etc/sudoers.d/foulfox-patcher
+  visudo -cf /etc/sudoers.d/foulfox-patcher
+fi

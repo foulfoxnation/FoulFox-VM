@@ -1,0 +1,217 @@
+name: Build FoulFox App Bundle
+
+# Build a small, checksummed APP-STACK update bundle (api-server + odysseus-shell
+# + odysseus-service) that running FoulFox OS devices pull and apply live, WITHOUT
+# reflashing. The device-side updater is /usr/local/sbin/foulfox-patcher; this
+# workflow produces exactly what that script consumes:
+#
+#   foulfox-app-latest.tar.gz   top-level app/ = the staged monorepo, with the
+#                               three services built, vendored Python wheels under
+#                               app/artifacts/odysseus-service/wheels, and an
+#                               app/.foulfox-app-version stamp.
+#   foulfox-app-latest.json     manifest the device fetches first: version,
+#                               bundleUrl (https), sha256 (mandatory integrity
+#                               gate), sizeBytes, builtAt, minCompatibleAppVersion
+#                               (signature verification is a documented seam).
+#
+# How to run it (the "click"):
+#   GitHub -> Actions -> "Build FoulFox App Bundle" -> "Run workflow".
+# Pushing a tag like app-v1.2.3 also triggers a build whose version is that tag.
+#
+# This is the companion to "Build FoulFox OS ISO": the ISO reflashes the whole
+# appliance; this bundle live-patches just the app stack on devices already
+# running. Both build the current committed code, so commit + push, then click.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Also publish to the rolling 'foulfox-app-latest' release"
+        type: boolean
+        default: true
+  push:
+    tags:
+      - "app-v*"
+
+# One bundle build at a time so two runs can't clobber the shared rolling
+# release; let an in-flight build finish rather than cancelling it.
+concurrency:
+  group: foulfox-app-bundle
+  cancel-in-progress: false
+
+jobs:
+  build-bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write # required to create/update the rolling release
+
+    steps:
+      - name: Check out latest code on this ref
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable pnpm (corepack)
+        run: |
+          corepack enable
+          # Pin pnpm to the version that generated pnpm-lock.yaml (also set in
+          # package.json "packageManager"). pnpm@latest can be a newer MAJOR
+          # whose lockfile format differs, making the frozen-lockfile install in
+          # stage-app.sh fail fast on a clean checkout.
+          corepack prepare pnpm@10.26.1 --activate
+          node --version
+          pnpm --version
+
+      - name: "Set up Python (match the bookworm appliance, 3.11)"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Stage + build the app stack
+        # Reuses the exact script the ISO uses, so the bundle's app/ tree is
+        # byte-for-byte what gets baked into the image (api-server externalized
+        # runtime deps resolve via the copied node_modules symlinks).
+        run: |
+          chmod +x os/scripts/*.sh
+          os/scripts/stage-app.sh
+
+      - name: Vendor Python wheels for offline install on-device
+        # The patcher builds the odysseus-service venv with
+        # `pip install --no-index --find-links wheels`, so the appliance never
+        # needs network for Python deps. Build cp311 amd64 wheels here (the
+        # runner matches the appliance: glibc Linux x86_64, Python 3.11).
+        run: |
+          set -euo pipefail
+          STAGE="os/live-build/config/includes.chroot/opt/foulfox/app"
+          SVC="$STAGE/artifacts/odysseus-service"
+          if [ -f "$SVC/requirements.txt" ]; then
+            python3 -m pip install --upgrade pip wheel
+            rm -rf "$SVC/wheels"
+            mkdir -p "$SVC/wheels"
+            python3 -m pip wheel --wheel-dir "$SVC/wheels" -r "$SVC/requirements.txt"
+            echo "Vendored $(ls -1 "$SVC/wheels" | wc -l) wheels."
+          else
+            echo "::warning::No requirements.txt in odysseus-service — skipping wheel vendoring."
+          fi
+
+      - name: Stamp the bundle with its version
+        id: ver
+        run: |
+          set -euo pipefail
+          STAGE="os/live-build/config/includes.chroot/opt/foulfox/app"
+          # Version scheme shared with the ISO: a pushed app-v* tag wins,
+          # otherwise the short commit SHA.
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION="$(git rev-parse --short HEAD)"
+          fi
+          COMMIT="$(git rev-parse HEAD)"
+          BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # current_version() in foulfox-patcher reads .version from this file.
+          VERSION="$VERSION" COMMIT="$COMMIT" BUILT_AT="$BUILT_AT" python3 - "$STAGE/.foulfox-app-version" <<'PY'
+          import json, os, sys
+          json.dump({
+              "version": os.environ["VERSION"],
+              "commit": os.environ["COMMIT"],
+              "builtAt": os.environ["BUILT_AT"],
+          }, open(sys.argv[1], "w"), indent=2)
+          PY
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "built_at=${BUILT_AT}" >> "$GITHUB_OUTPUT"
+          echo "Bundle version: ${VERSION} (${COMMIT})"
+
+      - name: Pack the bundle + write the manifest
+        id: pack
+        env:
+          BUNDLE_URL_BASE: ${{ github.server_url }}/${{ github.repository }}/releases/download/foulfox-app-latest
+          VERSION: ${{ steps.ver.outputs.version }}
+          COMMIT: ${{ steps.ver.outputs.commit }}
+          BUILT_AT: ${{ steps.ver.outputs.built_at }}
+        run: |
+          set -euo pipefail
+          STAGE_PARENT="os/live-build/config/includes.chroot/opt/foulfox"
+          mkdir -p out
+          BUNDLE="out/foulfox-app-latest.tar.gz"
+          MANIFEST="out/foulfox-app-latest.json"
+
+          # Stable asset names (like the ISO's foulfox-os-latest.iso): the rolling
+          # release replaces them every build; the version lives in the manifest
+          # and inside the bundle's .foulfox-app-version. Top-level dir is app/ —
+          # the patcher extracts and expects app/artifacts/...; gzip because the
+          # device extracts with `tar -xzf` (zstd is not in the base image).
+          tar -czf "$BUNDLE" -C "$STAGE_PARENT" app
+
+          SHA="$(sha256sum "$BUNDLE" | awk '{print $1}')"
+          SIZE="$(stat -c%s "$BUNDLE")"
+          echo "$SHA  foulfox-app-latest.tar.gz" > "$BUNDLE.sha256"
+
+          BUNDLE_URL="${BUNDLE_URL_BASE}/foulfox-app-latest.tar.gz" \
+          SHA="$SHA" SIZE="$SIZE" python3 - "$MANIFEST" <<'PY'
+          import json, os, sys
+          json.dump({
+              "version": os.environ["VERSION"],
+              "commit": os.environ["COMMIT"],
+              "channel": "latest",
+              "bundleUrl": os.environ["BUNDLE_URL"],
+              "sha256": os.environ["SHA"],
+              "sizeBytes": int(os.environ["SIZE"]),
+              "builtAt": os.environ["BUILT_AT"],
+              # Seam: bump when a release needs a minimum running version to apply
+              # safely (e.g. a data migration). null = any version may update.
+              "minCompatibleAppVersion": None,
+              "notes": "Automated app-stack bundle.",
+          }, open(sys.argv[1], "w"), indent=2)
+          PY
+
+          SIZE_H="$(numfmt --to=iec "$SIZE" 2>/dev/null || echo "${SIZE}B")"
+          echo "size_h=${SIZE_H}" >> "$GITHUB_OUTPUT"
+          echo "Bundle: ${SIZE_H}, sha256 ${SHA}"
+          ls -lh out
+          echo "--- manifest ---"; cat "$MANIFEST"
+
+      - name: Upload bundle as run artifact (guaranteed download)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: foulfox-app-bundle-${{ steps.ver.outputs.version }}
+          path: |
+            out/foulfox-app-latest.tar.gz
+            out/foulfox-app-latest.tar.gz.sha256
+            out/foulfox-app-latest.json
+          retention-days: 14
+          # The tarball is already gzip-compressed — don't re-zip it.
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Publish/refresh the rolling "foulfox-app-latest" release
+        if: ${{ success() && (github.event_name == 'push' || inputs.publish_release) }}
+        # Never let a release hiccup turn a good build red — the run artifact
+        # above is the guaranteed download.
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: foulfox-app-latest
+          name: FoulFox App Bundle - latest
+          prerelease: true
+          body: |
+            Automated FoulFox OS app-stack update bundle (live-patch, no reflash).
+
+            - Version: `${{ steps.ver.outputs.version }}`
+            - Commit: `${{ steps.ver.outputs.commit }}`
+            - Built (UTC): `${{ steps.ver.outputs.built_at }}`
+            - Bundle size: `${{ steps.pack.outputs.size_h }}`
+
+            FoulFox OS devices fetch `foulfox-app-latest.json`, verify
+            `foulfox-app-latest.tar.gz` against its `sha256`, then apply it
+            atomically with automatic rollback. This release's assets are
+            replaced on every build, so these links are always the newest bundle.
+          files: |
+            out/foulfox-app-latest.tar.gz
+            out/foulfox-app-latest.tar.gz.sha256
+            out/foulfox-app-latest.json

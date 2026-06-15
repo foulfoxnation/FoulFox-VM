@@ -156,6 +156,75 @@ export async function fetchOsRelease(): Promise<OsReleaseInfo> {
   return res.json();
 }
 
+// ── Live app-stack updates (the "patcher") ──────────────────────────────────────
+// FoulFox OS devices pull a checksummed app bundle and swap it in atomically with
+// automatic rollback — no reflash. The api-server probes the rolling manifest and
+// shells out to /usr/local/sbin/foulfox-patcher. `supported` is false anywhere the
+// patcher isn't installed (e.g. the Replit dev preview), so the UI can say so.
+export interface AppUpdateInfo {
+  available: boolean;
+  status: "ready" | "current" | "building" | "unconfigured";
+  currentVersion: string | null;
+  latestVersion: string | null;
+  notes: string | null;
+  builtAt: string | null;
+  sizeBytes: number | null;
+  repo: string | null;
+  source: "explicit" | "github" | null;
+  supported: boolean;
+}
+
+// Filesystem-backed progress written by the patcher — it survives the api-server
+// restart that apply triggers, so polling resumes against the same record.
+export interface UpdateStatus {
+  phase: string;
+  state: "idle" | "running" | "success" | "failed";
+  message: string;
+  currentVersion: string | null;
+  targetVersion: string | null;
+  previousVersion: string | null;
+  error: string | null;
+  updatedAt: string | null;
+}
+
+// What apply/rollback return immediately (the real work detaches into a transient
+// systemd unit; progress then comes from fetchUpdateStatus).
+export interface UpdateActionResult {
+  started: boolean;
+  reason?: string;
+  error?: string;
+}
+
+export async function fetchAppUpdateInfo(): Promise<AppUpdateInfo> {
+  const res = await fetch(apiUrl("/api/os/app-update-info"));
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function fetchUpdateStatus(): Promise<UpdateStatus> {
+  const res = await fetch(apiUrl("/api/os/update/status"));
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function applyAppUpdate(token?: string | null): Promise<UpdateActionResult> {
+  const res = await fetch(apiUrl("/api/os/update/apply"), {
+    method: "POST",
+    headers: jsonHeaders(token),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function rollbackAppUpdate(token?: string | null): Promise<UpdateActionResult> {
+  const res = await fetch(apiUrl("/api/os/update/rollback"), {
+    method: "POST",
+    headers: jsonHeaders(token),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export interface CreateVmInput {
   name: string;
   osKind: OsKind;

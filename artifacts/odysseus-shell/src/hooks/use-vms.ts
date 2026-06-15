@@ -9,18 +9,27 @@ import {
   vmLifecycle,
   deleteVm,
   retryProvision,
+  fetchAppUpdateInfo,
+  fetchUpdateStatus,
+  applyAppUpdate,
+  rollbackAppUpdate,
   type CreateVmInput,
   type VmLifecycleAction,
   type VmSummary,
   type VmCapabilities,
   type OsImage,
   type OsReleaseInfo,
+  type AppUpdateInfo,
+  type UpdateStatus,
 } from "@/lib/vm-api";
 
 export const VM_LIST_KEY = ["vm-list"];
 export const VM_CAPS_KEY = ["vm-capabilities"];
 export const VM_OS_IMAGES_KEY = ["vm-os-images"];
 export const OS_RELEASE_KEY = ["os-release"];
+export const APP_UPDATE_INFO_KEY = ["app-update-info"];
+export const UPDATE_STATUS_KEY = ["update-status"];
+export const SHELL_TOKEN_KEY = ["shell-session-token"];
 
 export function useVmList() {
   return useQuery<VmSummary[]>({
@@ -88,5 +97,52 @@ export function useRetryProvision() {
   return useMutation({
     mutationFn: (id: string) => retryProvision(id, token),
     onSuccess: () => qc.invalidateQueries({ queryKey: VM_LIST_KEY }),
+  });
+}
+
+// ── Live app-stack updates ──────────────────────────────────────────────────────
+export function useAppUpdateInfo() {
+  return useQuery<AppUpdateInfo>({
+    queryKey: APP_UPDATE_INFO_KEY,
+    queryFn: fetchAppUpdateInfo,
+    refetchInterval: 60_000,
+  });
+}
+
+export function useUpdateStatus() {
+  return useQuery<UpdateStatus>({
+    queryKey: UPDATE_STATUS_KEY,
+    queryFn: fetchUpdateStatus,
+    // Poll fast while an update runs, slowly when idle. The status file is
+    // written by the detached patcher, so it keeps advancing even across the
+    // api-server restart that apply triggers.
+    refetchInterval: (query) =>
+      query.state.data?.state === "running" ? 2000 : 20_000,
+  });
+}
+
+// apply/rollback restart the api-server, which mints a fresh shell token; drop
+// the cached one so the next action re-fetches it instead of sending a stale one.
+function onUpdateActionSettled(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: UPDATE_STATUS_KEY });
+  qc.invalidateQueries({ queryKey: APP_UPDATE_INFO_KEY });
+  qc.invalidateQueries({ queryKey: SHELL_TOKEN_KEY });
+}
+
+export function useApplyAppUpdate() {
+  const qc = useQueryClient();
+  const { data: token } = useShellToken();
+  return useMutation({
+    mutationFn: () => applyAppUpdate(token),
+    onSettled: () => onUpdateActionSettled(qc),
+  });
+}
+
+export function useRollbackAppUpdate() {
+  const qc = useQueryClient();
+  const { data: token } = useShellToken();
+  return useMutation({
+    mutationFn: () => rollbackAppUpdate(token),
+    onSettled: () => onUpdateActionSettled(qc),
   });
 }
