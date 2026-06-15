@@ -30,6 +30,27 @@ if id foulfox >/dev/null 2>&1; then
   usermod -aG kvm foulfox 2>/dev/null || true
 fi
 
+# ── Persistence sanity check (non-destructive) ───────────────────────────────
+# The live image boots with 'persistence persistence-label=foulfox-persist'. If
+# no partition with that label exists (a plain dd/Etcher flash has none), ALL
+# writes — the multi-GB Windows ISO and the 128G guest disk — land in a RAM
+# overlay: they are LOST on reboot and can exhaust memory mid-install. We never
+# repartition the user's stick automatically; warn loudly in the service log and
+# drop a note the shell surfaces, so the user can add the partition deliberately.
+if ! blkid -L foulfox-persist >/dev/null 2>&1; then
+  echo "[foulfox-first-run] WARNING: no 'foulfox-persist' partition — running on a RAM overlay." >&2
+  echo "[foulfox-first-run] WARNING: downloads and the Windows guest will be LOST on reboot and may exhaust memory." >&2
+  echo "[foulfox-first-run] WARNING: add an ext4 partition labelled 'foulfox-persist' to the USB stick (see docs/first-boot.md)." >&2
+  cat > "$FOULFOX_HOME/logs/PERSISTENCE-WARNING.txt" <<'WARN'
+No 'foulfox-persist' partition was found, so FoulFox OS is running entirely in RAM.
+Anything you download or install (including the Windows VM) will be ERASED on reboot,
+and large downloads may run the machine out of memory. To make storage persistent,
+add a second partition labelled exactly 'foulfox-persist' (ext4, containing a
+'persistence.conf' of "/ union") to the USB stick. See docs/first-boot.md.
+WARN
+  chown foulfox:foulfox "$FOULFOX_HOME/logs/PERSISTENCE-WARNING.txt" 2>/dev/null || true
+fi
+
 # ── Locate a Windows ISO ─────────────────────────────────────────────────────
 # Prefer the frontload staging dir, then any mounted removable media.
 find_windows_iso() {

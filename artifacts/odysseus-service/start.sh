@@ -26,9 +26,19 @@ else
   fi
   # shellcheck disable=SC1091
   source "$VENV_DIR/bin/activate"
-  if [ -f "$SCRIPT_DIR/requirements.txt" ]; then
-    pip install --quiet --upgrade pip
-    pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
+  # Install deps only once. The packaged image's build hook pre-provisions this
+  # venv and stamps a sentinel, so we do NOT reinstall on every boot — that would
+  # crash an offline first boot (no PyPI) and, with Restart=on-failure, crash-loop
+  # the service. `set -e` must not abort here when pip fails offline; the
+  # build-provisioned venv is already usable, so the install runs inside an `if`.
+  DEPS_STAMP="$VENV_DIR/.foulfox-deps-installed"
+  if [ ! -f "$DEPS_STAMP" ] && [ -f "$SCRIPT_DIR/requirements.txt" ]; then
+    if pip install --quiet --upgrade pip \
+       && pip install --quiet -r "$SCRIPT_DIR/requirements.txt"; then
+      touch "$DEPS_STAMP"
+    else
+      echo "[odysseus] WARNING: dependency install skipped (offline?); using the pre-provisioned venv." >&2
+    fi
   fi
   PY="python"
 fi

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Start the Windows VM through the api-server so runtime state stays consistent
-# with the shell's VM controls. No-ops gracefully when nothing is configured
-# (e.g. before the user has frontloaded a Windows ISO).
+# Provision (build the Windows unattended answer-file CD) and then start the VM
+# through the api-server, so runtime state stays consistent with the shell's VM
+# controls. No-ops gracefully when no media is configured (e.g. before the user
+# has frontloaded a Windows ISO).
 set -euo pipefail
 
 # shellcheck disable=SC1091
@@ -9,29 +10,91 @@ set -euo pipefail
 PORT="${PORT:-8080}"
 BASE="http://127.0.0.1:${PORT}"
 
+log() { echo "[foulfox-vm-autostart] $*"; }
+
 # Wait for the api-server to be reachable.
 for _ in $(seq 1 60); do
   if curl -sf -o /dev/null "$BASE/api/vm/status"; then break; fi
   sleep 1
 done
 
-# Only autostart if a Windows ISO or an existing disk is configured.
-status="$(curl -sf "$BASE/api/vm/status" 2>/dev/null || echo '{}')"
-case "$status" in
-  *'"isoPath":null'*'"diskPath":null'*)
-    echo "[foulfox-vm-autostart] no ISO or disk configured yet; skipping"
-    exit 0
-    ;;
-esac
+# Read the default VM's id + media presence from the VM list. Parsed with
+# python3 (robust against JSON field order / whitespace) so a schema reshuffle
+# can't make us POST /start on a media-less VM. NOTE: we MUST use `python3 -c`
+# (program in the arg) so the piped curl JSON stays on stdin — `python3 - <<EOF`
+# would make the heredoc stdin and silently discard the piped JSON.
+vm_info() {
+  curl -sf "$BASE/api/vm/list" 2>/dev/null | python3 -c 'import sys, json
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+vms = data.get("vms") or []
+if not vms:
+    sys.exit(0)
+vm = next((v for v in vms if v.get("id") == "default"), vms[0])
+print(vm.get("id") or "")
+print("yes" if vm.get("isoPath") else "no")
+print("yes" if vm.get("diskPath") else "no")' 2>/dev/null || true
+}
 
-# The /vm/* routes are CSRF-guarded with a per-process token served on loopback.
-TOKEN="$(curl -sf "$BASE/api/shell/session-token" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
-if [ -z "$TOKEN" ]; then
-  echo "[foulfox-vm-autostart] no shell token available; skipping"
+INFO="$(vm_info)"
+VM_ID="$(printf '%s\n' "$INFO" | sed -n 1p)"
+HAS_ISO="$(printf '%s\n' "$INFO" | sed -n 2p)"
+HAS_DISK="$(printf '%s\n' "$INFO" | sed -n 3p)"
+
+if [ -z "$VM_ID" ]; then
+  log "no VM registered yet; skipping"
+  exit 0
+fi
+if [ "$HAS_ISO" != "yes" ] && [ "$HAS_DISK" != "yes" ]; then
+  log "no ISO or disk configured yet; skipping"
   exit 0
 fi
 
-curl -sf -X POST "$BASE/api/vm/start" \
+# The /vm/* mutation routes are CSRF-guarded with a per-process token served on
+# loopback (GETs are unguarded).
+TOKEN="$(curl -sf "$BASE/api/shell/session-token" | python3 -c 'import sys, json
+try:
+    print(json.load(sys.stdin).get("token") or "")
+except Exception:
+    pass' 2>/dev/null || true)"
+if [ -z "$TOKEN" ]; then
+  log "no shell token available; skipping"
+  exit 0
+fi
+
+# Provision first. For a Windows guest this (re)builds the unattended answer-file
+# CD — which carries the Win11 hardware-check bypass + auto SSH/RDP — and points
+# the VM at the frontloaded ISO/disk. It is a cheap no-op once already done.
+log "requesting provisioning for VM '$VM_ID'…"
+curl -sf -X POST "$BASE/api/vm/$VM_ID/provision" \
   -H "X-Shell-Token: $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{}' >/dev/null || echo "[foulfox-vm-autostart] /vm/start returned non-zero; continuing"
+  -d '{}' >/dev/null 2>&1 || log "provision request failed; continuing"
+
+# Poll provisioning until it settles (ready/failed) before starting, so the
+# unattend CD exists when the installer boots. Bounded so a stuck download can't
+# wedge the boot forever; on timeout we start best-effort.
+prov_status() {
+  curl -sf "$BASE/api/vm/$VM_ID/status" 2>/dev/null | python3 -c 'import sys, json
+try:
+    print((json.load(sys.stdin).get("provisioning") or {}).get("status") or "")
+except Exception:
+    pass' 2>/dev/null || true
+}
+s=""
+for _ in $(seq 1 900); do
+  s="$(prov_status)"
+  case "$s" in
+    ready|failed|"") break ;;
+  esac
+  sleep 1
+done
+log "provisioning status: ${s:-unknown}"
+
+# Start the VM.
+curl -sf -X POST "$BASE/api/vm/$VM_ID/start" \
+  -H "X-Shell-Token: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{}' >/dev/null || log "/vm/start returned non-zero; continuing"

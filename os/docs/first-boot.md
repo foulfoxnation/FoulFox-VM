@@ -85,12 +85,18 @@ The kiosk runs the FoulFox shell **and** the fullscreen Windows viewer as
 separate windows. Use **Alt+Tab** to switch between them. The shell's VM
 controls let you start, stop, restart, and snapshot the guest.
 
-## 6. Persistence
+## 6. Persistence (do this before installing Windows)
 
-The image boots with a persistence label (`foulfox-persist`). To keep your
-guest disk, settings, and frontloaded files across reboots, create a persistence
-partition/file labeled `foulfox-persist` on the USB stick (an `ext4` partition
-with that label, containing a `persistence.conf` of `/ union`). Without it, the
-session is fresh on every boot (the guest disk lives in RAM/overlay and is lost).
+The image boots with a persistence label (`foulfox-persist`), but a plain flash
+(dd/Etcher/Rufus) does **not** create that partition. Without it, **everything
+runs in a RAM overlay**: the multi-GB Windows ISO and the 128 GB guest disk are
+written to memory, so they are **lost on every reboot** and can **exhaust RAM
+mid-install**. The appliance detects this and shows a warning in the kiosk plus a
+`PERSISTENCE-WARNING.txt` note — it never repartitions your stick for you.
+
+To make storage durable, add a second partition to the USB stick labeled exactly
+`foulfox-persist` (an `ext4` partition containing a one-line `persistence.conf`
+of `/ union`). See **flash.md → "Make storage persistent"** for the steps. Do
+this before installing Windows so the guest disk survives reboots.
 
 See troubleshooting.md if anything above doesn't behave as expected.

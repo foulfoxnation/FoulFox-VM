@@ -80,6 +80,55 @@ the `.iso` → **Start Restoring**.
 
 ---
 
+## Make storage persistent (required to install Windows)
+
+A raw flash leaves the rest of the stick unpartitioned. Without a persistence
+partition, FoulFox OS runs entirely in RAM — the Windows ISO and the guest disk
+are **lost on reboot** and can **exhaust memory during install**. Installing
+Windows is not realistic without this, so add a second partition labeled exactly
+`foulfox-persist`.
+
+Use a stick comfortably larger than your guest disk (the default guest disk is
+128 GB, so 256 GB+ is ideal). Do this from a Linux machine (or another FoulFox
+boot — Ctrl+Alt+F2 for a console):
+
+**Easiest — GParted / GNOME Disks (GUI):** open the flashed stick, select the
+unallocated space after the image, create a new **ext4** partition, and set its
+label to exactly `foulfox-persist`. Then do step 3 below for the config file.
+
+**CLI alternative (parted):**
+
+1. Find the stick and inspect its free space — note the **Start** of the free
+   region reported (e.g. `2150MiB`):
+   ```bash
+   lsblk
+   sudo parted /dev/sdb unit MiB print free
+   ```
+2. Create an ext4 partition spanning that free space to the end of the disk,
+   then format it with the exact label. Replace `START` with the free-region
+   **Start** value parted printed in step 1 — it already includes the unit, so
+   write it verbatim (e.g. `2150MiB`, not `2150MiBMiB`). Replace `N` with the new
+   partition number:
+   ```bash
+   sudo parted /dev/sdb --script -- mkpart primary ext4 START 100%
+   sudo partprobe /dev/sdb
+   sudo mkfs.ext4 -L foulfox-persist /dev/sdbN
+   ```
+3. Add the persistence config so the whole system overlays onto it:
+   ```bash
+   sudo mount /dev/sdbN /mnt
+   echo "/ union" | sudo tee /mnt/persistence.conf
+   sudo umount /mnt
+   ```
+
+On reboot, FoulFox OS finds the label automatically and stores everything there.
+
+> On Windows/macOS, the built-in tools won't set a Linux ext4 label easily —
+> create the `foulfox-persist` partition from a Linux machine or from a first
+> FoulFox boot (Ctrl+Alt+F2 for a console).
+
+---
+
 ## Next
 
 Continue to **first-boot.md** to boot the stick and complete first run.

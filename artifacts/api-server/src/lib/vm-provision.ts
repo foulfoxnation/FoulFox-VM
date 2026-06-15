@@ -50,8 +50,16 @@ export async function startProvisioning(vmId: string): Promise<void> {
   const vm = getVm(vmId);
   if (!vm) return;
 
-  // Already has explicit media (manual disk/iso) — nothing to auto-provision.
-  if (vm.config.diskPath && vm.provisioning.status === "ready") return;
+  // Already has explicit media (manual disk/iso) and marked ready — usually
+  // nothing to auto-provision. EXCEPTION: a Windows guest still needs its
+  // unattended answer-file CD (the Win11 hardware-check bypass + auto SSH/RDP
+  // live there). On the flashed appliance the default VM is loaded straight from
+  // config with status "ready" but no unattend ISO, so fall through and build it.
+  if (vm.config.diskPath && vm.provisioning.status === "ready") {
+    const hasUnattend = !!vm.config.unattendIsoPath && fs.existsSync(vm.config.unattendIsoPath);
+    const needsUnattend = vm.osKind === "windows" && !hasUnattend;
+    if (!needsUnattend) return;
+  }
 
   try {
     fs.mkdirSync(vmDiskDir(vmId), { recursive: true });
@@ -234,7 +242,13 @@ async function provisionWindows(vmId: string): Promise<void> {
 
   // 4. Create the disk + unattended answer file (auto-enables SSH + RDP).
   emit(vmId, { status: "creating-disk", progress: 0, message: "Creating Windows VM disk…" });
-  const diskPath = path.join(vmDiskDir(vmId), "disk.qcow2");
+  // Honor an existing disk path. The flashed appliance's foulfox-first-run
+  // pre-creates the guest disk and writes it into the VM config; reusing it (vs.
+  // the per-VM managed path) keeps the installed guest stable across reboots
+  // instead of orphaning it behind a second disk file. API-created VMs have no
+  // diskPath yet and fall back to the managed path.
+  const diskPath = vm.config.diskPath ?? path.join(vmDiskDir(vmId), "disk.qcow2");
+  fs.mkdirSync(path.dirname(diskPath), { recursive: true });
   if (!fs.existsSync(diskPath)) {
     await runQemuImg(["create", "-f", "qcow2", diskPath, `${vm.diskGb}G`]);
   }
@@ -412,6 +426,37 @@ function buildAutoUnattend(opts: { username: string; password: string; pubKey: s
     : "";
   return `<?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>reg add HKLM\\System\\Setup\\LabConfig /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Path>reg add HKLM\\System\\Setup\\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Path>reg add HKLM\\System\\Setup\\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Path>reg add HKLM\\System\\Setup\\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>5</Order>
+          <Path>reg add HKLM\\System\\Setup\\LabConfig /v BypassStorageCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>6</Order>
+          <Path>reg add HKLM\\System\\Setup\\LabConfig /v BypassCPUCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+    </component>
+  </settings>
   <settings pass="oobeSystem">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64"
                publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">

@@ -49,6 +49,16 @@ export function buildQemuArgs(vm: VmRecord, accel: AcceleratorInfo): string[] {
   args.push("-vnc", `127.0.0.1:${disp},websocket=127.0.0.1:${vm.ports.vncWs}`);
   args.push("-device", "virtio-vga");
 
+  // Additive SPICE endpoint. The in-shell noVNC viewer (proxying the VNC
+  // websocket above) stays the guaranteed display path; when the appliance is
+  // configured for SPICE (config.displayMode === "spice") we ALSO expose a
+  // loopback SPICE server so the kiosk's fullscreen remote-viewer can attach.
+  // VNC and SPICE coexist on one QEMU; ticketing is disabled because the socket
+  // is localhost-only and never routed off the box.
+  if (c.displayMode === "spice") {
+    args.push("-spice", `port=${c.spicePort},addr=127.0.0.1,disable-ticketing=on`);
+  }
+
   // Absolute pointing device for agent computer-use (screenshot → click at exact
   // pixel coordinates). The default PS/2 mouse is RELATIVE and cannot be
   // positioned deterministically from a screenshot; a USB tablet reports

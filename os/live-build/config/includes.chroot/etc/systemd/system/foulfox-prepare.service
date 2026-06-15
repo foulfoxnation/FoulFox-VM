@@ -1,8 +1,10 @@
 [Unit]
 Description=FoulFox OS first-run provisioning (dirs, permissions, VM config)
 DefaultDependencies=yes
-After=local-fs.target network-online.target
-Wants=network-online.target
+# Do NOT wait on network-online.target: first-run only does best-effort downloads
+# (guarded by a reachability probe) and an offline boot is fully supported, so
+# blocking ~90-120s for a network that may never come just delays the kiosk.
+After=local-fs.target
 Before=foulfox-api.service odysseus-service.service
 
 [Service]

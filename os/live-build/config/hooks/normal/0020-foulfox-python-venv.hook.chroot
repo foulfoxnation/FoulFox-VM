@@ -9,6 +9,9 @@ if [ -d "$SVC" ] && [ -f "$SVC/requirements.txt" ]; then
   python3 -m venv "$SVC/.venv"
   "$SVC/.venv/bin/pip" install --upgrade pip
   "$SVC/.venv/bin/pip" install -r "$SVC/requirements.txt"
+  # Stamp the sentinel start.sh checks so the first boot never tries to reinstall
+  # (which would fail offline). Keep this filename in sync with start.sh.
+  touch "$SVC/.venv/.foulfox-deps-installed"
   chown -R foulfox:foulfox "$SVC/.venv" 2>/dev/null || true
 else
   echo "[0020-foulfox-python-venv] Odysseus service not staged; skipping venv warm-up"
