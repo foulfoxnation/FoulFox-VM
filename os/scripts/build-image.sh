@@ -31,8 +31,15 @@ echo "[build-image] (4/4) Running live-build (needs root for chroot)..."
 cd "$LB_DIR"
 sudo lb clean || true
 sudo lb config
+
+echo "[build-image] Resolved live-build config (must show Debian, not Ubuntu):"
+grep -rhE '^LB_(MODE|DISTRIBUTION|PARENT_DISTRIBUTION|MIRROR_BOOTSTRAP|MIRROR_CHROOT|MIRROR_BINARY|MIRROR_CHROOT_SECURITY|MIRROR_BINARY_SECURITY)=' config/ 2>/dev/null | sort -u || true
+
 sudo lb build
 
 echo
 echo "[build-image] Done. ISO(s):"
-ls -1 "$LB_DIR"/*.iso 2>/dev/null || echo "  (no .iso found — check $LB_DIR/build.log)"
+if ! ls -1 "$LB_DIR"/*.iso 2>/dev/null; then
+  echo "[build-image] ERROR: no .iso produced — check $LB_DIR/build.log" >&2
+  exit 1
+fi

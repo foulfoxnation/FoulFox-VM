@@ -35,6 +35,29 @@ types and emits declarations, but is not what makes the bundlers succeed.
 bundler/install path (pnpm pin, or a production-only `vite build` error that dev
 never exercises), not missing lib output.
 
+## live-build defaults to UBUNTU mode on the `ubuntu-latest` runner
+**Rule:** a Debian (bookworm) live recipe MUST explicitly pass `--mode debian`
+PLUS explicit Debian mirrors (`--mirror-bootstrap/-chroot/-binary` →
+`http://deb.debian.org/debian/`, `-security` → `http://security.debian.org/debian-security/`)
+in `auto/config`, and the workflow must `apt-get install debian-archive-keyring`.
+**Why:** GitHub's `ubuntu-latest` ships `/etc/live/build.conf` with the Ubuntu
+defaults, so without `--mode debian` live-build builds a "ubuntu/amd64 system"
+and debootstrap tries to fetch the Debian suite `bookworm` from
+`archive.ubuntu.com` → `E: Failed getting release file .../dists/bookworm/Release`
+→ no base system → no ISO. The keyring is needed to verify Debian's Release sig.
+**How to apply:** never rely on live-build's host-derived mode/mirror defaults in
+CI; pin them. This only surfaces once the corepack/pnpm step passes (earlier runs
+died before `lb build` ever ran).
+
+## live-build wrappers must FAIL LOUDLY (no masked errors)
+**Rule:** `auto/build` must use `#!/bin/bash` + `set -euo pipefail` (dash has no
+pipefail) so `lb build ... | tee build.log` propagates lb's failure instead of
+tee's 0. `build-image.sh` must `exit 1` when no `*.iso` exists, not
+`ls *.iso || echo "(none)"` (the echo returns 0 → false green).
+**Why:** these two maskings made a failed debootstrap report step #7 "Build the
+image" as SUCCESS, with the real failure only surfacing one step later at
+"Collect ISO" — confusing and easy to misdiagnose.
+
 ## Heavy builds can't run in this repl — verify on CI
 **Rule:** with the dev workflows running, this repl is resource-starved; `vite
 build`, esbuild bundles, and even `tsc --build` of the 3 tiny libs time out

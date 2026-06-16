@@ -67,7 +67,8 @@ jobs:
             mtools \
             dosfstools \
             shellcheck \
-            ca-certificates
+            ca-certificates \
+            debian-archive-keyring
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

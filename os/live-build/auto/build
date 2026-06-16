@@ -1,5 +1,6 @@
-#!/bin/sh
+#!/bin/bash
 # FoulFox OS — live-build build wrapper. Logs the full build to build.log.
-set -e
+# bash + pipefail so a failing `lb build` is NOT masked by the `tee` pipe exit.
+set -euo pipefail
 
 lb build noauto "${@}" 2>&1 | tee build.log
