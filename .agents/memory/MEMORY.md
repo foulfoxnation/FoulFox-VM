@@ -22,6 +22,7 @@
 - [noVNC + Vite CJS TLA pitfall](novnc-vite-cjs-tla.md) — pin @novnc/novnc to 1.4.0 ESM core/; 1.5+ CJS lib/ has a top-level await that crashes esbuild dep prebundle.
 - [api-server dev no-watch](apiserver-dev-no-watch.md) — dev = build+start, no watcher; restart the API Server workflow after backend edits or endpoints serve a stale build.
 - [FoulFox bootable-OS target](foulfox-bootable-os.md) — product aims to boot from USB on bare metal (KVM-native host); mutable VM state must live under ODYSSEUS_DATA_DIR (persistent partition), not tmpfs $HOME.
+- [live-build multi-pass apt](foulfox-livebuild-apt-passes.md) — chroot built in separate apt passes; transitive deps can be dropped in the live-packages pass (pkgProblemResolver breaks) → pin them explicitly in the package list.
 - [In-app ISO build trigger](foulfox-iso-build-trigger.md) — "Get FoulFox OS" page reads live run state + POSTs workflow_dispatch via server token; public-by-design so preview works (security deferred); build runs ONLY on dispatch.
 - [Rotating an un-editable secret](secret-rotation-viewenvvars-false.md) — viewEnvVars shows secret `false` yet stale value still injected → delete first, then requestEnvVar, then restart consumer.
 - [FoulFox live-updater](foulfox-live-updater.md) — pull-based app-stack patcher: anti-brick invariant (clear pending marker ONLY after a confirmed good flip) + fail-CLOSED boot recovery via Requires=foulfox-prepare; signatures/migrations/FF_HOME sticky-bit deferred.

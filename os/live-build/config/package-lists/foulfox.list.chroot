@@ -46,6 +46,14 @@ openbox
 lightdm
 lightdm-gtk-greeter
 chromium
+# dconf-gsettings-backend is the only provider of the virtual "gsettings-backend"
+# that libgtk-3-common hard-depends on. The GTK stack above pulls it in only
+# transitively, so in live-build's later "lb_chroot_live-packages" pass (which
+# installs live-boot/live-config in a separate apt transaction) the resolver is
+# free to solve by dropping it, which breaks libgtk-3-common and aborts the build
+# ("pkgProblemResolver::Resolve generated breaks"). Listing it here records it as
+# a manually-requested package so it stays pinned across every apt pass.
+dconf-gsettings-backend
 
 # ── Runtimes for the FoulFox services ────────────────────────────────────────
 nodejs
