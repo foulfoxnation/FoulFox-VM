@@ -6,6 +6,13 @@
 # autostarts the FoulFox VM shell. Run via `lb config` (see scripts/build-image.sh).
 set -e
 
+# NOTE on the Debian security pocket: the live-build shipped on the CI runner
+# predates Debian's bullseye-era rename of the security suite, so it auto-
+# generates the obsolete "<dist>/updates" name (e.g. "bookworm/updates"), which
+# 404s on security.debian.org and aborts the chroot apt stage. We turn off
+# live-build's built-in security source (--security false) and instead ship the
+# correct "<dist>-security" source via config/archives/debian-security.list.*.
+# The Debian archive keyring already trusts this repo, so no key import needed.
 lb config noauto \
   --mode debian \
   --distribution bookworm \
@@ -14,6 +21,7 @@ lb config noauto \
   --mirror-chroot-security "http://security.debian.org/debian-security/" \
   --mirror-binary "http://deb.debian.org/debian/" \
   --mirror-binary-security "http://security.debian.org/debian-security/" \
+  --security false \
   --architectures amd64 \
   --linux-flavours amd64 \
   --archive-areas "main contrib non-free non-free-firmware" \

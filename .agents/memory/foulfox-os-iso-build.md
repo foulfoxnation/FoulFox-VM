@@ -49,6 +49,21 @@ and debootstrap tries to fetch the Debian suite `bookworm` from
 CI; pin them. This only surfaces once the corepack/pnpm step passes (earlier runs
 died before `lb build` ever ran).
 
+## Debian security pocket: runner's live-build emits the OBSOLETE suite
+**Rule:** do NOT rely on live-build's built-in security source on the CI runner.
+Set `--security false` in `auto/config` and ship the correct security repo via
+`config/archives/debian-security.list.chroot` + `.list.binary` containing
+`deb http://security.debian.org/debian-security bookworm-security <areas>`.
+**Why:** the Ubuntu-shipped live-build on `ubuntu-latest` predates Debian's
+bullseye-era rename of the security suite, so it auto-generates the pre-Debian-11
+name `bookworm/updates` → `404 Not Found` / `does not have a Release file` → the
+chroot `apt update` aborts with `exit code 100`. Since Debian 11 the pocket is
+`<dist>-security`, not `<dist>/updates`. This only surfaces AFTER `--mode debian`
+fixes debootstrap (base system installs, then chroot apt fails on security).
+**How to apply:** `config/archives/*.list.chroot` survives `lb clean` + `lb config`
+(only `lb clean --purge` wipes config/); no key import needed because
+`debian-archive-keyring` (installed in the base) already trusts `bookworm-security`.
+
 ## live-build wrappers must FAIL LOUDLY (no masked errors)
 **Rule:** `auto/build` must use `#!/bin/bash` + `set -euo pipefail` (dash has no
 pipefail) so `lb build ... | tee build.log` propagates lb's failure instead of
