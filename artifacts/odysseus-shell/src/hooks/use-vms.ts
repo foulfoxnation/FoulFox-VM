@@ -82,8 +82,16 @@ export function useTriggerOsBuild() {
   return useMutation({
     mutationFn: triggerOsBuild,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: OS_BUILD_STATUS_KEY });
+      // GitHub takes a few seconds to register the new run, and the server
+      // caches build-status for ~12s. Without help, the idle 30s poll could
+      // briefly show the previous (failed/finished) run after a fresh start.
+      // Nudge a few refetches so the new run surfaces quickly.
       qc.invalidateQueries({ queryKey: OS_RELEASE_KEY });
+      [0, 4_000, 9_000, 15_000].forEach((delay) => {
+        setTimeout(() => {
+          qc.invalidateQueries({ queryKey: OS_BUILD_STATUS_KEY });
+        }, delay);
+      });
     },
   });
 }

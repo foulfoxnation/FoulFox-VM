@@ -471,6 +471,14 @@ function BuildStatusLine({
       </div>
     );
   }
+  if (buildStatus?.error) {
+    return (
+      <div className="flex items-center gap-2 font-medium text-destructive">
+        <AlertCircle className="h-4 w-4" />
+        Couldn't read the build status from GitHub
+      </div>
+    );
+  }
   return (
     <div className="flex items-center gap-2 font-medium">
       <Disc3 className="h-4 w-4 text-muted-foreground" />
@@ -492,6 +500,7 @@ function BuildPanel({
   const canTrigger = buildStatus?.canTrigger ?? true;
   const busy = running || trigger.isPending;
   const triggerError = (trigger.error as Error | null)?.message ?? null;
+  const statusError = buildStatus?.error ?? null;
 
   const runUrl = run?.htmlUrl ?? null;
   const workflowUrl =
@@ -560,6 +569,10 @@ function BuildPanel({
       {triggerError ? (
         <p className="flex items-center gap-1.5 text-sm text-destructive">
           <AlertCircle className="h-3.5 w-3.5" /> {triggerError}
+        </p>
+      ) : statusError ? (
+        <p className="flex items-center gap-1.5 text-sm text-destructive">
+          <AlertCircle className="h-3.5 w-3.5" /> {statusError}
         </p>
       ) : null}
     </div>
