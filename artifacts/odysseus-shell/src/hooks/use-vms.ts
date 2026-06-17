@@ -5,6 +5,8 @@ import {
   fetchCapabilities,
   fetchOsImages,
   fetchOsRelease,
+  fetchOsBuildStatus,
+  triggerOsBuild,
   createVm,
   vmLifecycle,
   deleteVm,
@@ -19,6 +21,7 @@ import {
   type VmCapabilities,
   type OsImage,
   type OsReleaseInfo,
+  type OsBuildStatus,
   type AppUpdateInfo,
   type UpdateStatus,
 } from "@/lib/vm-api";
@@ -27,6 +30,7 @@ export const VM_LIST_KEY = ["vm-list"];
 export const VM_CAPS_KEY = ["vm-capabilities"];
 export const VM_OS_IMAGES_KEY = ["vm-os-images"];
 export const OS_RELEASE_KEY = ["os-release"];
+export const OS_BUILD_STATUS_KEY = ["os-build-status"];
 export const APP_UPDATE_INFO_KEY = ["app-update-info"];
 export const UPDATE_STATUS_KEY = ["update-status"];
 export const SHELL_TOKEN_KEY = ["shell-session-token"];
@@ -60,6 +64,27 @@ export function useOsRelease() {
     queryKey: OS_RELEASE_KEY,
     queryFn: fetchOsRelease,
     refetchInterval: 60_000,
+  });
+}
+
+// Live GitHub Actions build state. Polls fast while a run is in flight so the
+// "Build image" button and status line feel responsive, slow when idle.
+export function useOsBuildStatus() {
+  return useQuery<OsBuildStatus>({
+    queryKey: OS_BUILD_STATUS_KEY,
+    queryFn: fetchOsBuildStatus,
+    refetchInterval: (query) => (query.state.data?.running ? 8_000 : 30_000),
+  });
+}
+
+export function useTriggerOsBuild() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: triggerOsBuild,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: OS_BUILD_STATUS_KEY });
+      qc.invalidateQueries({ queryKey: OS_RELEASE_KEY });
+    },
   });
 }
 

@@ -156,6 +156,55 @@ export async function fetchOsRelease(): Promise<OsReleaseInfo> {
   return res.json();
 }
 
+// ── ISO build trigger + live status ───────────────────────────────────────────
+// The actual state of the GitHub Actions cloud build, so the tab can show
+// "running / failed / never built" and offer a one-click "Build image" button,
+// instead of a permanent "building" guess.
+export type OsBuildState = "queued" | "in_progress" | "success" | "failed" | "unknown";
+
+export interface OsBuildRun {
+  runNumber: number | null;
+  state: OsBuildState;
+  status: string | null;
+  conclusion: string | null;
+  htmlUrl: string | null;
+  event: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface OsBuildStatus {
+  configured: boolean;
+  canTrigger: boolean; // a server-side token with workflow scope is present
+  repo: string | null;
+  workflowUrl: string | null;
+  running: boolean; // queued or in_progress
+  latestRun: OsBuildRun | null;
+  error: string | null;
+}
+
+export interface TriggerBuildResult {
+  started: boolean;
+  repo?: string;
+  workflowUrl?: string;
+  error?: string;
+}
+
+export async function fetchOsBuildStatus(): Promise<OsBuildStatus> {
+  const res = await fetch(apiUrl("/api/os/build-status"));
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function triggerOsBuild(): Promise<TriggerBuildResult> {
+  const res = await fetch(apiUrl("/api/os/build"), {
+    method: "POST",
+    headers: jsonHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 // ── Live app-stack updates (the "patcher") ──────────────────────────────────────
 // FoulFox OS devices pull a checksummed app bundle and swap it in atomically with
 // automatic rollback — no reflash. The api-server probes the rolling manifest and

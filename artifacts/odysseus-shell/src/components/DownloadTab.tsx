@@ -1,10 +1,13 @@
 import {
   useOsRelease,
+  useOsBuildStatus,
+  useTriggerOsBuild,
   useAppUpdateInfo,
   useUpdateStatus,
   useApplyAppUpdate,
   useRollbackAppUpdate,
 } from "@/hooks/use-vms";
+import type { OsBuildStatus } from "@/lib/vm-api";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -22,6 +25,7 @@ import {
   ExternalLink,
   ShieldCheck,
   Disc3,
+  Hammer,
   Loader2,
   AlertCircle,
   RefreshCw,
@@ -34,11 +38,12 @@ const ETCHER_URL = "https://etcher.balena.io/";
 
 export function DownloadTab() {
   const { data: release, isLoading } = useOsRelease();
+  const { data: buildStatus } = useOsBuildStatus();
   const status =
     release?.status ?? (release?.available ? "ready" : "unconfigured");
-  const available = release?.available ?? false;
   const isoUrl = release?.isoUrl ?? null;
   const sha256Url = release?.sha256Url ?? null;
+  const buildRunning = buildStatus?.running ?? false;
 
   return (
     <div className="h-full overflow-auto bg-background">
@@ -71,9 +76,15 @@ export function DownloadTab() {
                   Ready
                 </Badge>
               ) : status === "building" ? (
-                <Badge variant="outline" className="shrink-0 gap-1.5">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Building…
-                </Badge>
+                buildRunning ? (
+                  <Badge variant="outline" className="shrink-0 gap-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Building…
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="shrink-0">
+                    Not built yet
+                  </Badge>
+                )
               ) : (
                 <Badge variant="outline" className="shrink-0">
                   Not set up yet
@@ -117,7 +128,7 @@ export function DownloadTab() {
                 ) : null}
               </>
             ) : status === "building" ? (
-              <BuildingNotice repo={release?.repo ?? null} />
+              <BuildPanel buildStatus={buildStatus ?? null} repo={release?.repo ?? null} />
             ) : (
               <SetupNotice />
             )}
@@ -402,40 +413,155 @@ function StepCard({
   );
 }
 
-function BuildingNotice({ repo }: { repo: string | null }) {
-  const actionsUrl = repo
-    ? `https://github.com/${repo}/actions`
-    : "https://github.com";
-  return (
-    <div className="space-y-3 rounded-md border border-dashed p-4">
+function fmtAgo(iso: string | null): string | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return null;
+  const secs = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (secs < 60) return "just now";
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hr ago`;
+  const days = Math.round(hrs / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+// A single honest line about the real cloud-build state — the fix for "IDK if
+// it's even doing anything".
+function BuildStatusLine({
+  pending,
+  buildStatus,
+}: {
+  pending: boolean;
+  buildStatus: OsBuildStatus | null;
+}) {
+  if (pending) {
+    return (
+      <div className="flex items-center gap-2 font-medium">
+        <Loader2 className="h-4 w-4 animate-spin text-primary" /> Starting the build…
+      </div>
+    );
+  }
+  const run = buildStatus?.latestRun ?? null;
+  const num = run?.runNumber ? `#${run.runNumber}` : "";
+  if (buildStatus?.running) {
+    const ago = fmtAgo(run?.createdAt ?? null);
+    return (
       <div className="flex items-center gap-2 font-medium">
         <Loader2 className="h-4 w-4 animate-spin text-primary" />
-        Your FoulFox OS image is being built
+        Build {num} in progress{ago ? ` — started ${ago}` : ""}
       </div>
+    );
+  }
+  if (run?.state === "success") {
+    return (
+      <div className="flex items-center gap-2 font-medium">
+        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+        Latest build {num} finished — publishing the download…
+      </div>
+    );
+  }
+  if (run?.state === "failed") {
+    const ago = fmtAgo(run?.updatedAt ?? run?.createdAt ?? null);
+    return (
+      <div className="flex items-center gap-2 font-medium text-destructive">
+        <XCircle className="h-4 w-4" />
+        Last build {num} failed{ago ? ` ${ago}` : ""}
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 font-medium">
+      <Disc3 className="h-4 w-4 text-muted-foreground" />
+      No image has been built yet
+    </div>
+  );
+}
+
+function BuildPanel({
+  buildStatus,
+  repo,
+}: {
+  buildStatus: OsBuildStatus | null;
+  repo: string | null;
+}) {
+  const trigger = useTriggerOsBuild();
+  const running = buildStatus?.running ?? false;
+  const run = buildStatus?.latestRun ?? null;
+  const canTrigger = buildStatus?.canTrigger ?? true;
+  const busy = running || trigger.isPending;
+  const triggerError = (trigger.error as Error | null)?.message ?? null;
+
+  const runUrl = run?.htmlUrl ?? null;
+  const workflowUrl =
+    buildStatus?.workflowUrl ??
+    (repo ? `https://github.com/${repo}/actions` : "https://github.com");
+  const linkUrl = runUrl ?? workflowUrl;
+  const linkLabel = runUrl
+    ? running
+      ? "Watch this build"
+      : "View last build"
+    : "View on GitHub";
+
+  const buttonLabel = running
+    ? "Building…"
+    : trigger.isPending
+      ? "Starting…"
+      : run
+        ? "Rebuild image"
+        : "Build image";
+
+  return (
+    <div className="space-y-4 rounded-md border border-dashed p-4">
+      <BuildStatusLine pending={trigger.isPending} buildStatus={buildStatus} />
       <p className="text-sm text-muted-foreground">
-        A free GitHub cloud build is assembling the latest bootable image — this
-        usually takes about 30–90 minutes. This page checks on its own, so the
-        download button switches on by itself the moment it's ready. No refresh
-        needed.
+        Building the bootable image runs a free GitHub cloud build (~30–90 min).
+        This page tracks it live and the download switches on by itself the moment
+        it's ready — no refresh needed.
       </p>
-      <p className="text-sm text-muted-foreground">
-        Haven't kicked off a build yet? On GitHub open{" "}
-        <span className="font-medium text-foreground">
-          Actions → Build FoulFox OS ISO → Run workflow
-        </span>
-        .
-      </p>
-      <Button asChild variant="outline" size="sm">
-        <a
-          href={actionsUrl}
-          target="_blank"
-          rel="noreferrer"
-          data-testid="link-actions"
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          onClick={() => {
+            if (!busy && canTrigger) trigger.mutate();
+          }}
+          disabled={busy || !canTrigger}
+          data-testid="button-build-iso"
         >
-          <Github className="mr-2 h-4 w-4" /> View build on GitHub
-          <ExternalLink className="ml-2 h-3.5 w-3.5" />
-        </a>
-      </Button>
+          {busy ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Hammer className="mr-2 h-4 w-4" />
+          )}
+          {buttonLabel}
+        </Button>
+        <Button asChild variant="outline" size="sm">
+          <a
+            href={linkUrl}
+            target="_blank"
+            rel="noreferrer"
+            data-testid="link-actions"
+          >
+            <Github className="mr-2 h-4 w-4" /> {linkLabel}
+            <ExternalLink className="ml-2 h-3.5 w-3.5" />
+          </a>
+        </Button>
+      </div>
+      {!canTrigger ? (
+        <p className="text-xs text-muted-foreground">
+          One-click builds need a GitHub token with the{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-foreground">
+            workflow
+          </code>{" "}
+          scope on the server. You can still start one from GitHub with the button
+          above.
+        </p>
+      ) : null}
+      {triggerError ? (
+        <p className="flex items-center gap-1.5 text-sm text-destructive">
+          <AlertCircle className="h-3.5 w-3.5" /> {triggerError}
+        </p>
+      ) : null}
     </div>
   );
 }
