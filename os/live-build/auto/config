@@ -13,6 +13,16 @@ set -e
 # live-build's built-in security source (--security false) and instead ship the
 # correct "<dist>-security" source via config/archives/debian-security.list.*.
 # The Debian archive keyring already trusts this repo, so no key import needed.
+#
+# NOTE on firmware: live-build's automatic firmware detection (--firmware-chroot
+# / --firmware-binary "true") downloads the per-suite Contents index from
+# "<mirror>/dists/bookworm/Contents-amd64.gz" to map kernel modules to firmware
+# packages. deb.debian.org only serves Contents under a component path
+# ("dists/bookworm/<area>/Contents-amd64.gz"), so that top-level URL 404s and
+# aborts the chroot_linux-image stage. We turn the auto-detection OFF ("false")
+# and instead install the firmware bundles explicitly via
+# config/package-lists/foulfox.list.chroot (firmware-linux, firmware-iwlwifi, …),
+# which keeps broad plug-and-play hardware support without the broken lookup.
 lb config noauto \
   --mode debian \
   --distribution bookworm \
@@ -28,7 +38,7 @@ lb config noauto \
   --debian-installer none \
   --memtest none \
   --apt-recommends true \
-  --firmware-chroot true \
-  --firmware-binary true \
+  --firmware-chroot false \
+  --firmware-binary false \
   --bootappend-live "boot=live components username=foulfox user-fullname=FoulFox hostname=foulfox persistence persistence-label=foulfox-persist" \
   "${@}"
