@@ -54,21 +54,14 @@ jobs:
           sudo apt-get clean
           echo "Disk after:"; df -h /
 
-      - name: Install build dependencies
+      - name: Install host staging dependencies
+        # live-build itself runs inside the Debian container below; the host only
+        # needs what stage-app.sh uses to build + rsync the web stack.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            live-build \
             rsync \
-            xorriso \
-            squashfs-tools \
-            isolinux \
-            syslinux-common \
-            mtools \
-            dosfstools \
-            shellcheck \
-            ca-certificates \
-            debian-archive-keyring
+            ca-certificates
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -86,10 +79,41 @@ jobs:
           node --version
           pnpm --version
 
-      - name: Build the FoulFox OS image
+      - name: Stage the FoulFox web app (host has the Node/pnpm toolchain)
+        # Build + stage the web stack on the host, where Node 20 and pnpm are
+        # available. The result lands in the bind-mounted workspace, so the
+        # Debian build container below picks it up (FOULFOX_SKIP_STAGE_APP=1).
         run: |
           chmod +x os/scripts/*.sh
-          os/scripts/build-image.sh
+          os/scripts/stage-app.sh
+
+      - name: Build the FoulFox OS image (Debian live-build in a privileged container)
+        # The Ubuntu runner ships Ubuntu's live-build 3.x, which mis-resolves a
+        # Debian bookworm chroot and aborts at lb_chroot_live-packages. Build
+        # with Debian's own live-build inside a privileged debian:bookworm
+        # container -- via `docker run`, NOT a job-level `container:`, so the host
+        # disk-cleanup step above still reclaims space. The workspace is
+        # bind-mounted, so the produced ISO lands back on the host for the
+        # collect/upload steps. App staging already ran on the host (the
+        # container has no Node toolchain), so it's skipped inside.
+        run: |
+          docker run --rm --privileged --security-opt seccomp=unconfined \
+            -v "$PWD":/workspace -w /workspace \
+            -e DEBIAN_FRONTEND=noninteractive \
+            -e FOULFOX_SKIP_STAGE_APP=1 \
+            debian:bookworm \
+            bash -lc '
+              set -euo pipefail
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                live-build ca-certificates debian-archive-keyring \
+                rsync xorriso squashfs-tools isolinux syslinux-common \
+                mtools dosfstools shellcheck sudo bash findutils grep util-linux
+              echo "live-build version (must be Debian, not Ubuntu 3.x):"
+              lb --version
+              chmod +x os/scripts/*.sh
+              os/scripts/build-image.sh
+            '
 
       - name: Collect ISO + checksums
         id: iso
