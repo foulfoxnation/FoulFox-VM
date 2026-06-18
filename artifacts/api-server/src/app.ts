@@ -25,10 +25,14 @@ app.use(
 
 // CORS: allow same-origin and localhost origins only
 const localCors = cors({
+  // Same-origin requests (no Origin header) and explicit localhost origins only.
+  // Opaque origins (Origin: null) are intentionally NOT allowed: the in-shell
+  // browser renders fetched pages in a sandboxed (no allow-same-origin) iframe
+  // whose scripts run with Origin: null, and such a page must never be able to
+  // read a loopback API response (e.g. the shell session token) cross-origin.
   origin: (origin, cb) => {
     if (
       !origin ||
-      origin === "null" ||
       /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
     ) {
       cb(null, true);
@@ -120,6 +124,22 @@ app.use("/api/vm", localhostOnly, requireStateChangeToken);
 // foulfox-patcher via sudo). /api/os/app-update-info is intentionally NOT here —
 // it is a public read-only probe like /api/os/release-info.
 app.use("/api/os/update", localhostOnly, requireStateChangeToken);
+
+// In-shell web browser. All endpoints are localhost only. The proxy GET is
+// authorized by its own HttpOnly cookie (an iframe navigation can't send a
+// header), while the cookie-issuing /session and the Chromium /launch POST
+// require the shell token. /proxy + /capabilities pass with localhostOnly alone.
+app.use("/api/browser", localhostOnly);
+app.use("/api/browser/session", requireShellToken);
+app.use("/api/browser/launch", requireShellToken);
+
+// Hardware/peripheral endpoints: localhost only, with requireStateChangeToken
+// letting read-only GETs (capabilities/status/list/scan) through while requiring
+// the shell token for every state-changing POST (wifi connect/forget, USB
+// attach/detach, Bluetooth power/scan/pair/connect/trust/remove).
+app.use("/api/network", localhostOnly, requireStateChangeToken);
+app.use("/api/usb", localhostOnly, requireStateChangeToken);
+app.use("/api/bluetooth", localhostOnly, requireStateChangeToken);
 
 // Shell session token endpoint — localhost only so remote callers can't obtain it
 app.get("/api/shell/session-token", localhostOnly, (_req, res) => {

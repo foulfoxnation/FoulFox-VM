@@ -9,6 +9,9 @@ firmware-iwlwifi
 firmware-realtek
 firmware-atheros
 firmware-misc-nonfree
+# Broadcom/Cypress wifi + Bluetooth firmware (brcmfmac / many laptop BT radios).
+# Intel/Realtek/Atheros BT firmware already ships in the bundles above.
+firmware-brcm80211
 
 # ── Networking (auto bring-up, wired + wireless) ─────────────────────────────
 network-manager
@@ -16,6 +19,11 @@ network-manager-gnome
 iproute2
 iw
 wireless-tools
+
+# ── Bluetooth (plug-and-play pairing/management) ─────────────────────────────
+# bluez provides bluetoothd + the bluetoothctl CLI the api-server drives. The
+# BT controller firmware rides in the firmware-* bundles above (incl. brcm80211).
+bluez
 
 # ── Storage / removable media (USB frontload + NTFS/exFAT/FAT drives) ────────
 udisks2

@@ -1,0 +1,19 @@
+// FoulFox OS — let the appliance user manage NetworkManager headlessly.
+//
+// The shell's network panel drives `nmcli` from the api-server, which runs as a
+// systemd SYSTEM service (foulfox-api.service) — it has no logind graphical
+// session, so polkit's default "active local session" check would deny wifi
+// connect/disconnect/forget. Grant every member of the `netdev` group (the
+// `foulfox` appliance user is added to it in the build hook) full
+// NetworkManager control without an interactive auth prompt.
+//
+// bookworm ships polkit with the JavaScript rules engine, so this lives in
+// /etc/polkit-1/rules.d/*.rules (NOT the obsolete .pkla format).
+polkit.addRule(function (action, subject) {
+  if (
+    action.id.indexOf("org.freedesktop.NetworkManager.") === 0 &&
+    subject.isInGroup("netdev")
+  ) {
+    return polkit.Result.YES;
+  }
+});

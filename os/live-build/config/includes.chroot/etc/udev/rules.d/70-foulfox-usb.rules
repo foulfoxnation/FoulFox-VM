@@ -1,0 +1,9 @@
+# FoulFox OS — USB passthrough access for the api-server-managed QEMU.
+#
+# Passing a host USB device through to a guest (QMP `device_add usb-host`)
+# requires QEMU to open the device node under /dev/bus/usb/. QEMU is launched by
+# the api-server running as the `foulfox` system user, which (being a system
+# service, not a seat session) does not receive logind's per-seat uaccess ACLs.
+# Grant the `plugdev` group (foulfox is a member) read/write on USB device nodes
+# so plug-and-play passthrough works without running QEMU as root.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", MODE="0664", GROUP="plugdev"

@@ -7,6 +7,10 @@ import odysseusLifecycleRouter from "./odysseus-lifecycle";
 import filesRouter from "./files";
 import releaseRouter from "./release";
 import osUpdateRouter from "./os-update";
+import browserRouter from "./browser";
+import networkRouter from "./network";
+import usbRouter from "./usb";
+import bluetoothRouter from "./bluetooth";
 
 const router: IRouter = Router();
 
@@ -16,6 +20,10 @@ router.use(vmRouter);
 router.use(filesRouter);
 router.use(releaseRouter);
 router.use(osUpdateRouter);
+router.use(browserRouter);
+router.use(networkRouter);
+router.use(usbRouter);
+router.use(bluetoothRouter);
 router.use(odysseusLifecycleRouter);
 router.use(odysseusProxyRouter);
 

@@ -10,6 +10,8 @@ import { FileExplorer } from "@/components/FileExplorer";
 import { VmTab } from "@/components/VmTab";
 import { OsPicker } from "@/components/OsPicker";
 import { DownloadTab } from "@/components/DownloadTab";
+import { BrowserTab } from "@/components/BrowserTab";
+import { DevicesTab } from "@/components/DevicesTab";
 import foxLogo from "@assets/FoxQuest_Logo_1781378611335.png";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { useShellToken } from "@/hooks/use-shell-token";
@@ -26,6 +28,8 @@ import {
   Monitor,
   Apple,
   Disc3,
+  Globe,
+  Plug,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -192,6 +196,22 @@ export default function Home() {
               <Disc3 className="mr-2 h-4 w-4" />
               Get FoulFox OS
             </TabsTrigger>
+            <TabsTrigger
+              value="browser"
+              className={TAB_TRIGGER}
+              data-testid="tab-browser"
+            >
+              <Globe className="mr-2 h-4 w-4" />
+              Browser
+            </TabsTrigger>
+            <TabsTrigger
+              value="devices"
+              className={TAB_TRIGGER}
+              data-testid="tab-devices"
+            >
+              <Plug className="mr-2 h-4 w-4" />
+              Devices
+            </TabsTrigger>
 
             {vms.map((vm) => {
               const Icon = OS_ICON[vm.osKind] ?? Monitor;
@@ -311,6 +331,12 @@ export default function Home() {
             </Body>
             <Body show={activeTab === "download"}>
               <DownloadTab />
+            </Body>
+            <Body show={activeTab === "browser"}>
+              <BrowserTab />
+            </Body>
+            <Body show={activeTab === "devices"}>
+              <DevicesTab />
             </Body>
             {vms.map((vm) => (
               <Body key={vm.id} show={activeTab === `vm:${vm.id}`}>

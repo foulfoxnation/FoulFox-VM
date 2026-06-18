@@ -29,3 +29,4 @@
 - [FoulFox live-updater](foulfox-live-updater.md) — pull-based app-stack patcher: anti-brick invariant (clear pending marker ONLY after a confirmed good flip) + fail-CLOSED boot recovery via Requires=foulfox-prepare; signatures/migrations/FF_HOME sticky-bit deferred.
 - [FoulFox first-boot decisions](foulfox-first-boot-decisions.md) — additive SPICE (keep VNC), non-destructive persistence (warn not repartition), offline-safe sentinel-gated start, no network-online wait, single ODYSSEUS_DATA_DIR.
 - [Shell→Python stdin gotcha](shell-python-stdin-heredoc.md) — pipe JSON to `python3 -c`, NOT `python3 - <<EOF` (heredoc steals stdin, pipe is discarded → silent no-op).
+- [In-shell browser proxy security](foulfox-browser-proxy-security.md) — loopback CORS must NEVER allow Origin:null (sandboxed proxy iframe is null-origin); SSRF guard must pin the socket to the validated IP (custom lookup).

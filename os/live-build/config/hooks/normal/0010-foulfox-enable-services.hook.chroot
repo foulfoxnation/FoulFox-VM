@@ -8,8 +8,10 @@ if ! id foulfox >/dev/null 2>&1; then
   adduser --disabled-password --gecos "FoulFox" \
     --home /var/lib/foulfox --shell /bin/bash foulfox
 fi
-# Group memberships: KVM (/dev/kvm), USB hotplug, networking, X video.
-for grp in kvm plugdev netdev video; do
+# Group memberships: KVM (/dev/kvm), USB hotplug/passthrough, networking, X
+# video, and Bluetooth (the `bluetooth` group exists only once bluez is
+# installed — the getent guard skips it harmlessly if it is absent).
+for grp in kvm plugdev netdev video bluetooth; do
   getent group "$grp" >/dev/null 2>&1 && adduser foulfox "$grp" || true
 done
 # LightDM autologin in Debian requires membership in the "autologin" group.
@@ -21,6 +23,13 @@ systemctl enable foulfox-prepare.service
 systemctl enable odysseus-service.service
 systemctl enable foulfox-api.service
 systemctl enable foulfox-vm-autostart.service
+
+# ── Enable plug-and-play hardware daemons ────────────────────────────────────
+# NetworkManager (wired auto-DHCP + wifi management) and BlueZ (Bluetooth). The
+# packages usually enable these via systemd presets, but enable explicitly so a
+# preset change can never leave the appliance with no networking/Bluetooth.
+systemctl enable NetworkManager.service
+systemctl enable bluetooth.service
 
 # ── Graphical autologin straight into the kiosk session ──────────────────────
 mkdir -p /etc/lightdm/lightdm.conf.d
