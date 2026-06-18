@@ -23,6 +23,7 @@
 - [api-server dev no-watch](apiserver-dev-no-watch.md) — dev = build+start, no watcher; restart the API Server workflow after backend edits or endpoints serve a stale build.
 - [FoulFox bootable-OS target](foulfox-bootable-os.md) — product aims to boot from USB on bare metal (KVM-native host); mutable VM state must live under ODYSSEUS_DATA_DIR (persistent partition), not tmpfs $HOME.
 - [live-build CI build tool](foulfox-livebuild-apt-passes.md) — ubuntu-latest's Ubuntu live-build 3.x mis-resolves a Debian chroot (dies at lb_chroot_live-packages); fix = run live-build inside a privileged debian:bookworm container (package-list pins do NOT work).
+- [FoulFox ISO failed-build log](foulfox-os-iso-build.md) — canonical running record of every ISO-build failure mode + fix lives in repo at `os/docs/failed_builds.md`; consult/append it before debugging a new build break.
 - [In-app ISO build trigger](foulfox-iso-build-trigger.md) — "Get FoulFox OS" page reads live run state + POSTs workflow_dispatch via server token; public-by-design so preview works (security deferred); build runs ONLY on dispatch.
 - [Rotating an un-editable secret](secret-rotation-viewenvvars-false.md) — viewEnvVars shows secret `false` yet stale value still injected → delete first, then requestEnvVar, then restart consumer.
 - [FoulFox live-updater](foulfox-live-updater.md) — pull-based app-stack patcher: anti-brick invariant (clear pending marker ONLY after a confirmed good flip) + fail-CLOSED boot recovery via Requires=foulfox-prepare; signatures/migrations/FF_HOME sticky-bit deferred.
