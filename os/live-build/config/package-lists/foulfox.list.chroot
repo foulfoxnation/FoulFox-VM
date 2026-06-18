@@ -46,14 +46,21 @@ openbox
 lightdm
 lightdm-gtk-greeter
 chromium
-# dconf-gsettings-backend is the only provider of the virtual "gsettings-backend"
-# that libgtk-3-common hard-depends on. The GTK stack above pulls it in only
-# transitively, so in live-build's later "lb_chroot_live-packages" pass (which
-# installs live-boot/live-config in a separate apt transaction) the resolver is
-# free to solve by dropping it, which breaks libgtk-3-common and aborts the build
-# ("pkgProblemResolver::Resolve generated breaks"). Listing it here records it as
-# a manually-requested package so it stays pinned across every apt pass.
-dconf-gsettings-backend
+
+# ── Live system (live-build boot + config) ───────────────────────────────────
+# By default live-build installs these in a SEPARATE, later apt transaction
+# ("lb_chroot_live-packages"). That incremental install re-resolves the live
+# packages against the already-installed desktop stack and dead-ends with:
+#   "libgtk-3-common : Depends: dconf-gsettings-backend ... not going to be installed"
+#   "E: ... pkgProblemResolver::Resolve generated breaks"
+# i.e. apt cannot add the live packages on top of the GUI without proposing to
+# drop the gsettings backend, so it gives up (exit 100). Listing them here
+# installs them in the SAME combined transaction as the GUI stack -- which
+# resolves cleanly, exactly like Debian's own desktop live images -- so the later
+# live-packages pass finds them already present and becomes a no-op.
+live-boot
+live-config
+live-config-systemd
 
 # ── Runtimes for the FoulFox services ────────────────────────────────────────
 nodejs
