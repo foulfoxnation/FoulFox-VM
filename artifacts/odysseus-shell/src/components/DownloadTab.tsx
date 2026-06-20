@@ -128,12 +128,20 @@ export function DownloadTab() {
                 ) : null}
               </>
             ) : status === "building" ? (
-              <BuildPanel buildStatus={buildStatus ?? null} repo={release?.repo ?? null} />
+              <BuildingNotice configured={buildStatus?.configured ?? false} />
             ) : (
               <SetupNotice />
             )}
           </CardContent>
         </Card>
+
+        {buildStatus?.configured ? (
+          <BuildIsoCard
+            buildStatus={buildStatus}
+            repo={release?.repo ?? null}
+            ready={status === "ready"}
+          />
+        ) : null}
 
         <AppUpdatesCard />
 
@@ -432,9 +440,11 @@ function fmtAgo(iso: string | null): string | null {
 function BuildStatusLine({
   pending,
   buildStatus,
+  ready = false,
 }: {
   pending: boolean;
   buildStatus: OsBuildStatus | null;
+  ready?: boolean;
 }) {
   if (pending) {
     return (
@@ -458,7 +468,9 @@ function BuildStatusLine({
     return (
       <div className="flex items-center gap-2 font-medium">
         <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-        Latest build {num} finished — publishing the download…
+        {ready
+          ? `Latest build ${num} published — download is ready above.`
+          : `Latest build ${num} finished — publishing the download…`}
       </div>
     );
   }
@@ -487,17 +499,40 @@ function BuildStatusLine({
   );
 }
 
-function BuildPanel({
+// Shown in the download card while no .iso is published yet — it points at the
+// dedicated build card below instead of doubling up the build controls.
+function BuildingNotice({ configured }: { configured: boolean }) {
+  return (
+    <div className="space-y-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+      <div className="flex items-center gap-2 font-medium text-foreground">
+        <Disc3 className="h-4 w-4 text-muted-foreground" /> No image is published
+        yet
+      </div>
+      <p>
+        {configured
+          ? "Start one with “Build a new ISO” below — this download switches on by itself the moment the build finishes."
+          : "Once the .iso is published, this download switches on here automatically — no refresh needed."}
+      </p>
+    </div>
+  );
+}
+
+// A dedicated card for kicking off a fresh cloud build. It's intentionally
+// SEPARATE from the download button so you can rebuild after making changes
+// while the previous image is still downloadable above.
+function BuildIsoCard({
   buildStatus,
   repo,
+  ready,
 }: {
   buildStatus: OsBuildStatus | null;
   repo: string | null;
+  ready: boolean;
 }) {
   const trigger = useTriggerOsBuild();
   const running = buildStatus?.running ?? false;
   const run = buildStatus?.latestRun ?? null;
-  const canTrigger = buildStatus?.canTrigger ?? true;
+  const canTrigger = buildStatus?.canTrigger ?? false;
   const busy = running || trigger.isPending;
   const triggerError = (trigger.error as Error | null)?.message ?? null;
   const statusError = buildStatus?.error ?? null;
@@ -518,64 +553,84 @@ function BuildPanel({
     : trigger.isPending
       ? "Starting…"
       : run
-        ? "Rebuild image"
-        : "Build image";
+        ? "Rebuild ISO"
+        : "Build ISO";
 
   return (
-    <div className="space-y-4 rounded-md border border-dashed p-4">
-      <BuildStatusLine pending={trigger.isPending} buildStatus={buildStatus} />
-      <p className="text-sm text-muted-foreground">
-        Building the bootable image runs a free GitHub cloud build (~30–90 min).
-        This page tracks it live and the download switches on by itself the moment
-        it's ready — no refresh needed.
-      </p>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          onClick={() => {
-            if (!busy && canTrigger) trigger.mutate();
-          }}
-          disabled={busy || !canTrigger}
-          data-testid="button-build-iso"
-        >
-          {busy ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Hammer className="mr-2 h-4 w-4" />
-          )}
-          {buttonLabel}
-        </Button>
-        <Button asChild variant="outline" size="sm">
-          <a
-            href={linkUrl}
-            target="_blank"
-            rel="noreferrer"
-            data-testid="link-actions"
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Hammer className="h-5 w-5" /> Build a new ISO
+            </CardTitle>
+            <CardDescription>
+              Made changes? Build a fresh bootable image. It runs a free GitHub
+              cloud build (~30–90 min); the download above refreshes by itself
+              when it's done.
+            </CardDescription>
+          </div>
+          {running ? (
+            <Badge variant="outline" className="shrink-0 gap-1.5">
+              <Loader2 className="h-3 w-3 animate-spin" /> Building…
+            </Badge>
+          ) : null}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <BuildStatusLine
+          pending={trigger.isPending}
+          buildStatus={buildStatus}
+          ready={ready}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            onClick={() => {
+              if (!busy && canTrigger) trigger.mutate();
+            }}
+            disabled={busy || !canTrigger}
+            data-testid="button-build-iso"
           >
-            <Github className="mr-2 h-4 w-4" /> {linkLabel}
-            <ExternalLink className="ml-2 h-3.5 w-3.5" />
-          </a>
-        </Button>
-      </div>
-      {!canTrigger ? (
-        <p className="text-xs text-muted-foreground">
-          One-click builds need a GitHub token with the{" "}
-          <code className="rounded bg-muted px-1 py-0.5 text-foreground">
-            workflow
-          </code>{" "}
-          scope on the server. You can still start one from GitHub with the button
-          above.
-        </p>
-      ) : null}
-      {triggerError ? (
-        <p className="flex items-center gap-1.5 text-sm text-destructive">
-          <AlertCircle className="h-3.5 w-3.5" /> {triggerError}
-        </p>
-      ) : statusError ? (
-        <p className="flex items-center gap-1.5 text-sm text-destructive">
-          <AlertCircle className="h-3.5 w-3.5" /> {statusError}
-        </p>
-      ) : null}
-    </div>
+            {busy ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Hammer className="mr-2 h-4 w-4" />
+            )}
+            {buttonLabel}
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <a
+              href={linkUrl}
+              target="_blank"
+              rel="noreferrer"
+              data-testid="link-actions"
+            >
+              <Github className="mr-2 h-4 w-4" /> {linkLabel}
+              <ExternalLink className="ml-2 h-3.5 w-3.5" />
+            </a>
+          </Button>
+        </div>
+        {!canTrigger ? (
+          <p className="text-xs text-muted-foreground">
+            One-click builds need a GitHub token with the{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-foreground">
+              workflow
+            </code>{" "}
+            scope on the server. You can still start one from GitHub with the
+            button above.
+          </p>
+        ) : null}
+        {triggerError ? (
+          <p className="flex items-center gap-1.5 text-sm text-destructive">
+            <AlertCircle className="h-3.5 w-3.5" /> {triggerError}
+          </p>
+        ) : statusError ? (
+          <p className="flex items-center gap-1.5 text-sm text-destructive">
+            <AlertCircle className="h-3.5 w-3.5" /> {statusError}
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 
