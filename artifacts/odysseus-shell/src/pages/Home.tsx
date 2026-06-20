@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SettingsModal } from "@/components/SettingsModal";
 import { SetupWizard } from "@/components/SetupWizard";
+import { ConnectLlamaModal } from "@/components/ConnectLlamaModal";
 import { SnapshotModal } from "@/components/SnapshotModal";
 import { Terminal, type TerminalHandle } from "@/components/Terminal";
 import { AgentChatPane, type ChatTarget } from "@/components/AgentChatPane";
@@ -164,6 +165,7 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
+          <ConnectLlamaModal />
           <SnapshotModal />
           <SettingsModal />
         </div>

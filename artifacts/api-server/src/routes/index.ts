@@ -11,6 +11,7 @@ import browserRouter from "./browser";
 import networkRouter from "./network";
 import usbRouter from "./usb";
 import bluetoothRouter from "./bluetooth";
+import localModelRouter from "./local-model";
 
 const router: IRouter = Router();
 
@@ -24,6 +25,7 @@ router.use(browserRouter);
 router.use(networkRouter);
 router.use(usbRouter);
 router.use(bluetoothRouter);
+router.use(localModelRouter);
 router.use(odysseusLifecycleRouter);
 router.use(odysseusProxyRouter);
 

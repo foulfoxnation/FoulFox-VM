@@ -141,6 +141,12 @@ app.use("/api/network", localhostOnly, requireStateChangeToken);
 app.use("/api/usb", localhostOnly, requireStateChangeToken);
 app.use("/api/bluetooth", localhostOnly, requireStateChangeToken);
 
+// Local model connection endpoints: localhost only. requireStateChangeToken lets
+// the read-only GET (list endpoints) through but requires the shell token for the
+// state-changing test/create POSTs. These routes inject the privileged Odysseus
+// internal token upstream, so the browser-facing side must stay token-gated.
+app.use("/api/local-model", localhostOnly, requireStateChangeToken);
+
 // Shell session token endpoint — localhost only so remote callers can't obtain it
 app.get("/api/shell/session-token", localhostOnly, (_req, res) => {
   res.json({ token: SHELL_SESSION_TOKEN });

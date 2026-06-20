@@ -30,3 +30,4 @@
 - [FoulFox first-boot decisions](foulfox-first-boot-decisions.md) — additive SPICE (keep VNC), non-destructive persistence (warn not repartition), offline-safe sentinel-gated start, no network-online wait, single ODYSSEUS_DATA_DIR.
 - [Shell→Python stdin gotcha](shell-python-stdin-heredoc.md) — pipe JSON to `python3 -c`, NOT `python3 - <<EOF` (heredoc steals stdin, pipe is discarded → silent no-op).
 - [In-shell browser proxy security](foulfox-browser-proxy-security.md) — loopback CORS must NEVER allow Origin:null (sandboxed proxy iframe is null-origin); SSRF guard must pin the socket to the validated IP (custom lookup).
+- [Agent-suite endpoint assignment](agent-suite-endpoint-assignment.md) — creating a ModelEndpoint ≠ using it; must provision it to all 3 roles or AI cost stays on the paid default; switch-model UI must call provision itself.
