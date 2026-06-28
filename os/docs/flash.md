@@ -89,7 +89,7 @@ Windows is not realistic without this, so add a second partition labeled exactly
 `foulfox-persist`.
 
 Use a stick comfortably larger than your guest disk (the default guest disk is
-128 GB, so 256 GB+ is ideal). Do this from a Linux machine (or another FoulFox
+64 GB, so 128 GB+ is ideal). Do this from a Linux machine (or another FoulFox
 boot — Ctrl+Alt+F2 for a console):
 
 **Easiest — GParted / GNOME Disks (GUI):** open the flashed stick, select the

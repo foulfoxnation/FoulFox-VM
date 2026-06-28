@@ -22,6 +22,7 @@
 - [noVNC + Vite CJS TLA pitfall](novnc-vite-cjs-tla.md) — pin @novnc/novnc to 1.4.0 ESM core/; 1.5+ CJS lib/ has a top-level await that crashes esbuild dep prebundle.
 - [api-server dev no-watch](apiserver-dev-no-watch.md) — dev = build+start, no watcher; restart the API Server workflow after backend edits or endpoints serve a stale build.
 - [FoulFox bootable-OS target](foulfox-bootable-os.md) — product aims to boot from USB on bare metal (KVM-native host); mutable VM state must live under ODYSSEUS_DATA_DIR (persistent partition), not tmpfs $HOME.
+- [FoulFox VM guest disk sizing](foulfox-vm-disk-sizing.md) — guest disk cap set in TWO layers (api-server defaults vs OS foulfox.env/first-run, which wins via config merge); keep aligned; target 64G so OS+Windows fit a 128GB total disk.
 - [live-build CI build tool](foulfox-livebuild-apt-passes.md) — ubuntu-latest's Ubuntu live-build 3.x mis-resolves a Debian chroot (dies at lb_chroot_live-packages); fix = run live-build inside a privileged debian:bookworm container (package-list pins do NOT work).
 - [FoulFox ISO failed-build log](foulfox-os-iso-build.md) — canonical running record of every ISO-build failure mode + fix lives in repo at `os/docs/failed_builds.md`; consult/append it before debugging a new build break.
 - [In-app ISO build trigger](foulfox-iso-build-trigger.md) — "Get FoulFox OS" page reads live run state + POSTs workflow_dispatch via server token; public-by-design so preview works (security deferred); build runs ONLY on dispatch.

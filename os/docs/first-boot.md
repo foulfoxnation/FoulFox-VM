@@ -89,7 +89,7 @@ controls let you start, stop, restart, and snapshot the guest.
 
 The image boots with a persistence label (`foulfox-persist`), but a plain flash
 (dd/Etcher/Rufus) does **not** create that partition. Without it, **everything
-runs in a RAM overlay**: the multi-GB Windows ISO and the 128 GB guest disk are
+runs in a RAM overlay**: the multi-GB Windows ISO and the 64 GB guest disk are
 written to memory, so they are **lost on every reboot** and can **exhaust RAM
 mid-install**. The appliance detects this and shows a warning in the kiosk plus a
 `PERSISTENCE-WARNING.txt` note — it never repartitions your stick for you.

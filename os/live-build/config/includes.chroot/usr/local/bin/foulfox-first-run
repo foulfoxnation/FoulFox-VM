@@ -18,7 +18,7 @@ STAGING="${FRONTLOAD_STAGING_DIR:-$FOULFOX_HOME/frontload}"
 VM_DIR="$FOULFOX_HOME/vm"
 CONFIG="$FOULFOX_HOME/.odysseus-vm-config.json"
 DISK="$VM_DIR/windows.qcow2"
-DISK_SIZE="${VM_DISK_SIZE:-128G}"
+DISK_SIZE="${VM_DISK_SIZE:-64G}"
 RAM_GB="${VM_RAM_GB:-8}"
 CPU_CORES="${VM_CPU_CORES:-4}"
 DISPLAY_MODE="${VM_DISPLAY_MODE:-spice}"
@@ -92,7 +92,7 @@ fi
 # ── Persistence sanity check (non-destructive) ───────────────────────────────
 # The live image boots with 'persistence persistence-label=foulfox-persist'. If
 # no partition with that label exists (a plain dd/Etcher flash has none), ALL
-# writes — the multi-GB Windows ISO and the 128G guest disk — land in a RAM
+# writes — the multi-GB Windows ISO and the 64G guest disk — land in a RAM
 # overlay: they are LOST on reboot and can exhaust memory mid-install. We never
 # repartition the user's stick automatically; warn loudly in the service log and
 # drop a note the shell surfaces, so the user can add the partition deliberately.
