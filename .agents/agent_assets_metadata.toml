@@ -6,3 +6,9 @@ id = "yB-PxvK7569ppCEh4qm6q"
 uri = "file://docs/cloud-ollama-handoff.md"
 type = "text"
 title = "Cloud Ollama Handoff (plan + code for the new Repl)"
+
+[[outputs]]
+id = "VcialBagKVRzdDjNbmFqN"
+uri = "file://docs/foulfox-app-spec.md"
+type = "text"
+title = "FoulFox App Spec (Part 1 — hand this to every app-building agent)"
