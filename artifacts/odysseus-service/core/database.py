@@ -397,6 +397,69 @@ class McpServer(TimestampMixin, Base):
     oauth_tokens = Column(EncryptedText, nullable=True)  # JSON {tokens, client_info} for generic MCP OAuth, encrypted at rest
 
 
+class SetupHealEvent(Base):
+    """Append-only audit trail of the self-healing first-run setup.
+
+    Records every detected setup/install error AND every autonomous repair
+    attempt + result, so the user can audit exactly what FoulFox changed about
+    its OWN code/services (confined to BASE_DIR) to make the first install
+    succeed — and download the complete log. Rows are never updated or deleted
+    by the app (append-only); the table is exposed read-only (list + download)
+    to the shell via the api-server. Secrets (bearer tokens, api keys) are
+    redacted before any text is persisted (see routes/setup_heal_routes.py)."""
+    __tablename__ = "setup_heal_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=utcnow_naive, nullable=False, index=True)
+    # Groups one step attempt's error -> repair_started -> repair_finished -> retry chain.
+    correlation_id = Column(String, nullable=True, index=True)
+    step = Column(String, nullable=True)            # setup step key, e.g. "ai-online"
+    operation = Column(String, nullable=True)       # finer op, e.g. "endpoint-test"
+    # error_detected | repair_started | repair_finished | retry_started | step_success | step_failed | info
+    event_type = Column(String, nullable=False, index=True)
+    severity = Column(String, nullable=True, default="info")  # info | warning | error
+    attempt_no = Column(Integer, nullable=True, default=0)
+    objective = Column(Text, nullable=True)
+    check_key = Column(String, nullable=True)
+    check_command = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    repair_status = Column(String, nullable=True)   # ok | checks_failed | error | skipped
+    checks_pass = Column(Boolean, nullable=True)
+    check_exit_code = Column(Integer, nullable=True)
+    check_tail = Column(Text, nullable=True)
+    repair_json = Column(JSON, nullable=True)
+    context_json = Column(JSON, nullable=True)
+    source_service = Column(String, nullable=True, default="odysseus")
+
+    __table_args__ = (
+        Index("ix_setup_heal_corr_time", "correlation_id", "created_at"),
+        Index("ix_setup_heal_type_time", "event_type", "created_at"),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "correlation_id": self.correlation_id,
+            "step": self.step,
+            "operation": self.operation,
+            "event_type": self.event_type,
+            "severity": self.severity,
+            "attempt_no": self.attempt_no,
+            "objective": self.objective,
+            "check_key": self.check_key,
+            "check_command": self.check_command,
+            "error_message": self.error_message,
+            "repair_status": self.repair_status,
+            "checks_pass": self.checks_pass,
+            "check_exit_code": self.check_exit_code,
+            "check_tail": self.check_tail,
+            "repair_json": self.repair_json,
+            "context_json": self.context_json,
+            "source_service": self.source_service,
+        }
+
+
 class Comparison(TimestampMixin, Base):
     """Stores A/B model comparison results."""
     __tablename__ = "comparisons"

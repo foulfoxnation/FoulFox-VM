@@ -669,6 +669,10 @@ app.include_router(setup_agent_suite_routes())
 from routes.agent_lessons_routes import setup_agent_lessons_routes
 app.include_router(setup_agent_lessons_routes())
 
+# Self-healing setup: autonomous self_repair + persistent audit log for first-run install
+from routes.setup_heal_routes import setup_setup_heal_routes
+app.include_router(setup_setup_heal_routes())
+
 # Calendar (CalDAV)
 from routes.calendar_routes import setup_calendar_routes
 calendar_router = setup_calendar_routes()

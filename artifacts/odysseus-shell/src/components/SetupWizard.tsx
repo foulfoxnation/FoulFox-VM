@@ -22,15 +22,28 @@ import {
   Wand2,
   Wrench,
   Terminal,
+  Cloud,
+  Download,
+  RefreshCw,
+  ScrollText,
+  XCircle,
+  Activity,
 } from "lucide-react";
 import { apiUrl } from "@/lib/api-url";
 import { useShellToken } from "@/hooks/use-shell-token";
 import { useToast } from "@/hooks/use-toast";
 
-// First-run onboarding for the Odysseus 3-agent suite. Renders only when a suite
+// First-run onboarding for the FoulFox 3-agent suite. Renders only when a suite
 // exists but is not yet marked setup_complete (or no suite at all). Steps:
-//  0 Welcome + service reachability, 1 per-agent model selection,
-//  2 Windows VM capability detection (honest), 3 review + provision.
+//  0 AI Online (bring an AI engine up FIRST — cloud primary, local fallback —
+//    and gate the rest of setup on it), 1 Welcome + service reachability,
+//  2 per-agent model selection, 3 Windows VM capability detection (honest),
+//  4 storage persistence, 5 review + provision.
+//
+// Self-healing: install steps run through runHealableStep, which on failure
+// records the error, asks FoulFox to autonomously repair its OWN code/services
+// (confined to BASE_DIR), retries (capped), and records every attempt. The
+// audit panel shows that log live and offers a Download.
 
 type Role = "windows" | "game" | "architect";
 
@@ -136,6 +149,27 @@ const ROLES: { key: Role; label: string; icon: typeof MonitorCog }[] = [
   { key: "architect", label: "FoulFox OS Architect", icon: Compass },
 ];
 
+// AI comes online FIRST so the rest of setup has a working engine to lean on.
+const STEP = { AI: 0, WELCOME: 1, MODELS: 2, VM: 3, STORAGE: 4, REVIEW: 5 } as const;
+
+type HealEvent = {
+  id: number;
+  created_at: string | null;
+  correlation_id: string | null;
+  step: string | null;
+  operation: string | null;
+  event_type: string;
+  severity: string | null;
+  attempt_no: number | null;
+  objective: string | null;
+  check_command: string | null;
+  error_message: string | null;
+  repair_status: string | null;
+  checks_pass: boolean | null;
+  check_exit_code: number | null;
+};
+type HealEventsResp = { events: HealEvent[]; degraded?: boolean };
+
 async function getJson<T>(path: string): Promise<T> {
   const r = await fetch(apiUrl(path));
   if (!r.ok) throw new Error(`${path} → ${r.status}`);
@@ -200,6 +234,221 @@ export function SetupWizard() {
   const [partMode, setPartMode] = useState<"auto" | "manual" | null>(null);
   const [confirmText, setConfirmText] = useState("");
   const CONFIRM_PHRASE = "ERASE FREE SPACE";
+
+  // ── AI Online (step 0) — bring an engine up FIRST: cloud primary, local
+  // fallback. Next is gated until an AI engine is reachable.
+  const [cloud, setCloud] = useState({ url: "https://ollama.com", key: "" });
+  const [local, setLocal] = useState({ url: "http://localhost:11434" });
+  const [showAudit, setShowAudit] = useState(false);
+
+  // One correlation id per setup run ties every error + repair together so the
+  // attempt cap and the audit view group by install session.
+  const correlationId = useMemo(
+    () => `setup-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    [],
+  );
+
+  // Live, persistent audit log of every detected error and autonomous repair.
+  const healEventsQ = useQuery({
+    queryKey: ["heal-events"],
+    queryFn: () => getJson<HealEventsResp>("/api/setup/heal/events?limit=200"),
+    enabled: open,
+    refetchInterval: open ? 4000 : false,
+  });
+
+  const aiOnline = useMemo(
+    () =>
+      (modelsQ.data?.items ?? []).some((it) => !it.offline && (it.models?.length ?? 0) > 0),
+    [modelsQ.data],
+  );
+  // Gate is authoritative: only a live endpoint that actually reports models
+  // (modelsQ, re-probed after every save) opens Next — a saved-but-offline URL
+  // does NOT count as "AI online".
+  const aiReady = aiOnline;
+
+  const postWithToken = async (path: string, body: Record<string, unknown>) => {
+    const token = shellTokenQ.data;
+    return fetch(apiUrl(path), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { "X-Shell-Token": token } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+  };
+
+  // Probe a candidate AI endpoint without saving it.
+  const testEndpoint = useMutation({
+    mutationFn: async (b: { base_url: string; api_key?: string }) => {
+      const res = await postWithToken("/api/local-model/test", {
+        base_url: b.base_url,
+        api_key: b.api_key ?? "",
+        endpoint_kind: "auto",
+      });
+      const j = (await res.json().catch(() => null)) as { error?: string } | null;
+      if (!res.ok) throw new Error(j?.error || `test → ${res.status}`);
+      return j;
+    },
+    onSuccess: () => toast({ title: "AI endpoint reachable" }),
+    onError: (e) => {
+      void logHealEvent({
+        event_type: "error_detected",
+        step: "ai-online",
+        operation: "test-endpoint",
+        severity: "warning",
+        error_message: String(e),
+      });
+      toast({ title: "Couldn't reach that engine", variant: "destructive", description: String(e) });
+    },
+  });
+
+  // Persist an AI endpoint, then refresh model/endpoint state so the gate opens.
+  const saveEndpoint = useMutation({
+    mutationFn: async (b: { name: string; base_url: string; api_key?: string }) => {
+      const res = await postWithToken("/api/local-model/endpoints", {
+        name: b.name,
+        base_url: b.base_url,
+        api_key: b.api_key ?? "",
+        endpoint_kind: "auto",
+        supports_tools: "",
+      });
+      const j = (await res.json().catch(() => null)) as { error?: string } | null;
+      if (!res.ok) throw new Error(j?.error || `save → ${res.status}`);
+      return j;
+    },
+    onSuccess: () => {
+      // Re-probe; the status banner + Next gate reflect whether it's truly online.
+      qc.invalidateQueries({ queryKey: ["models"] });
+      toast({ title: "Endpoint saved", description: "Verifying it's online — see the status below." });
+    },
+  });
+
+  // Record one audit event (best-effort; the api-server spools if Odysseus is
+  // down, so the trail survives a crash during the very install it documents).
+  const logHealEvent = async (e: {
+    event_type: string;
+    step?: string;
+    operation?: string;
+    severity?: string;
+    attempt_no?: number;
+    error_message?: string;
+    context?: unknown;
+  }) => {
+    try {
+      await postWithToken("/api/setup/heal/event", {
+        event_type: e.event_type,
+        step: e.step ?? "",
+        operation: e.operation ?? "",
+        severity: e.severity ?? "info",
+        attempt_no: e.attempt_no ?? 0,
+        error_message: e.error_message ?? "",
+        correlation_id: correlationId,
+        ...(e.context !== undefined ? { context: e.context } : {}),
+      });
+    } catch {
+      /* best-effort; the spool handles outages */
+    }
+    qc.invalidateQueries({ queryKey: ["heal-events"] });
+  };
+
+  // Run an install step; on failure, autonomously repair FoulFox's OWN code
+  // (server picks the verify command from check_key) and retry, capped. Every
+  // error, repair, and retry is recorded. Returns the step result or rethrows.
+  const runHealableStep = async <T,>(opts: {
+    step: string;
+    operation: string;
+    checkKey: string;
+    objective: string;
+    run: () => Promise<T>;
+    maxRetries?: number;
+  }): Promise<T> => {
+    const max = opts.maxRetries ?? 2;
+    try {
+      return await opts.run();
+    } catch (firstErr) {
+      await logHealEvent({
+        event_type: "error_detected",
+        step: opts.step,
+        operation: opts.operation,
+        severity: "error",
+        attempt_no: 0,
+        error_message: String(firstErr),
+      });
+      let lastErr = firstErr;
+      for (let attempt = 1; attempt <= max; attempt++) {
+        try {
+          await postWithToken("/api/setup/heal/repair", {
+            objective: opts.objective,
+            step: opts.step,
+            operation: opts.operation,
+            check_key: opts.checkKey,
+            correlation_id: correlationId,
+            attempt_no: attempt,
+            error_message: String(lastErr),
+          });
+        } catch (repairErr) {
+          await logHealEvent({
+            event_type: "info",
+            step: opts.step,
+            operation: opts.operation,
+            severity: "warning",
+            attempt_no: attempt,
+            error_message: `repair request failed: ${String(repairErr)}`,
+          });
+        }
+        qc.invalidateQueries({ queryKey: ["heal-events"] });
+        await logHealEvent({
+          event_type: "retry_started",
+          step: opts.step,
+          operation: opts.operation,
+          severity: "info",
+          attempt_no: attempt,
+        });
+        try {
+          const out = await opts.run();
+          await logHealEvent({
+            event_type: "step_success",
+            step: opts.step,
+            operation: opts.operation,
+            severity: "info",
+            attempt_no: attempt,
+          });
+          return out;
+        } catch (retryErr) {
+          lastErr = retryErr;
+        }
+      }
+      await logHealEvent({
+        event_type: "step_failed",
+        step: opts.step,
+        operation: opts.operation,
+        severity: "error",
+        attempt_no: max,
+        error_message: String(lastErr),
+      });
+      throw lastErr;
+    }
+  };
+
+  // Download the complete persistent audit log as a JSON file.
+  const downloadLog = async () => {
+    try {
+      const res = await fetch(apiUrl("/api/setup/heal/events/download"));
+      if (!res.ok) throw new Error(`download → ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "foulfox-setup-heal-log.json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast({ title: "Couldn't download the log", variant: "destructive", description: String(e) });
+    }
+  };
 
   const modelOptions = useMemo(() => {
     const opts: { value: string; label: string }[] = [];
@@ -276,8 +525,16 @@ export function SetupWizard() {
       if (!res.ok) throw new Error(j?.error || j?.reason || `dry-run → ${res.status}`);
       return j as DryRunResp;
     },
-    onError: (e) =>
-      toast({ title: "Couldn't read the disk", variant: "destructive", description: String(e) }),
+    onError: (e) => {
+      void logHealEvent({
+        event_type: "error_detected",
+        step: "storage",
+        operation: "partition-dry-run",
+        severity: "warning",
+        error_message: String(e),
+      });
+      toast({ title: "Couldn't read the disk", variant: "destructive", description: String(e) });
+    },
   });
 
   // DESTRUCTIVE: create + format the persistence partition. confirm:true is sent
@@ -308,8 +565,17 @@ export function SetupWizard() {
         description: d.reason || "Reboot to activate durable storage.",
       });
     },
-    onError: (e) =>
-      toast({ title: "Auto-partition failed", variant: "destructive", description: String(e) }),
+    onError: (e) => {
+      // Destructive disk op: log the error for the audit trail, but never auto-retry.
+      void logHealEvent({
+        event_type: "error_detected",
+        step: "storage",
+        operation: "partition-apply",
+        severity: "error",
+        error_message: String(e),
+      });
+      toast({ title: "Auto-partition failed", variant: "destructive", description: String(e) });
+    },
   });
 
   // Save the (possibly adjusted) VM sizing, then provision the agent suite. A
@@ -320,18 +586,36 @@ export function SetupWizard() {
       sizing ?? (plan ? { diskGb: plan.diskGb, ramGb: plan.ramGb, cpuCores: plan.cpuCores } : null);
     if (body) {
       try {
-        await applySizing.mutateAsync(body);
+        await runHealableStep({
+          step: "review",
+          operation: "vm-sizing",
+          checkKey: "syntax",
+          objective:
+            "Persist the chosen Windows VM sizing; repair FoulFox's own setup/storage code if the save keeps failing.",
+          run: () => applySizing.mutateAsync(body),
+        });
       } catch (e) {
         toast({ title: "VM sizing not saved", variant: "destructive", description: String(e) });
         return;
       }
     }
-    provision.mutate();
+    try {
+      await runHealableStep({
+        step: "review",
+        operation: "provision-suite",
+        checkKey: "subagents",
+        objective:
+          "Provision the FoulFox 3-agent suite; repair FoulFox's own agent-suite code/config if provisioning keeps failing.",
+        run: () => provision.mutateAsync(),
+      });
+    } catch {
+      /* provision.onError already surfaced a toast; the audit log captured details */
+    }
   };
 
   if (!open) return null;
 
-  const steps = ["Welcome", "Models", "Windows VM", "Storage", "Review"];
+  const steps = ["AI Online", "Welcome", "Models", "Windows VM", "Storage", "Review"];
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && setDismissed(true)}>
@@ -365,8 +649,184 @@ export function SetupWizard() {
         </div>
 
         <div className="min-h-[260px] py-2">
-          {/* Step 0 — Welcome */}
-          {step === 0 && (
+          {/* Step 0 — AI Online: bring an engine up FIRST; gates the rest */}
+          {step === STEP.AI && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                FoulFox brings an AI engine online <span className="font-medium">first</span> —
+                the rest of setup leans on it (and on autonomous self-repair). Cloud Ollama is
+                the primary engine; a local engine is the fallback.
+              </p>
+
+              <div
+                className={`flex items-center gap-2 rounded-md border p-3 ${
+                  aiReady
+                    ? "border-green-500/40 bg-green-500/5"
+                    : "border-amber-500/40 bg-amber-500/5"
+                }`}
+                data-testid="ai-status"
+              >
+                {modelsQ.isLoading || modelsQ.isFetching ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                ) : aiReady ? (
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                ) : (
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                )}
+                <span className="text-sm">
+                  {aiReady
+                    ? "AI engine online — you're good to continue."
+                    : "No AI engine online yet. Connect one below."}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-7 text-xs"
+                  onClick={() => void modelsQ.refetch()}
+                  data-testid="button-ai-recheck"
+                >
+                  <RefreshCw className="mr-1 h-3.5 w-3.5" /> Recheck
+                </Button>
+              </div>
+
+              {/* Cloud Ollama — primary */}
+              <div className="space-y-2 rounded-md border p-3">
+                <div className="flex items-center gap-2">
+                  <Cloud className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">Cloud Ollama</span>
+                  <span className="ml-auto text-[11px] uppercase tracking-wide text-muted-foreground">
+                    primary
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="cloud-url" className="text-xs">
+                    Base URL
+                  </Label>
+                  <input
+                    id="cloud-url"
+                    className={inputClass}
+                    value={cloud.url}
+                    onChange={(e) => setCloud((c) => ({ ...c, url: e.target.value }))}
+                    data-testid="input-cloud-url"
+                  />
+                  <Label htmlFor="cloud-key" className="text-xs">
+                    API key
+                  </Label>
+                  <input
+                    id="cloud-key"
+                    type="password"
+                    className={inputClass}
+                    value={cloud.key}
+                    placeholder="ollama.com API key"
+                    onChange={(e) => setCloud((c) => ({ ...c, key: e.target.value }))}
+                    data-testid="input-cloud-key"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!cloud.url.trim() || testEndpoint.isPending}
+                    onClick={() =>
+                      testEndpoint.mutate({ base_url: cloud.url.trim(), api_key: cloud.key })
+                    }
+                    data-testid="button-cloud-test"
+                  >
+                    {testEndpoint.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Test
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={!cloud.url.trim() || saveEndpoint.isPending}
+                    onClick={() =>
+                      void runHealableStep({
+                        step: "ai-online",
+                        operation: "connect-cloud-ollama",
+                        checkKey: "model-routes",
+                        objective:
+                          "Bring the primary Cloud Ollama AI engine online for FoulFox; repair FoulFox's own model-endpoint code/config if saving the endpoint keeps failing.",
+                        run: () =>
+                          saveEndpoint.mutateAsync({
+                            name: "Cloud Ollama",
+                            base_url: cloud.url.trim(),
+                            api_key: cloud.key,
+                          }),
+                      }).catch(() => {})
+                    }
+                    data-testid="button-cloud-save"
+                  >
+                    {saveEndpoint.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Connect
+                  </Button>
+                </div>
+              </div>
+
+              {/* Local engine — fallback */}
+              <div className="space-y-2 rounded-md border p-3">
+                <div className="flex items-center gap-2">
+                  <HardDrive className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">Local engine</span>
+                  <span className="ml-auto text-[11px] uppercase tracking-wide text-muted-foreground">
+                    fallback
+                  </span>
+                </div>
+                <Label htmlFor="local-url" className="text-xs">
+                  Base URL
+                </Label>
+                <input
+                  id="local-url"
+                  className={inputClass}
+                  value={local.url}
+                  onChange={(e) => setLocal({ url: e.target.value })}
+                  data-testid="input-local-url"
+                />
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!local.url.trim() || testEndpoint.isPending}
+                    onClick={() => testEndpoint.mutate({ base_url: local.url.trim() })}
+                    data-testid="button-local-test"
+                  >
+                    {testEndpoint.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Test
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={!local.url.trim() || saveEndpoint.isPending}
+                    onClick={() =>
+                      void runHealableStep({
+                        step: "ai-online",
+                        operation: "connect-local-ollama",
+                        checkKey: "model-routes",
+                        objective:
+                          "Bring a local fallback AI engine online for FoulFox; repair FoulFox's own model-endpoint code/config if saving the endpoint keeps failing.",
+                        run: () =>
+                          saveEndpoint.mutateAsync({
+                            name: "Local Ollama",
+                            base_url: local.url.trim(),
+                          }),
+                      }).catch(() => {})
+                    }
+                    data-testid="button-local-save"
+                  >
+                    {saveEndpoint.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Connect
+                  </Button>
+                </div>
+              </div>
+
+              {!aiReady && (
+                <p className="text-xs text-muted-foreground">
+                  Bring an AI engine online before continuing. If a connection fails, FoulFox
+                  tries to repair itself automatically — watch the audit log below.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Step 1 — Welcome */}
+          {step === STEP.WELCOME && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 FoulFox OS runs as three coordinated agents. The Architect reviews the
@@ -402,8 +862,8 @@ export function SetupWizard() {
             </div>
           )}
 
-          {/* Step 1 — Model selection per agent */}
-          {step === 1 && (
+          {/* Step 2 — Model selection per agent */}
+          {step === STEP.MODELS && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 Choose a model for each agent. Each agent is model-agnostic — you can
@@ -452,8 +912,8 @@ export function SetupWizard() {
             </div>
           )}
 
-          {/* Step 2 — Windows VM capability */}
-          {step === 2 && (
+          {/* Step 3 — Windows VM capability */}
+          {step === STEP.VM && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 The Windows Agent drives a real Windows VM. We checked whether this
@@ -611,8 +1071,8 @@ export function SetupWizard() {
             </div>
           )}
 
-          {/* Step 3 — Storage persistence (auto vs manual) */}
-          {step === 3 &&
+          {/* Step 4 — Storage persistence (auto vs manual) */}
+          {step === STEP.STORAGE &&
             (() => {
               const pinfo = partitionsQ.data;
               const dr = dryRun.data;
@@ -813,8 +1273,8 @@ echo "/ union" | sudo tee /mnt/persistence.conf`}
               );
             })()}
 
-          {/* Step 4 — Review */}
-          {step === 4 && (
+          {/* Step 5 — Review */}
+          {step === STEP.REVIEW && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">Review and finish setup.</p>
               <div className="space-y-2">
@@ -864,6 +1324,99 @@ echo "/ union" | sudo tee /mnt/persistence.conf`}
           )}
         </div>
 
+        {/* Self-healing audit log — every detected error + autonomous repair,
+            persisted server-side, viewable live and downloadable. */}
+        {(() => {
+          const events = healEventsQ.data?.events ?? [];
+          const errors = events.filter(
+            (e) => e.event_type === "error_detected" || e.event_type === "step_failed",
+          ).length;
+          const repairs = events.filter((e) => e.event_type === "repair_finished").length;
+          const sevColor = (e: HealEvent) =>
+            e.event_type === "step_success" || e.checks_pass
+              ? "text-green-600 dark:text-green-500"
+              : e.severity === "error" || e.event_type === "step_failed"
+              ? "text-red-600 dark:text-red-500"
+              : e.severity === "warning"
+              ? "text-amber-600 dark:text-amber-500"
+              : "text-muted-foreground";
+          return (
+            <div className="rounded-md border" data-testid="heal-audit-panel">
+              <div className="flex items-center gap-2 p-2.5">
+                <button
+                  type="button"
+                  className="flex items-center gap-2 text-sm font-medium"
+                  onClick={() => setShowAudit((v) => !v)}
+                  data-testid="button-toggle-audit"
+                >
+                  <ScrollText className="h-4 w-4 text-primary" />
+                  Self-heal log
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {events.length} events · {errors} errors · {repairs} repairs
+                  </span>
+                  {healEventsQ.data?.degraded && (
+                    <span className="text-[11px] text-amber-600 dark:text-amber-500">
+                      (offline cache)
+                    </span>
+                  )}
+                </button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-7 text-xs"
+                  onClick={() => void downloadLog()}
+                  data-testid="button-download-log"
+                >
+                  <Download className="mr-1 h-3.5 w-3.5" /> Download
+                </Button>
+              </div>
+              {showAudit && (
+                <div
+                  className="max-h-44 space-y-1 overflow-y-auto border-t p-2.5"
+                  data-testid="heal-audit-list"
+                >
+                  {events.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      No issues yet — repairs will appear here automatically if a step fails.
+                    </p>
+                  ) : (
+                    events.map((e) => (
+                      <div key={e.id} className="flex items-start gap-2 text-xs">
+                        {e.event_type === "step_success" || e.checks_pass ? (
+                          <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-500" />
+                        ) : e.severity === "error" || e.event_type === "step_failed" ? (
+                          <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500" />
+                        ) : (
+                          <Activity className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        )}
+                        <div className="min-w-0">
+                          <span className={`font-medium ${sevColor(e)}`}>
+                            {e.event_type.replace(/_/g, " ")}
+                          </span>
+                          {(e.step || e.operation) && (
+                            <span className="text-muted-foreground">
+                              {" "}
+                              · {[e.step, e.operation].filter(Boolean).join(" / ")}
+                            </span>
+                          )}
+                          {typeof e.attempt_no === "number" && e.attempt_no > 0 && (
+                            <span className="text-muted-foreground"> · try {e.attempt_no}</span>
+                          )}
+                          {e.error_message && (
+                            <div className="truncate text-muted-foreground" title={e.error_message}>
+                              {e.error_message}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* Footer nav */}
         <div className="flex items-center justify-between pt-2">
           <Button
@@ -882,7 +1435,13 @@ echo "/ union" | sudo tee /mnt/persistence.conf`}
               </Button>
             )}
             {step < steps.length - 1 ? (
-              <Button size="sm" onClick={() => setStep((s) => s + 1)} data-testid="button-wizard-next">
+              <Button
+                size="sm"
+                onClick={() => setStep((s) => s + 1)}
+                disabled={step === STEP.AI && !aiReady}
+                title={step === STEP.AI && !aiReady ? "Bring an AI engine online to continue" : undefined}
+                data-testid="button-wizard-next"
+              >
                 Next <ChevronRight className="ml-1 h-4 w-4" />
               </Button>
             ) : (

@@ -22,6 +22,7 @@
 - [noVNC + Vite CJS TLA pitfall](novnc-vite-cjs-tla.md) — pin @novnc/novnc to 1.4.0 ESM core/; 1.5+ CJS lib/ has a top-level await that crashes esbuild dep prebundle.
 - [api-server dev no-watch](apiserver-dev-no-watch.md) — dev = build+start, no watcher; restart the API Server workflow after backend edits or endpoints serve a stale build.
 - [FoulFox bootable-OS target](foulfox-bootable-os.md) — product aims to boot from USB on bare metal (KVM-native host); mutable VM state must live under ODYSSEUS_DATA_DIR (persistent partition), not tmpfs $HOME.
+- [Self-healing setup audit](setup-heal-audit.md) — AI-online gate must derive from live models probe (not save-success); redact secrets in BOTH Odysseus + api-server spool; repair scope = server-side check_key whitelist.
 - [FoulFox storage setup](foulfox-storage-setup.md) — first-run persistence auto-partition: device-side helper is the SOLE safety boundary (append-only, refuses virtual/mounted/existing); `parted` must stay in the live package list or it silently dead-ends.
 - [FoulFox VM guest disk sizing](foulfox-vm-disk-sizing.md) — guest disk cap set in TWO layers (api-server defaults vs OS foulfox.env/first-run, which wins via config merge); keep aligned; target 64G so OS+Windows fit a 128GB total disk.
 - [live-build CI build tool](foulfox-livebuild-apt-passes.md) — ubuntu-latest's Ubuntu live-build 3.x mis-resolves a Debian chroot (dies at lb_chroot_live-packages); fix = run live-build inside a privileged debian:bookworm container (package-list pins do NOT work).
