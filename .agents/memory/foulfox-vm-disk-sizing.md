@@ -29,3 +29,24 @@ disk with headroom.
 `foulfox.env`, the `:-` fallback in `foulfox-first-run`, the api-server
 `defaultDiskGb`/`diskGb` defaults, and the size strings in
 `os/docs/first-boot.md` + `os/docs/flash.md` in lockstep.
+
+## Aggregate-disk guardrail (enforcement)
+
+The VM-create path enforces a real disk budget: it reads actual capacity via
+`detectHostCapabilities()` (statfs on `ODYSSEUS_DATA_DIR`) and refuses to create
+a VM when `sum(existing VM diskGb caps) + new diskGb` exceeds
+`totalDiskGb − FOULFOX_DISK_RESERVE_GB` (reserve default 30 GB, held for FoulFox
+OS + host-side apps), plus a floor that refuses when free space drops below the
+reserve. diskGb is treated as a *reservation* (qcow2 is sparse, so this
+over-counts real usage on purpose — predictable budgeting beats density on a
+single-disk appliance).
+
+**Why this is here, not in `vm-ports.ts`:** the `maxTotalDiskGb: 512` in
+`defaultResourceGuards` is DEAD config — nothing calls it; real enforcement
+lives in the `vm.ts` create handler next to the RAM check.
+
+**Gotcha:** this dev host's statfs reports only ~32 GB total, so with the 30 GB
+reserve the VM budget is ~2 GB and VM creation is effectively blocked here. That
+is expected (the dev host has no KVM and can't boot VMs anyway), NOT a bug. The
+guardrail fails OPEN when `totalDiskGb` is 0 (statfs unavailable). Real budget
+only makes sense on the appliance's persist partition (e.g. 128 GB → 98 GB).

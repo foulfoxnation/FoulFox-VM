@@ -1,5 +1,6 @@
 import fs from "fs";
 import os from "os";
+import path from "path";
 import { spawn } from "child_process";
 
 // ── OS kinds & validation allowlists ─────────────────────────────────────────
@@ -120,8 +121,45 @@ export interface HostCapabilities {
   appleHost: boolean;
   totalRamGb: number;
   cpuCount: number;
+  // Capacity + currently-free space of the writable data partition (where VM
+  // disks AND FoulFox Apps live). 0 when the host can't report it, in which case
+  // disk guardrails fail open rather than block VM creation.
+  totalDiskGb: number;
+  freeDiskGb: number;
   // Which guest OSes this host can realistically run, with honest reasons.
   osSupport: Record<OsKind, { supported: boolean; reason: string }>;
+}
+
+// Capacity of the partition that holds the VM data dir (ODYSSEUS_DATA_DIR, the
+// persistent partition on the appliance). Uses statfs when the runtime exposes
+// it; returns zeros otherwise so callers can fail open.
+async function detectDiskCapacity(): Promise<{ totalDiskGb: number; freeDiskGb: number }> {
+  const configured = process.env["ODYSSEUS_DATA_DIR"] || os.homedir();
+  // statfs needs an existing path. The data dir may not be created yet (first
+  // run), so walk up to the nearest existing ancestor — it lives on the same
+  // filesystem, so the capacity numbers are identical. This keeps the guardrail
+  // measuring (rather than silently failing open) before the dir is created.
+  let target = path.resolve(configured);
+  while (!fs.existsSync(target)) {
+    const parent = path.dirname(target);
+    if (parent === target) break;
+    target = parent;
+  }
+  try {
+    const statfs = (
+      fs.promises as unknown as {
+        statfs?: (p: string) => Promise<{ blocks: number; bsize: number; bavail: number }>;
+      }
+    ).statfs;
+    if (!statfs) return { totalDiskGb: 0, freeDiskGb: 0 };
+    const sf = await statfs(target);
+    return {
+      totalDiskGb: Math.round((sf.blocks * sf.bsize) / 1024 ** 3),
+      freeDiskGb: Math.round((sf.bavail * sf.bsize) / 1024 ** 3),
+    };
+  } catch {
+    return { totalDiskGb: 0, freeDiskGb: 0 };
+  }
 }
 
 export async function detectHostCapabilities(): Promise<HostCapabilities> {
@@ -133,6 +171,7 @@ export async function detectHostCapabilities(): Promise<HostCapabilities> {
   const apple = isAppleHost();
   const totalRamGb = Math.max(1, Math.round(os.totalmem() / (1024 ** 3)));
   const cpuCount = os.cpus()?.length || 1;
+  const { totalDiskGb, freeDiskGb } = await detectDiskCapacity();
 
   const baseReason = !qemuSystem
     ? "QEMU is not installed on this host."
@@ -166,6 +205,8 @@ export async function detectHostCapabilities(): Promise<HostCapabilities> {
     appleHost: apple,
     totalRamGb,
     cpuCount,
+    totalDiskGb,
+    freeDiskGb,
     osSupport,
   };
 }

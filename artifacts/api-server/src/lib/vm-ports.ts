@@ -27,16 +27,18 @@ export interface ResourceGuards {
   maxVms: number;
   maxTotalRamGb: number;
   maxTotalCpuCores: number;
-  maxTotalDiskGb: number;
 }
 
 export function defaultResourceGuards(totalRamGb: number, cpuCount: number): ResourceGuards {
   // Never let VMs claim more than ~75% of host RAM / all-but-one cores.
+  // NOTE: disk budgeting is intentionally NOT here. It is enforced in the
+  // VM-create handler (routes/vm.ts) against the real measured disk capacity
+  // minus FOULFOX_DISK_RESERVE_GB, since a fixed constant can't know the
+  // appliance's actual disk size.
   return {
     maxVms: MAX_VMS,
     maxTotalRamGb: Math.max(2, Math.floor(totalRamGb * 0.75)),
     maxTotalCpuCores: Math.max(1, cpuCount),
-    maxTotalDiskGb: 512,
   };
 }
 

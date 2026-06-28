@@ -152,6 +152,26 @@ router.post("/vm/create", async (req: Request, res: Response) => {
     return;
   }
 
+  // Aggregate-disk guardrail: FoulFox OS, every VM disk, and the user's
+  // installable apps share ONE physical disk. qcow2 images are sparse, so we
+  // treat diskGb as the *reservation* we account against and hold back a slice
+  // (FOULFOX_DISK_RESERVE_GB, default 30) for the OS + apps. This prevents
+  // silently overcommitting the drive. Fails open when capacity is unknown.
+  if (caps.totalDiskGb > 0) {
+    const reserveGb = clampInt(process.env["FOULFOX_DISK_RESERVE_GB"], 0, caps.totalDiskGb, 30);
+    const committedDisk = existing.reduce((s, v) => s + v.diskGb, 0);
+    const vmBudgetGb = Math.max(0, caps.totalDiskGb - reserveGb);
+    if (committedDisk + diskGb > vmBudgetGb) {
+      res.status(409).json({ error: `Not enough disk: this ${diskGb}GB VM plus ${committedDisk}GB already reserved by other VMs exceeds the ${vmBudgetGb}GB VM budget (${caps.totalDiskGb}GB disk − ${reserveGb}GB held for FoulFox OS + your apps). Shrink the disk, remove a VM, or lower FOULFOX_DISK_RESERVE_GB.` });
+      return;
+    }
+    // totalDiskGb > 0 proves statfs succeeded, so freeDiskGb is known (even 0).
+    if (caps.freeDiskGb < reserveGb) {
+      res.status(409).json({ error: `Not enough free disk: only ${caps.freeDiskGb}GB free, below the ${reserveGb}GB reserved for FoulFox OS + your apps. Free up space before creating another VM.` });
+      return;
+    }
+  }
+
   try {
     const vm = await createVm({ name, osKind: osKind as OsKind, imageId: image?.id, ramGb, cpuCores, diskGb });
     // Fire-and-forget provisioning; the UI subscribes to progress via SSE.
@@ -434,6 +454,8 @@ router.get("/vm/capabilities", async (_req: Request, res: Response) => {
     appleHost: caps.appleHost,
     totalRamGb: caps.totalRamGb,
     cpuCount: caps.cpuCount,
+    totalDiskGb: caps.totalDiskGb,
+    freeDiskGb: caps.freeDiskGb,
     osSupport: caps.osSupport,
   });
 });
