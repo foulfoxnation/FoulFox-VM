@@ -15,7 +15,11 @@ async function buildAll() {
   await rm(distDir, { recursive: true, force: true });
 
   await esbuild({
-    entryPoints: [path.resolve(artifactDir, "src/index.ts")],
+    entryPoints: [
+      path.resolve(artifactDir, "src/index.ts"),
+      // Standalone first-run sizing CLI → dist/storage-plan.mjs (same planner as the API).
+      path.resolve(artifactDir, "src/storage-plan.ts"),
+    ],
     platform: "node",
     bundle: true,
     format: "esm",

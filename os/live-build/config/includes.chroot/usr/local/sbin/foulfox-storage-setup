@@ -1,0 +1,377 @@
+#!/usr/bin/env bash
+# foulfox-storage-setup — create the 'foulfox-persist' persistence partition on
+# the FoulFox OS boot USB, safely and APPEND-ONLY.
+#
+# WHY: the live image boots with 'persistence persistence-label=foulfox-persist'.
+# A plain dd/Etcher flash leaves the rest of the stick UNPARTITIONED, so every
+# write (the Windows ISO + the multi-GB guest disk) lands in a RAM overlay and is
+# LOST on reboot. Making storage durable means adding a 2nd partition labelled
+# exactly 'foulfox-persist' (ext4) holding a one-line persistence.conf of
+# "/ union". os/docs/flash.md documents the manual steps; this helper performs
+# the same thing for the user, with hard guards so it can NEVER touch existing
+# data.
+#
+# SAFETY MODEL (every guard is re-checked at apply time, never trusted from the
+# caller):
+#   * Operates ONLY on the disk the live system actually booted from, derived
+#     from /run/live/medium — an --expected-device from the API is merely
+#     CONFIRMED against that, never used to choose the target.
+#   * APPEND-ONLY: only ever creates ONE new partition in the TRAILING free
+#     region (the free space that ends at the disk end and starts AFTER the last
+#     existing partition). It never resizes, moves, renumbers, or deletes an
+#     existing partition, and asserts the new partition's start is >= the end of
+#     every existing partition before writing anything.
+#   * Refuses if a 'foulfox-persist' label already exists anywhere, if the boot
+#     disk can't be identified or doesn't match --expected-device, if the disk is
+#     a virtual/managed device, if any partition on it is mounted read-write, if
+#     there is no usable trailing free region (>= FOULFOX_PERSIST_MIN_GB), or if
+#     the partition table changed since the dry-run (fingerprint mismatch).
+#   * Holds an flock for the whole apply so two callers can't race.
+#
+# Partition-table re-read: the boot ISO partition stays mounted (ro) the entire
+# time, so a full BLKRRPART re-read (partprobe) usually fails with EBUSY. We add
+# the single new partition to the kernel with `partx -a` (BLKPG ADD_PARTITION),
+# which does NOT need exclusive access, then mkfs + write persistence.conf
+# immediately. If even that can't attach the node, we report needsReboot.
+#
+# COMMANDS (all print a single JSON object to stdout; logs go to stderr):
+#   detect | dry-run   read-only: assess the boot disk and print the plan (incl.
+#                      a fingerprint) without changing anything. (detect == dry-run)
+#   apply              create + format the partition and write persistence.conf.
+#
+# Invoked by the api-server (running as the unprivileged 'foulfox' user) via a
+# narrow sudoers rule. check/detect/dry-run/apply all validate their own inputs;
+# the sudoers rule permits only this single binary with no wildcards.
+
+set -uo pipefail
+
+# shellcheck disable=SC1091
+[ -f /etc/foulfox/foulfox.env ] && . /etc/foulfox/foulfox.env
+
+PERSIST_LABEL="foulfox-persist"
+MIN_GB="${FOULFOX_PERSIST_MIN_GB:-8}"
+MIN_BYTES=$(( MIN_GB * 1024 * 1024 * 1024 ))
+LOCK="/run/foulfox-storage-setup.lock"
+ALIGN=1048576   # 1 MiB
+
+log() { echo "[foulfox-storage-setup] $*" >&2; }
+
+# ── JSON helpers ─────────────────────────────────────────────────────────────
+json_escape() {
+  # Escape backslashes and double-quotes; strip control characters.
+  printf '%s' "${1:-}" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\000-\037'
+}
+
+# emit_error CODE MESSAGE — print a failure object and exit non-zero.
+emit_error() {
+  printf '{"ok":false,"code":"%s","error":"%s"}\n' "$(json_escape "$1")" "$(json_escape "$2")"
+}
+die() { emit_error "$1" "$2"; exit "${3:-2}"; }
+
+# ── Boot-disk derivation (the ONLY way the target is chosen) ──────────────────
+derive_boot_part() {
+  local m src
+  for m in /run/live/medium /lib/live/mount/medium /run/live/overlay; do
+    src="$(findmnt -n -o SOURCE "$m" 2>/dev/null | head -n1)"
+    [ -n "$src" ] && { printf '%s' "$src"; return 0; }
+  done
+  return 1
+}
+
+derive_boot_disk() {
+  local part pk
+  part="$(derive_boot_part)" || return 1
+  [ -n "$part" ] || return 1
+  part="$(readlink -f "$part" 2>/dev/null || printf '%s' "$part")"
+  pk="$(lsblk -no PKNAME "$part" 2>/dev/null | head -n1)"
+  if [ -n "$pk" ]; then
+    printf '/dev/%s' "$pk"
+  else
+    printf '%s' "$part"
+  fi
+}
+
+is_whole_disk() {
+  local d="$1" t
+  [ -b "$d" ] || return 1
+  t="$(lsblk -dno TYPE "$d" 2>/dev/null | head -n1)"
+  [ "$t" = "disk" ]
+}
+
+# True for any pseudo/managed/virtual block device we must never repartition.
+# FoulFox is meant to boot from a real USB stick on bare metal (sd*/nvme*/mmcblk*),
+# so virtual disks (virtio vd*, Xen xvd*, network nbd*/rbd*, persistent-memory
+# pmem*) are out of scope and refused rather than risked.
+is_virtual_device() {
+  case "$1" in
+    /dev/loop*|/dev/zram*|/dev/ram*|/dev/dm-*|/dev/md*|/dev/sr*|/dev/fd*) return 0;;
+    /dev/vd*|/dev/xvd*|/dev/nbd*|/dev/rbd*|/dev/pmem*) return 0;;
+    *) return 1;;
+  esac
+}
+
+persist_exists() { blkid -L "$PERSIST_LABEL" >/dev/null 2>&1; }
+
+# True if any partition of the disk is mounted read-write (the live ISO is ro,
+# which is fine; a rw mount means real data we must not endanger).
+disk_rw_mounted() {
+  local d="$1" p opts
+  while read -r p; do
+    [ -n "$p" ] || continue
+    opts="$(findmnt -nro OPTIONS -S "$p" 2>/dev/null | head -n1)"
+    [ -n "$opts" ] || continue
+    case ",$opts," in *,rw,*) return 0;; esac
+  done < <(lsblk -nrp -o NAME,TYPE "$d" 2>/dev/null | awk '$2=="part"{print $1}')
+  return 1
+}
+
+# Kernel node for partition N of disk D (nvme/mmc use a 'p' separator).
+part_node() {
+  local d="$1" n="$2"
+  case "$d" in
+    *[0-9]) printf '%sp%s' "$d" "$n";;
+    *) printf '%s%s' "$d" "$n";;
+  esac
+}
+
+# Stable fingerprint of the current table, so apply can detect any change since
+# the dry-run the user confirmed.
+table_fingerprint() {
+  parted -m -s "$1" unit B print 2>/dev/null | sha256sum | cut -d' ' -f1
+}
+
+# ── Parse the partition table + trailing free region ─────────────────────────
+# Sets globals: DISK_BYTES TABLE_TYPE LAST_PART_END FREE_START FREE_END FREE_SIZE
+parse_table() {
+  local d="$1" out line num start end size fstype
+  out="$(parted -m -s "$d" unit B print free 2>/dev/null)" || return 1
+  [ -n "$out" ] || return 1
+  DISK_BYTES="$(printf '%s\n' "$out" | awk -F: -v dev="$d" '$1==dev{gsub(/B$/,"",$2);print $2;exit}')"
+  TABLE_TYPE="$(printf '%s\n' "$out" | awk -F: -v dev="$d" '$1==dev{print $6;exit}')"
+  [ -n "$DISK_BYTES" ] || return 1
+  LAST_PART_END=0
+  FREE_START=""; FREE_END=""; FREE_SIZE=0
+  while IFS= read -r line; do
+    case "$line" in BYT*|"") continue;; esac
+    case "$line" in "$d":*) continue;; esac
+    num="$(printf '%s' "$line" | cut -d: -f1)"
+    start="$(printf '%s' "$line" | cut -d: -f2 | tr -d 'B')"
+    end="$(printf '%s' "$line" | cut -d: -f3 | tr -d 'B')"
+    size="$(printf '%s' "$line" | cut -d: -f4 | tr -d 'B')"
+    fstype="$(printf '%s' "$line" | cut -d: -f5)"
+    [ -n "$start" ] && [ -n "$end" ] || continue
+    if [ "$fstype" = "free" ]; then
+      # Track the trailing free region (highest start).
+      if [ -z "$FREE_START" ] || [ "$start" -gt "$FREE_START" ]; then
+        FREE_START="$start"; FREE_END="$end"; FREE_SIZE="$size"
+      fi
+    else
+      [ "$end" -gt "$LAST_PART_END" ] && LAST_PART_END="$end"
+    fi
+  done <<EOF
+$(printf '%s\n' "$out")
+EOF
+  return 0
+}
+
+# ── Assessment shared by detect/dry-run and apply ────────────────────────────
+# Sets: DISK MODEL  plus the parse_table globals and PLANNED_START.
+# Echoes nothing; callers decide what to emit. Returns 0 if a valid plan exists,
+# 1 if not (REASON / CODE describe why).
+REASON=""; CODE=""
+assess() {
+  local expected="$1"
+  DISK="$(derive_boot_disk 2>/dev/null || true)"
+  if [ -z "$DISK" ]; then
+    CODE="BOOT_DISK_UNKNOWN"; REASON="Could not identify the disk FoulFox booted from."; return 1
+  fi
+  if ! is_whole_disk "$DISK"; then
+    CODE="NOT_WHOLE_DISK"; REASON="Boot device $DISK is not a whole disk."; return 1
+  fi
+  if is_virtual_device "$DISK"; then
+    CODE="VIRTUAL_DEVICE"; REASON="Refusing to partition virtual/managed device $DISK."; return 1
+  fi
+  if [ -n "$expected" ] && [ "$expected" != "$DISK" ]; then
+    CODE="DEVICE_MISMATCH"; REASON="Requested device $expected is not the boot disk ($DISK)."; return 1
+  fi
+  MODEL="$(lsblk -dno MODEL "$DISK" 2>/dev/null | head -n1 | sed 's/[[:space:]]*$//')"
+  if persist_exists; then
+    CODE="ALREADY_EXISTS"; REASON="A '$PERSIST_LABEL' partition already exists."; return 1
+  fi
+  if disk_rw_mounted "$DISK"; then
+    CODE="DISK_BUSY"; REASON="A partition on $DISK is mounted read-write; refusing to modify it."; return 1
+  fi
+  if ! parse_table "$DISK"; then
+    CODE="TABLE_UNREADABLE"; REASON="Could not read the partition table on $DISK."; return 1
+  fi
+  if [ -z "$FREE_START" ]; then
+    CODE="NO_FREE_SPACE"; REASON="No trailing free space on $DISK to create a partition in."; return 1
+  fi
+  # Append-only invariant: the chosen free region must lie entirely AFTER every
+  # existing partition, and must end at (≈) the disk end.
+  if [ "$FREE_START" -lt "$LAST_PART_END" ]; then
+    CODE="WOULD_OVERLAP"; REASON="Free region starts before the last partition ends; refusing."; return 1
+  fi
+  if [ $(( DISK_BYTES - FREE_END )) -gt "$ALIGN" ]; then
+    CODE="NOT_TRAILING"; REASON="Largest free region is not at the end of the disk; refusing."; return 1
+  fi
+  # Align the start UP to the next MiB (stays inside the free region) so the new
+  # partition is properly aligned and never dips below the last partition.
+  PLANNED_START=$(( (FREE_START + ALIGN - 1) / ALIGN * ALIGN ))
+  if [ "$PLANNED_START" -lt "$FREE_START" ]; then PLANNED_START="$FREE_START"; fi
+  local usable=$(( FREE_END - PLANNED_START + 1 ))
+  if [ "$usable" -lt "$MIN_BYTES" ]; then
+    CODE="TOO_SMALL"; REASON="Only $(( usable / 1024 / 1024 ))MiB of free space; need at least ${MIN_GB}GB."; return 1
+  fi
+  return 0
+}
+
+# ── detect / dry-run ─────────────────────────────────────────────────────────
+do_plan() {
+  local sub="$1" expected="$2"
+  if assess "$expected"; then
+    printf '{"ok":true,"action":"%s","canApply":true,"persistExists":false,"device":"%s","model":"%s","tableType":"%s","diskBytes":%s,"freeStart":%s,"freeEnd":%s,"freeBytes":%s,"plannedStart":%s,"plannedBytes":%s,"minBytes":%s,"persistLabel":"%s","fingerprint":"%s"}\n' \
+      "$sub" "$(json_escape "$DISK")" "$(json_escape "$MODEL")" "$(json_escape "$TABLE_TYPE")" \
+      "$DISK_BYTES" "$FREE_START" "$FREE_END" "$FREE_SIZE" "$PLANNED_START" \
+      "$(( FREE_END - PLANNED_START + 1 ))" "$MIN_BYTES" "$(json_escape "$PERSIST_LABEL")" \
+      "$(table_fingerprint "$DISK")"
+    return 0
+  fi
+  # Not applicable — report WHY (and whether it's already configured) without erroring.
+  local already="false"
+  [ "$CODE" = "ALREADY_EXISTS" ] && already="true"
+  printf '{"ok":true,"action":"%s","canApply":false,"persistExists":%s,"code":"%s","reason":"%s","device":"%s"}\n' \
+    "$sub" "$already" "$(json_escape "$CODE")" "$(json_escape "$REASON")" "$(json_escape "${DISK:-}")"
+  return 0
+}
+
+# ── apply ────────────────────────────────────────────────────────────────────
+do_apply() {
+  local expected="$1" expect_fp="$2"
+
+  # Serialize the whole destructive section.
+  exec 9>"$LOCK" || die LOCK_FAILED "Could not open lock file $LOCK"
+  if ! flock -n 9; then
+    die BUSY "Another storage-setup operation is in progress."
+  fi
+
+  # Re-run every guard from scratch (never trust the dry-run). ALREADY_EXISTS is a
+  # benign no-op (exit 0); everything else is a hard validation failure (exit 2).
+  if ! assess "$expected"; then
+    die "$CODE" "$REASON" "$( [ "$CODE" = "ALREADY_EXISTS" ] && echo 0 || echo 2 )"
+  fi
+
+  # Refuse if the table changed since the plan the user confirmed.
+  if [ -n "$expect_fp" ]; then
+    local now_fp; now_fp="$(table_fingerprint "$DISK")"
+    if [ "$now_fp" != "$expect_fp" ]; then
+      die FINGERPRINT_MISMATCH "The disk layout changed since the plan was generated; re-run detection."
+    fi
+  fi
+
+  log "Creating $PERSIST_LABEL on $DISK at ${PLANNED_START}B (table=$TABLE_TYPE)"
+
+  # Record existing partition numbers so we can find the one we add.
+  local before_nums; before_nums="$(parted -m -s "$DISK" unit B print 2>/dev/null | awk -F: 'NR>2 && $1 ~ /^[0-9]+$/{print $1}' | sort -n)"
+
+  # Create the partition in the trailing free region only. parted names the part
+  # on GPT and uses the primary slot on MBR; either way it lands in free space.
+  if [ "$TABLE_TYPE" = "gpt" ]; then
+    if ! parted -s "$DISK" unit B -- mkpart "$PERSIST_LABEL" ext4 "${PLANNED_START}B" 100% 2>>/dev/stderr; then
+      die MKPART_FAILED "parted failed to create the partition."
+    fi
+  else
+    if ! parted -s "$DISK" unit B -- mkpart primary ext4 "${PLANNED_START}B" 100% 2>>/dev/stderr; then
+      die MKPART_FAILED "parted failed to create the partition."
+    fi
+  fi
+  sync
+
+  # Identify the new partition NUMBER (the one that wasn't there before).
+  local after_nums new_num=""
+  after_nums="$(parted -m -s "$DISK" unit B print 2>/dev/null | awk -F: 'NR>2 && $1 ~ /^[0-9]+$/{print $1}' | sort -n)"
+  new_num="$(comm -13 <(printf '%s\n' "$before_nums") <(printf '%s\n' "$after_nums") | head -n1)"
+  if [ -z "$new_num" ]; then
+    die POST_VERIFY_FAILED "Could not determine the new partition number after creation."
+  fi
+
+  # Verify (belt-and-suspenders) that the new partition starts where we planned
+  # and does not dip below any prior partition — proof it is append-only.
+  local new_start new_end
+  new_start="$(parted -m -s "$DISK" unit B print 2>/dev/null | awk -F: -v n="$new_num" '$1==n{gsub(/B$/,"",$2);print $2;exit}')"
+  new_end="$(parted -m -s "$DISK" unit B print 2>/dev/null | awk -F: -v n="$new_num" '$1==n{gsub(/B$/,"",$3);print $3;exit}')"
+  if [ -z "$new_start" ] || [ "$new_start" -lt "$LAST_PART_END" ]; then
+    die SAFETY_ABORT "New partition start ($new_start) is below the last existing partition end ($LAST_PART_END); aborting before format."
+  fi
+
+  local part; part="$(part_node "$DISK" "$new_num")"
+
+  # Attach the single new partition to the kernel WITHOUT a full re-read (the
+  # boot ISO partition is still mounted), then settle udev.
+  partx -a "$DISK" >/dev/null 2>&1 || partprobe "$DISK" >/dev/null 2>&1 || true
+  udevadm settle >/dev/null 2>&1 || true
+
+  if [ ! -b "$part" ]; then
+    # Kernel wouldn't expose the node while running from this disk. The table
+    # entry is safely written; formatting must happen from another machine.
+    printf '{"ok":true,"action":"apply","device":"%s","partition":"%s","partitionCreated":true,"formatted":false,"needsReboot":true,"reason":"The new partition was created but the kernel could not attach it while running from this disk. Format it (mkfs.ext4 -L %s %s) and add persistence.conf from another machine, or see docs/flash.md.","persistLabel":"%s"}\n' \
+      "$(json_escape "$DISK")" "$(json_escape "$part")" "$(json_escape "$PERSIST_LABEL")" "$(json_escape "$part")" "$(json_escape "$PERSIST_LABEL")"
+    return 0
+  fi
+
+  log "Formatting $part as ext4 (label $PERSIST_LABEL)"
+  if ! mkfs.ext4 -F -L "$PERSIST_LABEL" "$part" >>/dev/stderr 2>&1; then
+    die MKFS_FAILED "Created the partition but failed to format it as ext4."
+  fi
+
+  # Write the persistence config so the whole system overlays onto it at boot.
+  local mnt; mnt="$(mktemp -d)" || die MOUNT_FAILED "Could not create a mountpoint."
+  if ! mount "$part" "$mnt" >>/dev/stderr 2>&1; then
+    rmdir "$mnt" 2>/dev/null || true
+    die MOUNT_FAILED "Formatted the partition but could not mount it to write persistence.conf."
+  fi
+  printf '/ union\n' > "$mnt/persistence.conf"
+  sync
+  umount "$mnt" >>/dev/stderr 2>&1 || true
+  rmdir "$mnt" 2>/dev/null || true
+
+  log "Done. $PERSIST_LABEL ready on $part"
+  printf '{"ok":true,"action":"apply","device":"%s","partition":"%s","partitionCreated":true,"formatted":true,"needsReboot":true,"bytes":%s,"persistLabel":"%s","reason":"Persistence partition created. Reboot to activate durable storage."}\n' \
+    "$(json_escape "$DISK")" "$(json_escape "$part")" "$(( new_end - new_start + 1 ))" "$(json_escape "$PERSIST_LABEL")"
+  return 0
+}
+
+# ── Argument parsing (no eval; reject metacharacters) ────────────────────────
+SUB="${1:-}"
+[ $# -gt 0 ] && shift
+EXPECTED_DEVICE=""; EXPECT_FP=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --json) ;;  # JSON is always emitted; accepted for explicitness
+    --expected-device) EXPECTED_DEVICE="${2:-}"; shift || true;;
+    --expect-fingerprint) EXPECT_FP="${2:-}"; shift || true;;
+    *) die BAD_ARG "Unknown argument: $1";;
+  esac
+  shift || true
+done
+
+if [ -n "$EXPECTED_DEVICE" ]; then
+  case "$EXPECTED_DEVICE" in
+    /dev/*) ;;
+    *) die BAD_DEVICE "Device must be a /dev path.";;
+  esac
+  case "$EXPECTED_DEVICE" in
+    *[!A-Za-z0-9/_-]*) die BAD_DEVICE "Illegal characters in device path.";;
+  esac
+fi
+if [ -n "$EXPECT_FP" ]; then
+  case "$EXPECT_FP" in
+    *[!a-f0-9]*) die BAD_FINGERPRINT "Illegal characters in fingerprint.";;
+  esac
+fi
+
+case "$SUB" in
+  detect|dry-run) do_plan "$SUB" "$EXPECTED_DEVICE";;
+  apply) do_apply "$EXPECTED_DEVICE" "$EXPECT_FP";;
+  *) die BAD_SUBCOMMAND "Usage: foulfox-storage-setup {detect|dry-run|apply} [--expected-device /dev/X] [--expect-fingerprint SHA256]";;
+esac

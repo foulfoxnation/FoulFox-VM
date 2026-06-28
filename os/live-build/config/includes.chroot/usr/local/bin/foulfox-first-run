@@ -143,6 +143,39 @@ if [ -z "$VIRTIO_ISO" ]; then
   fi
 fi
 
+# ── Hardware-adaptive VM sizing ──────────────────────────────────────────────
+# When a sizing dimension is left as "auto" (the default in foulfox.env), size it
+# to the detected hardware with the SAME planner the api-server/setup wizard use,
+# so a small machine stays conservative and a capable one stretches its legs. A
+# concrete value pinned in foulfox.env always wins. Sizing only runs on a FRESH
+# guest (before the disk exists); an existing disk keeps its current size. The
+# planner is best-effort — if node or the bundled CLI is unavailable we fall back
+# to safe static defaults, so first boot can never be blocked by sizing.
+PLAN_CLI="$APP_CURRENT/artifacts/api-server/dist/storage-plan.mjs"
+if [ ! -f "$DISK" ] && { [ "$DISK_SIZE" = "auto" ] || [ "$RAM_GB" = "auto" ] || [ "$CPU_CORES" = "auto" ]; }; then
+  PLAN_OUT=""
+  if command -v node >/dev/null 2>&1 && [ -f "$PLAN_CLI" ]; then
+    # ODYSSEUS_DATA_DIR makes the planner measure the persistent partition (where
+    # the guest disk lives), matching the api-server's disk guardrail.
+    PLAN_ENV=(ODYSSEUS_DATA_DIR="$FOULFOX_HOME")
+    [ -n "${FOULFOX_DISK_RESERVE_GB:-}" ] && PLAN_ENV+=(FOULFOX_DISK_RESERVE_GB="$FOULFOX_DISK_RESERVE_GB")
+    PLAN_OUT="$(env "${PLAN_ENV[@]}" node "$PLAN_CLI" 2>/dev/null || true)"
+  fi
+  if [ -n "$PLAN_OUT" ]; then
+    # Only eval our own well-formed KEY=value lines (defense in depth).
+    eval "$(printf '%s\n' "$PLAN_OUT" | grep -E '^FOULFOX_PLAN_(DISK_GB|RAM_GB|CPU_CORES|TIER|DISK_KNOWN)=[A-Za-z0-9]+$' || true)"
+  fi
+  [ "$DISK_SIZE" = "auto" ] && DISK_SIZE="${FOULFOX_PLAN_DISK_GB:-64}G"
+  [ "$RAM_GB" = "auto" ] && RAM_GB="${FOULFOX_PLAN_RAM_GB:-8}"
+  [ "$CPU_CORES" = "auto" ] && CPU_CORES="${FOULFOX_PLAN_CPU_CORES:-4}"
+  echo "[foulfox-first-run] Adaptive VM sizing: disk=$DISK_SIZE ram=${RAM_GB}G cpu=$CPU_CORES tier=${FOULFOX_PLAN_TIER:-unknown}"
+fi
+# Final guard: never let an unresolved "auto" reach qemu-img / the VM config
+# (e.g. an existing disk skipped the block above, or the CLI failed).
+[ "$DISK_SIZE" = "auto" ] && DISK_SIZE="64G"
+[ "$RAM_GB" = "auto" ] && RAM_GB="8"
+[ "$CPU_CORES" = "auto" ] && CPU_CORES="4"
+
 # ── Create the guest disk only when there's something to install or run ──────
 # Create it the first time a Windows ISO appears (the user is ready to install),
 # and keep using it once it exists (so an installed guest still boots after the

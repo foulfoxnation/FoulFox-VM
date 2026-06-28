@@ -11,3 +11,13 @@ if [ -f /etc/sudoers.d/foulfox-patcher ]; then
   chmod 0440 /etc/sudoers.d/foulfox-patcher
   visudo -cf /etc/sudoers.d/foulfox-patcher
 fi
+
+# Same treatment for the storage-setup helper (auto-partition the persistence
+# disk) and its sudoers drop-in.
+chmod 0755 /usr/local/sbin/foulfox-storage-setup
+
+if [ -f /etc/sudoers.d/foulfox-storage-setup ]; then
+  chown root:root /etc/sudoers.d/foulfox-storage-setup
+  chmod 0440 /etc/sudoers.d/foulfox-storage-setup
+  visudo -cf /etc/sudoers.d/foulfox-storage-setup
+fi

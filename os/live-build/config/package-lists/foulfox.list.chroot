@@ -30,6 +30,12 @@ udisks2
 ntfs-3g
 exfatprogs
 dosfstools
+# parted (+ its partprobe) is what foulfox-storage-setup drives to add the
+# optional 'foulfox-persist' partition in trailing free space. Without it the
+# Storage Setup auto-partition path dead-ends with TABLE_UNREADABLE on-device.
+# (partx/findmnt/flock come from util-linux and mkfs.ext4 from e2fsprogs, both
+# Priority: required, so they are always present in the base.)
+parted
 rsync
 
 # ── Virtualization stack (Windows guest) ─────────────────────────────────────

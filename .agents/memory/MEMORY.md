@@ -2,7 +2,7 @@
 - [Odysseus embedding](odysseus-embedding.md) — bundled Odysseus FastAPI app (artifacts/odysseus-service) embedded via api-server proxy; uses local SQLite, root-absolute URLs rewritten in proxy.
 - [Odysseus vector store](odysseus-vector-store.md) — semantic knowledge = full `chromadb` (embedded PersistentClient by default, HTTP only if CHROMADB_HOST/MODE set) + local fastembed; keep one process per data dir.
 - [Vite keep-awake](vite-keep-awake.md) — Replit Vite preview white-pages on long/idle sessions (HMR WS dies under throttling); fix = worker heartbeat + wake lock, no reload.
-- [FoulFox OS ISO build](foulfox-os-iso-build.md) — pin pnpm in CI (`@latest` drifts major → frozen-lockfile fails); @workspace libs export src (dist = only `.d.ts`); verify heavy builds on CI, not this repl.
+- [FoulFox OS ISO build](foulfox-os-iso-build.md) — pin pnpm in CI (`@latest` drifts → frozen-lockfile fails); @workspace libs export src (dist = `.d.ts` only); verify heavy builds on CI not this repl; running failure-mode log lives at `os/docs/failed_builds.md` (consult/append before debugging a build break).
 - [Odysseus sub-agents & self-repair](odysseus-subagents.md) — spawn_subagents/self_repair: depth-1 recursion lock, inherit parent agent_ctx, self-repair double-gated + never self-kills uvicorn.
 - [Odysseus service tests](odysseus-service-tests.md) — run pytest from artifacts/odysseus-service with DATABASE_URL=sqlite:///:memory: (workspace Postgres has no psycopg2); needs pytest-asyncio.
 - [Static-testing odysseus tools](odysseus-static-tool-tests.md) — stub sys.modules['core'] + monkeypatch VM bridges to exercise do_* fns without booting the service (no KVM).
@@ -22,9 +22,9 @@
 - [noVNC + Vite CJS TLA pitfall](novnc-vite-cjs-tla.md) — pin @novnc/novnc to 1.4.0 ESM core/; 1.5+ CJS lib/ has a top-level await that crashes esbuild dep prebundle.
 - [api-server dev no-watch](apiserver-dev-no-watch.md) — dev = build+start, no watcher; restart the API Server workflow after backend edits or endpoints serve a stale build.
 - [FoulFox bootable-OS target](foulfox-bootable-os.md) — product aims to boot from USB on bare metal (KVM-native host); mutable VM state must live under ODYSSEUS_DATA_DIR (persistent partition), not tmpfs $HOME.
+- [FoulFox storage setup](foulfox-storage-setup.md) — first-run persistence auto-partition: device-side helper is the SOLE safety boundary (append-only, refuses virtual/mounted/existing); `parted` must stay in the live package list or it silently dead-ends.
 - [FoulFox VM guest disk sizing](foulfox-vm-disk-sizing.md) — guest disk cap set in TWO layers (api-server defaults vs OS foulfox.env/first-run, which wins via config merge); keep aligned; target 64G so OS+Windows fit a 128GB total disk.
 - [live-build CI build tool](foulfox-livebuild-apt-passes.md) — ubuntu-latest's Ubuntu live-build 3.x mis-resolves a Debian chroot (dies at lb_chroot_live-packages); fix = run live-build inside a privileged debian:bookworm container (package-list pins do NOT work).
-- [FoulFox ISO failed-build log](foulfox-os-iso-build.md) — canonical running record of every ISO-build failure mode + fix lives in repo at `os/docs/failed_builds.md`; consult/append it before debugging a new build break.
 - [In-app ISO build trigger](foulfox-iso-build-trigger.md) — "Get FoulFox OS" page reads live run state + POSTs workflow_dispatch via server token; public-by-design so preview works (security deferred); build runs ONLY on dispatch.
 - [Rotating an un-editable secret](secret-rotation-viewenvvars-false.md) — viewEnvVars shows secret `false` yet stale value still injected → delete first, then requestEnvVar, then restart consumer.
 - [FoulFox live-updater](foulfox-live-updater.md) — pull-based app-stack patcher: anti-brick invariant (clear pending marker ONLY after a confirmed good flip) + fail-CLOSED boot recovery via Requires=foulfox-prepare; signatures/migrations/FF_HOME sticky-bit deferred.

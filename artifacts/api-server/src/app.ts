@@ -147,6 +147,12 @@ app.use("/api/bluetooth", localhostOnly, requireStateChangeToken);
 // internal token upstream, so the browser-facing side must stay token-gated.
 app.use("/api/local-model", localhostOnly, requireStateChangeToken);
 
+// Storage setup: localhost only. requireStateChangeToken lets the read-only GET
+// (the sizing recommendation) through while requiring the shell token for the
+// state-changing POSTs (applying VM sizing, and — Phase 2 — driving the
+// privileged partitioner via sudo).
+app.use("/api/setup", localhostOnly, requireStateChangeToken);
+
 // Shell session token endpoint — localhost only so remote callers can't obtain it
 app.get("/api/shell/session-token", localhostOnly, (_req, res) => {
   res.json({ token: SHELL_SESSION_TOKEN });

@@ -18,8 +18,13 @@ import {
   MonitorCog,
   Gamepad2,
   Compass,
+  HardDrive,
+  Wand2,
+  Wrench,
+  Terminal,
 } from "lucide-react";
 import { apiUrl } from "@/lib/api-url";
+import { useShellToken } from "@/hooks/use-shell-token";
 import { useToast } from "@/hooks/use-toast";
 
 // First-run onboarding for the Odysseus 3-agent suite. Renders only when a suite
@@ -58,6 +63,73 @@ type Caps = {
   message: string;
 };
 
+type VmSizing = { diskGb: number; ramGb: number; cpuCores: number };
+
+type SizingPlan = {
+  tier: string;
+  diskGb: number;
+  ramGb: number;
+  cpuCores: number;
+  reserveGb: number;
+  vmBudgetGb: number;
+  diskKnown: boolean;
+  totalDiskGb: number;
+  freeDiskGb: number;
+  totalRamGb: number;
+  cpuCount: number;
+  notes: string[];
+};
+
+type StoragePlanResp = {
+  plan: SizingPlan;
+  current:
+    | { ramGb: number; cpuCores: number; diskGb: number; diskPath: string | null; diskExists: boolean }
+    | null;
+  canBootVm: boolean;
+};
+
+type DiskInfo = {
+  path: string;
+  sizeBytes: number;
+  model: string | null;
+  removable: boolean;
+  isBootDisk: boolean;
+};
+type PartitionsResp = {
+  helperAvailable: boolean;
+  bootDisk: string | null;
+  persistExists: boolean;
+  persistLabel: string;
+  disks: DiskInfo[];
+};
+type DryRunResp = {
+  ok: boolean;
+  canApply?: boolean;
+  persistExists?: boolean;
+  device?: string;
+  model?: string;
+  tableType?: string;
+  freeBytes?: number;
+  plannedBytes?: number;
+  persistLabel?: string;
+  fingerprint?: string;
+  code?: string;
+  reason?: string;
+  error?: string;
+};
+type ApplyResp = {
+  ok: boolean;
+  device?: string;
+  partition?: string;
+  partitionCreated?: boolean;
+  formatted?: boolean;
+  needsReboot?: boolean;
+  bytes?: number;
+  reason?: string;
+  code?: string;
+  error?: string;
+};
+
 const ROLES: { key: Role; label: string; icon: typeof MonitorCog }[] = [
   { key: "windows", label: "Windows Agent", icon: MonitorCog },
   { key: "game", label: "Game Agent", icon: Gamepad2 },
@@ -81,6 +153,8 @@ function parseSel(v: string | undefined): { endpoint_id: string; model: string }
 
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+
+const inputClass = selectClass;
 
 export function SetupWizard() {
   const qc = useQueryClient();
@@ -108,6 +182,24 @@ export function SetupWizard() {
     queryFn: () => getJson<Caps>("/api/vm/capabilities"),
     enabled: open,
   });
+  const planQ = useQuery({
+    queryKey: ["storage-plan"],
+    queryFn: () => getJson<StoragePlanResp>("/api/setup/storage/plan"),
+    enabled: open,
+  });
+  const partitionsQ = useQuery({
+    queryKey: ["storage-partitions"],
+    queryFn: () => getJson<PartitionsResp>("/api/setup/storage/partitions"),
+    enabled: open,
+  });
+  const shellTokenQ = useShellToken();
+  // null = "use the recommendation"; an object = a user override.
+  const [sizing, setSizing] = useState<VmSizing | null>(null);
+  // Storage step: which persistence path the user picked, + the typed erase
+  // confirmation that gates the destructive apply.
+  const [partMode, setPartMode] = useState<"auto" | "manual" | null>(null);
+  const [confirmText, setConfirmText] = useState("");
+  const CONFIRM_PHRASE = "ERASE FREE SPACE";
 
   const modelOptions = useMemo(() => {
     const opts: { value: string; label: string }[] = [];
@@ -148,9 +240,98 @@ export function SetupWizard() {
       toast({ title: "Setup failed", variant: "destructive", description: String(e) }),
   });
 
+  const applySizing = useMutation({
+    mutationFn: async (body: VmSizing) => {
+      const token = shellTokenQ.data;
+      const res = await fetch(apiUrl("/api/setup/storage/vm-sizing"), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(token ? { "X-Shell-Token": token } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(j?.error || `vm-sizing → ${res.status}`);
+      }
+      return res.json();
+    },
+  });
+
+  // Plan the persistence partition (read-only). The device is a confirmation
+  // hint; the device-side helper still derives the real boot disk itself.
+  const dryRun = useMutation({
+    mutationFn: async (device: string | null): Promise<DryRunResp> => {
+      const token = shellTokenQ.data;
+      const res = await fetch(apiUrl("/api/setup/storage/partition/dry-run"), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(token ? { "X-Shell-Token": token } : {}),
+        },
+        body: JSON.stringify(device ? { device } : {}),
+      });
+      const j = (await res.json().catch(() => null)) as DryRunResp | null;
+      if (!res.ok) throw new Error(j?.error || j?.reason || `dry-run → ${res.status}`);
+      return j as DryRunResp;
+    },
+    onError: (e) =>
+      toast({ title: "Couldn't read the disk", variant: "destructive", description: String(e) }),
+  });
+
+  // DESTRUCTIVE: create + format the persistence partition. confirm:true is sent
+  // only after the user types the erase phrase in the UI.
+  const applyPartition = useMutation({
+    mutationFn: async (input: { device: string | null; fingerprint?: string }): Promise<ApplyResp> => {
+      const token = shellTokenQ.data;
+      const res = await fetch(apiUrl("/api/setup/storage/partition/apply"), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(token ? { "X-Shell-Token": token } : {}),
+        },
+        body: JSON.stringify({
+          ...(input.device ? { device: input.device } : {}),
+          ...(input.fingerprint ? { fingerprint: input.fingerprint } : {}),
+          confirm: true,
+        }),
+      });
+      const j = (await res.json().catch(() => null)) as ApplyResp | null;
+      if (!res.ok) throw new Error(j?.error || j?.reason || `apply → ${res.status}`);
+      return j as ApplyResp;
+    },
+    onSuccess: (d) => {
+      qc.invalidateQueries({ queryKey: ["storage-partitions"] });
+      toast({
+        title: d.formatted ? "Persistence partition created" : "Partition created",
+        description: d.reason || "Reboot to activate durable storage.",
+      });
+    },
+    onError: (e) =>
+      toast({ title: "Auto-partition failed", variant: "destructive", description: String(e) }),
+  });
+
+  // Save the (possibly adjusted) VM sizing, then provision the agent suite. A
+  // correctable sizing error (e.g. over budget) stops here so the user can fix it.
+  const finishSetup = async () => {
+    const plan = planQ.data?.plan;
+    const body =
+      sizing ?? (plan ? { diskGb: plan.diskGb, ramGb: plan.ramGb, cpuCores: plan.cpuCores } : null);
+    if (body) {
+      try {
+        await applySizing.mutateAsync(body);
+      } catch (e) {
+        toast({ title: "VM sizing not saved", variant: "destructive", description: String(e) });
+        return;
+      }
+    }
+    provision.mutate();
+  };
+
   if (!open) return null;
 
-  const steps = ["Welcome", "Models", "Windows VM", "Review"];
+  const steps = ["Welcome", "Models", "Windows VM", "Storage", "Review"];
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && setDismissed(true)}>
@@ -314,11 +495,326 @@ export function SetupWizard() {
                   </p>
                 </div>
               )}
+
+              {/* Hardware-tiered Windows VM sizing */}
+              {planQ.isLoading ? (
+                <div className="flex justify-center p-4">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : planQ.data?.plan ? (
+                (() => {
+                  const plan = planQ.data.plan;
+                  const rec: VmSizing = {
+                    diskGb: plan.diskGb,
+                    ramGb: plan.ramGb,
+                    cpuCores: plan.cpuCores,
+                  };
+                  const eff = sizing ?? rec;
+                  const diskMax = plan.diskKnown && plan.vmBudgetGb > 0 ? plan.vmBudgetGb : undefined;
+                  const ramMax = plan.totalRamGb > 0 ? Math.max(1, Math.floor(plan.totalRamGb / 2)) : undefined;
+                  const cpuMax = plan.cpuCount > 0 ? plan.cpuCount : undefined;
+                  const set = (patch: Partial<VmSizing>) =>
+                    setSizing((s) => ({ ...(s ?? rec), ...patch }));
+                  const toInt = (v: string, min: number) => {
+                    const n = Math.floor(Number(v));
+                    return Number.isFinite(n) ? Math.max(min, n) : min;
+                  };
+                  return (
+                    <div className="space-y-3 rounded-md border p-3" data-testid="vm-sizing-panel">
+                      <div className="flex items-center gap-2">
+                        <HardDrive className="h-4 w-4 text-primary" />
+                        <span className="text-sm font-medium">Windows VM size</span>
+                        <span className="ml-auto text-[11px] uppercase tracking-wide text-muted-foreground">
+                          {plan.tier} tier
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Sized to your hardware — conservative on a small machine, larger on a capable
+                        one.{" "}
+                        {plan.diskKnown
+                          ? `Detected ${plan.totalDiskGb}GB disk · ${plan.totalRamGb}GB RAM · ${plan.cpuCount} CPU. Holding ${plan.reserveGb}GB back for FoulFox OS + your apps leaves ${plan.vmBudgetGb}GB for VMs.`
+                          : "Disk size couldn't be detected — using safe defaults you can adjust."}
+                      </p>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="space-y-1">
+                          <Label htmlFor="size-disk" className="text-xs">
+                            Disk (GB)
+                          </Label>
+                          <input
+                            id="size-disk"
+                            type="number"
+                            min={8}
+                            max={diskMax}
+                            className={inputClass}
+                            value={eff.diskGb}
+                            onChange={(e) => set({ diskGb: toInt(e.target.value, 8) })}
+                            data-testid="input-size-disk"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="size-ram" className="text-xs">
+                            RAM (GB)
+                          </Label>
+                          <input
+                            id="size-ram"
+                            type="number"
+                            min={1}
+                            max={ramMax}
+                            className={inputClass}
+                            value={eff.ramGb}
+                            onChange={(e) => set({ ramGb: toInt(e.target.value, 1) })}
+                            data-testid="input-size-ram"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="size-cpu" className="text-xs">
+                            CPU cores
+                          </Label>
+                          <input
+                            id="size-cpu"
+                            type="number"
+                            min={1}
+                            max={cpuMax}
+                            className={inputClass}
+                            value={eff.cpuCores}
+                            onChange={(e) => set({ cpuCores: toInt(e.target.value, 1) })}
+                            data-testid="input-size-cpu"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground">
+                          Recommended: {rec.diskGb}GB · {rec.ramGb}GB RAM · {rec.cpuCores} CPU
+                        </span>
+                        {sizing && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => setSizing(null)}
+                            data-testid="button-reset-sizing"
+                          >
+                            Reset to recommended
+                          </Button>
+                        )}
+                      </div>
+                      {planQ.data.current?.diskExists && (
+                        <p className="text-xs text-amber-600 dark:text-amber-500">
+                          A Windows disk image already exists — RAM and CPU changes apply, but the
+                          disk keeps its current size unless it's recreated.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()
+              ) : null}
             </div>
           )}
 
-          {/* Step 3 — Review */}
-          {step === 3 && (
+          {/* Step 3 — Storage persistence (auto vs manual) */}
+          {step === 3 &&
+            (() => {
+              const pinfo = partitionsQ.data;
+              const dr = dryRun.data;
+              const ar = applyPartition.data;
+              const gb = (b?: number) =>
+                typeof b === "number" ? (b / 1024 ** 3).toFixed(b < 1024 ** 3 * 10 ? 1 : 0) : "?";
+              const bootDisk = pinfo?.bootDisk ?? null;
+              const dev = bootDisk ?? "/dev/sdX";
+              const label = pinfo?.persistLabel ?? "foulfox-persist";
+              const cardCls = (active: boolean) =>
+                `w-full text-left rounded-md border p-3 transition-colors ${
+                  active ? "border-primary bg-primary/5" : "hover:bg-muted/50"
+                }`;
+              return (
+                <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    A fresh FoulFox USB runs entirely in RAM — the Windows ISO and your VM are{" "}
+                    <span className="font-medium">lost on reboot</span>. Add a{" "}
+                    <span className="font-medium">{label}</span> partition so your storage survives a
+                    restart.
+                  </p>
+
+                  {partitionsQ.isLoading ? (
+                    <div className="flex justify-center p-6">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : pinfo?.persistExists ? (
+                    <div className="flex items-start gap-3 rounded-md border border-green-500/40 bg-green-500/5 p-3">
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
+                      <p className="text-sm">
+                        Durable storage is already set up — a{" "}
+                        <span className="font-medium">{label}</span> partition exists. Nothing to do
+                        here.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <button
+                        type="button"
+                        onClick={() => setPartMode("auto")}
+                        className={cardCls(partMode === "auto")}
+                        data-testid="choice-partition-auto"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Wand2 className="h-4 w-4 text-primary" />
+                          <span className="text-sm font-medium">Auto-partition this drive for me</span>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Create the {label} partition in the free space on the FoulFox USB. Only
+                          unused space is touched — existing partitions are never modified.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setPartMode("manual")}
+                        className={cardCls(partMode === "manual")}
+                        data-testid="choice-partition-manual"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Wrench className="h-4 w-4 text-primary" />
+                          <span className="text-sm font-medium">I&apos;ll partition it myself</span>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Show the exact commands to add the partition by hand from a Linux machine.
+                        </p>
+                      </button>
+
+                      {partMode === "auto" && (
+                        <div className="space-y-3 rounded-md border p-3">
+                          {pinfo && !pinfo.helperAvailable ? (
+                            <div className="flex items-start gap-3">
+                              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                              <p className="text-xs text-muted-foreground">
+                                Auto-partitioning runs on the FoulFox OS device itself — it isn&apos;t
+                                available in this preview. Boot the USB to use it, or partition
+                                manually.
+                              </p>
+                            </div>
+                          ) : !bootDisk ? (
+                            <div className="flex items-start gap-3">
+                              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                              <p className="text-xs text-muted-foreground">
+                                Couldn&apos;t identify the drive FoulFox booted from. Use the manual
+                                option instead.
+                              </p>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-xs text-muted-foreground">
+                                Target drive: <span className="font-medium">{dev}</span>
+                                {(() => {
+                                  const d = pinfo?.disks.find((x) => x.isBootDisk);
+                                  return d ? ` · ${d.model ?? "USB drive"} · ${gb(d.sizeBytes)}GB` : "";
+                                })()}
+                              </p>
+
+                              {!dr || !dr.ok ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => dryRun.mutate(bootDisk)}
+                                  disabled={dryRun.isPending}
+                                  data-testid="button-partition-preview"
+                                >
+                                  {dryRun.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                  Preview changes
+                                </Button>
+                              ) : !dr.canApply ? (
+                                <div className="flex items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5">
+                                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                                  <p className="text-xs">
+                                    {dr.reason || "This drive can&apos;t be auto-partitioned."}
+                                  </p>
+                                </div>
+                              ) : ar?.partitionCreated ? (
+                                <div className="flex items-start gap-3 rounded-md border border-green-500/40 bg-green-500/5 p-2.5">
+                                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
+                                  <p className="text-xs">
+                                    {ar.reason ||
+                                      "Persistence partition created. Reboot to activate durable storage."}
+                                  </p>
+                                </div>
+                              ) : (
+                                <div className="space-y-2 rounded-md border border-red-500/40 bg-red-500/5 p-3">
+                                  <p className="text-xs">
+                                    Will create a{" "}
+                                    <span className="font-medium">{gb(dr.plannedBytes)}GB ext4</span>{" "}
+                                    partition labelled{" "}
+                                    <span className="font-medium">{dr.persistLabel}</span> in the free
+                                    space on <span className="font-medium">{dr.device}</span>. Existing
+                                    partitions are left untouched. Type{" "}
+                                    <span className="font-mono font-medium">{CONFIRM_PHRASE}</span> to
+                                    confirm.
+                                  </p>
+                                  <input
+                                    className={inputClass}
+                                    value={confirmText}
+                                    onChange={(e) => setConfirmText(e.target.value)}
+                                    placeholder={CONFIRM_PHRASE}
+                                    data-testid="input-partition-confirm"
+                                  />
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    disabled={
+                                      confirmText.trim() !== CONFIRM_PHRASE || applyPartition.isPending
+                                    }
+                                    onClick={() =>
+                                      applyPartition.mutate({
+                                        device: dr.device ?? bootDisk,
+                                        fingerprint: dr.fingerprint,
+                                      })
+                                    }
+                                    data-testid="button-partition-apply"
+                                  >
+                                    {applyPartition.isPending && (
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    )}
+                                    Create persistence partition
+                                  </Button>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {partMode === "manual" && (
+                        <div className="space-y-2 rounded-md border p-3">
+                          <div className="flex items-center gap-2">
+                            <Terminal className="h-4 w-4 text-primary" />
+                            <span className="text-sm font-medium">Manual partition steps</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            From a Linux machine (replace <span className="font-mono">{dev}</span> with
+                            your USB device and <span className="font-mono">N</span> with the new
+                            partition number):
+                          </p>
+                          <pre className="overflow-x-auto rounded bg-muted p-2 text-[11px] leading-relaxed">
+{`sudo parted ${dev} unit MiB print free
+sudo parted ${dev} --script -- mkpart primary ext4 START 100%
+sudo partprobe ${dev}
+sudo mkfs.ext4 -L ${label} ${dev}N
+sudo mount ${dev}N /mnt
+echo "/ union" | sudo tee /mnt/persistence.conf`}
+                          </pre>
+                          <p className="text-xs text-muted-foreground">
+                            Replace <span className="font-mono">START</span> with the free-region start
+                            shown by the first command. Full guide: docs/flash.md →
+                            &ldquo;Make storage persistent&rdquo;.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+          {/* Step 4 — Review */}
+          {step === 4 && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">Review and finish setup.</p>
               <div className="space-y-2">
@@ -339,6 +835,28 @@ export function SetupWizard() {
                   <span className="text-sm">Windows VM</span>
                   <span className="text-xs text-muted-foreground">
                     {capsQ.data?.canBootVm ? "Ready to boot" : "Not bootable on this host"}
+                  </span>
+                </div>
+                {planQ.data?.plan &&
+                  (() => {
+                    const plan = planQ.data.plan;
+                    const eff =
+                      sizing ?? { diskGb: plan.diskGb, ramGb: plan.ramGb, cpuCores: plan.cpuCores };
+                    return (
+                      <div className="flex items-center justify-between rounded-md border p-2.5">
+                        <span className="text-sm">VM size</span>
+                        <span className="text-xs text-muted-foreground" data-testid="text-review-sizing">
+                          {eff.diskGb}GB disk · {eff.ramGb}GB RAM · {eff.cpuCores} CPU
+                        </span>
+                      </div>
+                    );
+                  })()}
+                <div className="flex items-center justify-between rounded-md border p-2.5">
+                  <span className="text-sm">Durable storage</span>
+                  <span className="text-xs text-muted-foreground" data-testid="text-review-storage">
+                    {partitionsQ.data?.persistExists || applyPartition.data?.partitionCreated
+                      ? "Persistence ready — reboot to activate"
+                      : "Running in RAM (set up in the Storage step)"}
                   </span>
                 </div>
               </div>
@@ -370,11 +888,13 @@ export function SetupWizard() {
             ) : (
               <Button
                 size="sm"
-                onClick={() => provision.mutate()}
-                disabled={provision.isPending}
+                onClick={() => void finishSetup()}
+                disabled={provision.isPending || applySizing.isPending}
                 data-testid="button-wizard-finish"
               >
-                {provision.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {(provision.isPending || applySizing.isPending) && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
                 Finish setup
               </Button>
             )}

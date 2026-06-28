@@ -1,0 +1,11 @@
+# Let the appliance service user create the persistence partition via the
+# storage-setup helper. The api-server runs as 'foulfox' and shells out to
+# `sudo -n foulfox-storage-setup {detect|dry-run|apply}` so the Setup wizard can
+# offer "auto-partition this drive for me". The helper needs root to read the raw
+# partition table (parted), create the partition, and mkfs the new device. Only
+# this single binary is permitted (no wildcards); the helper derives the target
+# from the live boot medium itself and performs all of its own validation, so a
+# caller cannot point it at an arbitrary disk. Installed 0440 by the
+# 0030-foulfox-patcher-perms build hook.
+Cmnd_Alias FOULFOX_STORAGE_SETUP = /usr/local/sbin/foulfox-storage-setup
+foulfox ALL=(root) NOPASSWD: FOULFOX_STORAGE_SETUP
