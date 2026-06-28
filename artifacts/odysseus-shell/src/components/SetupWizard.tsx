@@ -35,8 +35,9 @@ import { useToast } from "@/hooks/use-toast";
 
 // First-run onboarding for the FoulFox 3-agent suite. Renders only when a suite
 // exists but is not yet marked setup_complete (or no suite at all). Steps:
-//  0 AI Online (bring an AI engine up FIRST — cloud primary, local fallback —
-//    and gate the rest of setup on it), 1 Welcome + service reachability,
+//  0 AI Online (bring an AI engine up FIRST — local Ollama is the free default,
+//    cloud Ollama is an optional paid alternative — and gate the rest of setup
+//    on it), 1 Welcome + service reachability,
 //  2 per-agent model selection, 3 Windows VM capability detection (honest),
 //  4 storage persistence, 5 review + provision.
 //
@@ -235,10 +236,11 @@ export function SetupWizard() {
   const [confirmText, setConfirmText] = useState("");
   const CONFIRM_PHRASE = "ERASE FREE SPACE";
 
-  // ── AI Online (step 0) — bring an engine up FIRST: cloud primary, local
-  // fallback. Next is gated until an AI engine is reachable.
-  const [cloud, setCloud] = useState({ url: "https://ollama.com", key: "" });
+  // ── AI Online (step 0) — bring an engine up FIRST: local Ollama is the free
+  // default (no API key); cloud Ollama is an optional paid alternative. Next is
+  // gated until an AI engine is reachable.
   const [local, setLocal] = useState({ url: "http://localhost:11434" });
+  const [cloud, setCloud] = useState({ url: "https://ollama.com", key: "" });
   const [showAudit, setShowAudit] = useState(false);
 
   // One correlation id per setup run ties every error + repair together so the
@@ -654,8 +656,10 @@ export function SetupWizard() {
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 FoulFox brings an AI engine online <span className="font-medium">first</span> —
-                the rest of setup leans on it (and on autonomous self-repair). Cloud Ollama is
-                the primary engine; a local engine is the fallback.
+                the rest of setup leans on it (and on autonomous self-repair). A{" "}
+                <span className="font-medium">local Ollama</span> engine is the default: it runs on
+                your own machine, needs no API key, and costs nothing. Cloud Ollama is an optional
+                paid alternative.
               </p>
 
               <div
@@ -689,15 +693,79 @@ export function SetupWizard() {
                 </Button>
               </div>
 
-              {/* Cloud Ollama — primary */}
+              {/* Local Ollama — default: free, runs on your machine, no API key */}
               <div className="space-y-2 rounded-md border p-3">
                 <div className="flex items-center gap-2">
-                  <Cloud className="h-4 w-4 text-primary" />
-                  <span className="text-sm font-medium">Cloud Ollama</span>
-                  <span className="ml-auto text-[11px] uppercase tracking-wide text-muted-foreground">
-                    primary
+                  <HardDrive className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">Local Ollama</span>
+                  <span className="ml-auto text-[11px] uppercase tracking-wide text-primary">
+                    recommended · free
                   </span>
                 </div>
+                <Label htmlFor="local-url" className="text-xs">
+                  Base URL
+                </Label>
+                <input
+                  id="local-url"
+                  className={inputClass}
+                  value={local.url}
+                  onChange={(e) => setLocal({ url: e.target.value })}
+                  data-testid="input-local-url"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Runs on your own machine — no API key, no cost. Just make sure Ollama is running
+                  (default http://localhost:11434).
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!local.url.trim() || testEndpoint.isPending}
+                    onClick={() => testEndpoint.mutate({ base_url: local.url.trim() })}
+                    data-testid="button-local-test"
+                  >
+                    {testEndpoint.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Test
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={!local.url.trim() || saveEndpoint.isPending}
+                    onClick={() =>
+                      void runHealableStep({
+                        step: "ai-online",
+                        operation: "connect-local-ollama",
+                        checkKey: "model-routes",
+                        objective:
+                          "Bring the local Ollama AI engine online for FoulFox; repair FoulFox's own model-endpoint code/config if saving the endpoint keeps failing.",
+                        run: () =>
+                          saveEndpoint.mutateAsync({
+                            name: "Local Ollama",
+                            base_url: local.url.trim(),
+                          }),
+                      }).catch(() => {})
+                    }
+                    data-testid="button-local-save"
+                  >
+                    {saveEndpoint.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Connect
+                  </Button>
+                </div>
+              </div>
+
+              {/* Cloud Ollama — optional paid alternative (ollama.com hosted) */}
+              <div className="space-y-2 rounded-md border p-3">
+                <div className="flex items-center gap-2">
+                  <Cloud className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">Cloud Ollama</span>
+                  <span className="ml-auto text-[11px] uppercase tracking-wide text-muted-foreground">
+                    optional · paid
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Only needed if you don&apos;t run Ollama locally. Uses ollama.com&apos;s hosted
+                  service and requires a paid API key — skip this if you&apos;re using the local
+                  engine above.
+                </p>
                 <div className="space-y-1.5">
                   <Label htmlFor="cloud-url" className="text-xs">
                     Base URL
@@ -744,7 +812,7 @@ export function SetupWizard() {
                         operation: "connect-cloud-ollama",
                         checkKey: "model-routes",
                         objective:
-                          "Bring the primary Cloud Ollama AI engine online for FoulFox; repair FoulFox's own model-endpoint code/config if saving the endpoint keeps failing.",
+                          "Bring the optional Cloud Ollama AI engine online for FoulFox; repair FoulFox's own model-endpoint code/config if saving the endpoint keeps failing.",
                         run: () =>
                           saveEndpoint.mutateAsync({
                             name: "Cloud Ollama",
@@ -754,61 +822,6 @@ export function SetupWizard() {
                       }).catch(() => {})
                     }
                     data-testid="button-cloud-save"
-                  >
-                    {saveEndpoint.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Connect
-                  </Button>
-                </div>
-              </div>
-
-              {/* Local engine — fallback */}
-              <div className="space-y-2 rounded-md border p-3">
-                <div className="flex items-center gap-2">
-                  <HardDrive className="h-4 w-4 text-primary" />
-                  <span className="text-sm font-medium">Local engine</span>
-                  <span className="ml-auto text-[11px] uppercase tracking-wide text-muted-foreground">
-                    fallback
-                  </span>
-                </div>
-                <Label htmlFor="local-url" className="text-xs">
-                  Base URL
-                </Label>
-                <input
-                  id="local-url"
-                  className={inputClass}
-                  value={local.url}
-                  onChange={(e) => setLocal({ url: e.target.value })}
-                  data-testid="input-local-url"
-                />
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!local.url.trim() || testEndpoint.isPending}
-                    onClick={() => testEndpoint.mutate({ base_url: local.url.trim() })}
-                    data-testid="button-local-test"
-                  >
-                    {testEndpoint.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Test
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={!local.url.trim() || saveEndpoint.isPending}
-                    onClick={() =>
-                      void runHealableStep({
-                        step: "ai-online",
-                        operation: "connect-local-ollama",
-                        checkKey: "model-routes",
-                        objective:
-                          "Bring a local fallback AI engine online for FoulFox; repair FoulFox's own model-endpoint code/config if saving the endpoint keeps failing.",
-                        run: () =>
-                          saveEndpoint.mutateAsync({
-                            name: "Local Ollama",
-                            base_url: local.url.trim(),
-                          }),
-                      }).catch(() => {})
-                    }
-                    data-testid="button-local-save"
                   >
                     {saveEndpoint.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Connect
