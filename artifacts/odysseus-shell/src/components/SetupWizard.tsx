@@ -35,9 +35,10 @@ import { useToast } from "@/hooks/use-toast";
 
 // First-run onboarding for the FoulFox 3-agent suite. Renders only when a suite
 // exists but is not yet marked setup_complete (or no suite at all). Steps:
-//  0 AI Online (bring an AI engine up FIRST — local Ollama is the free default,
-//    cloud Ollama is an optional paid alternative — and gate the rest of setup
-//    on it), 1 Welcome + service reachability,
+//  0 AI Online (bring an AI engine up FIRST — local Ollama is the free default;
+//    "Cloud Ollama" = the user's OWN deployed cloud Ollama service (bearer-auth
+//    proxy, see docs/cloud-ollama-handoff.md), NOT the public paid ollama.com —
+//    and gate the rest of setup on it), 1 Welcome + service reachability,
 //  2 per-agent model selection, 3 Windows VM capability detection (honest),
 //  4 storage persistence, 5 review + provision.
 //
@@ -237,10 +238,12 @@ export function SetupWizard() {
   const CONFIRM_PHRASE = "ERASE FREE SPACE";
 
   // ── AI Online (step 0) — bring an engine up FIRST: local Ollama is the free
-  // default (no API key); cloud Ollama is an optional paid alternative. Next is
-  // gated until an AI engine is reachable.
+  // default (no key); the cloud option points at the user's OWN deployed cloud
+  // Ollama service (bearer-auth proxy from docs/cloud-ollama-handoff.md, keyed by
+  // its OLLAMA_PROXY_KEY), NOT the public paid ollama.com. Next is gated until an
+  // AI engine is reachable.
   const [local, setLocal] = useState({ url: "http://localhost:11434" });
-  const [cloud, setCloud] = useState({ url: "https://ollama.com", key: "" });
+  const [cloud, setCloud] = useState({ url: "", key: "" });
   const [showAudit, setShowAudit] = useState(false);
 
   // One correlation id per setup run ties every error + repair together so the
@@ -658,8 +661,10 @@ export function SetupWizard() {
                 FoulFox brings an AI engine online <span className="font-medium">first</span> —
                 the rest of setup leans on it (and on autonomous self-repair). A{" "}
                 <span className="font-medium">local Ollama</span> engine is the default: it runs on
-                your own machine, needs no API key, and costs nothing. Cloud Ollama is an optional
-                paid alternative.
+                your own machine, needs no key, and costs nothing.{" "}
+                <span className="font-medium">Cloud Ollama</span> connects to the always-on cloud
+                service <span className="font-medium">you deployed</span>, using its proxy key — not
+                the public ollama.com.
               </p>
 
               <div
@@ -752,40 +757,43 @@ export function SetupWizard() {
                 </div>
               </div>
 
-              {/* Cloud Ollama — optional paid alternative (ollama.com hosted) */}
+              {/* Cloud Ollama — the user's OWN deployed cloud service (bearer-auth
+                  proxy), connected via its /v1 URL + OLLAMA_PROXY_KEY. NOT ollama.com. */}
               <div className="space-y-2 rounded-md border p-3">
                 <div className="flex items-center gap-2">
                   <Cloud className="h-4 w-4 text-muted-foreground" />
                   <span className="text-sm font-medium">Cloud Ollama</span>
                   <span className="ml-auto text-[11px] uppercase tracking-wide text-muted-foreground">
-                    optional · paid
+                    your deployment
                   </span>
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  Only needed if you don&apos;t run Ollama locally. Uses ollama.com&apos;s hosted
-                  service and requires a paid API key — skip this if you&apos;re using the local
-                  engine above.
+                  The always-on cloud Ollama service you deployed (Ollama behind a bearer-auth
+                  proxy). Paste its <code>/v1</code> URL and the proxy key
+                  (<code>OLLAMA_PROXY_KEY</code>) — this is your own service, not the public
+                  ollama.com.
                 </p>
                 <div className="space-y-1.5">
                   <Label htmlFor="cloud-url" className="text-xs">
-                    Base URL
+                    Deployment URL (ends in /v1)
                   </Label>
                   <input
                     id="cloud-url"
                     className={inputClass}
                     value={cloud.url}
+                    placeholder="https://your-deploy.replit.app/v1"
                     onChange={(e) => setCloud((c) => ({ ...c, url: e.target.value }))}
                     data-testid="input-cloud-url"
                   />
                   <Label htmlFor="cloud-key" className="text-xs">
-                    API key
+                    Proxy key
                   </Label>
                   <input
                     id="cloud-key"
                     type="password"
                     className={inputClass}
                     value={cloud.key}
-                    placeholder="ollama.com API key"
+                    placeholder="OLLAMA_PROXY_KEY value"
                     onChange={(e) => setCloud((c) => ({ ...c, key: e.target.value }))}
                     data-testid="input-cloud-key"
                   />
@@ -812,7 +820,7 @@ export function SetupWizard() {
                         operation: "connect-cloud-ollama",
                         checkKey: "model-routes",
                         objective:
-                          "Bring the optional Cloud Ollama AI engine online for FoulFox; repair FoulFox's own model-endpoint code/config if saving the endpoint keeps failing.",
+                          "Bring the user's deployed Cloud Ollama service online for FoulFox; repair FoulFox's own model-endpoint code/config if saving the endpoint keeps failing.",
                         run: () =>
                           saveEndpoint.mutateAsync({
                             name: "Cloud Ollama",
