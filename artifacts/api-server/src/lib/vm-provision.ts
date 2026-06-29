@@ -411,6 +411,15 @@ async function buildUnattendIso(
 //   • installs the agent's public key into administrators_authorized_keys with the
 //     ACLs OpenSSH requires (Administrators + SYSTEM only, inheritance removed) —
 //     for an admin user OpenSSH ignores ~/.ssh/authorized_keys and reads this file.
+// Wrap a PowerShell script as a single XML/CMD-safe FirstLogonCommand. Using
+// -EncodedCommand (base64 of UTF-16LE) means the script body can contain quotes,
+// ampersands, and angle brackets without any XML or shell escaping corrupting
+// the answer file — important for the multi-line browser-install scripts below.
+function psEncoded(script: string): string {
+  const b64 = Buffer.from(script, "utf16le").toString("base64");
+  return `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64}`;
+}
+
 // The public key is base64-wrapped before being embedded in the PowerShell so no
 // quoting/XML-escaping can corrupt it. (Edition/key/partition specifics vary by
 // ISO and are intentionally left to the supplied media's defaults.)
@@ -424,6 +433,78 @@ function buildAutoUnattend(opts: { username: string; password: string; pubKey: s
         </SynchronousCommand>
 `
     : "";
+
+  // ── Browser automation (Windows scraper / Playwright-over-CDP) ───────────────
+  // Install Chrome + Node + Playwright in the guest and expose Chrome's DevTools
+  // endpoint so a host-side Playwright (over the QEMU CDP host-forward) OR an
+  // in-guest Playwright can drive a REAL desktop browser. These run once, after
+  // auto-logon, with outbound internet via QEMU user-mode NAT. Each script is
+  // wrapped with -EncodedCommand so quotes/&/<> can never corrupt the answer
+  // file, and each ends `exit 0` so a failed download never aborts OOBE.
+  // NOTE: only exercisable on a KVM-capable host — a guest cannot boot where
+  // /dev/kvm is absent, so this is implemented correct-by-design, not runtime-tested.
+  const sync = (order: number, cmd: string): string =>
+    `        <SynchronousCommand wcm:action="add">
+          <Order>${order}</Order>
+          <CommandLine>${cmd}</CommandLine>
+        </SynchronousCommand>
+`;
+  // Node.js LTS (pinned permanent dist URL — bump the version as needed).
+  const nodeInstallScript = String.raw`$ErrorActionPreference='SilentlyContinue'
+$ProgressPreference='SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+$u='https://nodejs.org/dist/v20.18.0/node-v20.18.0-x64.msi'
+$o=Join-Path $env:TEMP 'node-lts-x64.msi'
+try { Invoke-WebRequest -Uri $u -OutFile $o -UseBasicParsing } catch {}
+if (Test-Path $o) { Start-Process msiexec.exe -ArgumentList '/i', $o, '/qn', '/norestart' -Wait }
+exit 0`;
+  // Google Chrome stable (Google's permanent latest-stable enterprise MSI URL).
+  const chromeInstallScript = String.raw`$ErrorActionPreference='SilentlyContinue'
+$ProgressPreference='SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+$u='https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi'
+$o=Join-Path $env:TEMP 'chrome-enterprise-x64.msi'
+try { Invoke-WebRequest -Uri $u -OutFile $o -UseBasicParsing } catch {}
+if (Test-Path $o) { Start-Process msiexec.exe -ArgumentList '/i', $o, '/qn', '/norestart' -Wait }
+exit 0`;
+  // Playwright (npm global). The Node MSI updates the machine PATH but not this
+  // already-running session, so refresh PATH and call npm by full path. Pulling
+  // Playwright's own chromium is best-effort (the CDP path drives system Chrome).
+  const playwrightInstallScript = String.raw`$ErrorActionPreference='SilentlyContinue'
+$ProgressPreference='SilentlyContinue'
+$env:Path=[Environment]::GetEnvironmentVariable('Path','Machine')+';'+[Environment]::GetEnvironmentVariable('Path','User')
+$npm=Join-Path $env:ProgramFiles 'nodejs\npm.cmd'
+if (Test-Path $npm) {
+  & $npm install -g playwright
+  $pw=Join-Path $env:APPDATA 'npm\playwright.cmd'
+  if (Test-Path $pw) { & $pw install chromium }
+}
+exit 0`;
+  // Expose CDP: open the firewall for 9222, bridge guest-NIC:9222 -> loopback:9222
+  // (the QEMU host-forward targets the guest NIC IP 10.0.2.15, but Chrome's
+  // DevTools port binds loopback only), then (re)launch HEADED Chrome with remote
+  // debugging at every logon. Headed (not --headless) preserves the real-desktop
+  // anti-detection benefit; --remote-allow-origins=* lets Playwright's
+  // connectOverCDP attach on Chrome M111+. NOTE: across reboots this needs
+  // persistent auto-logon (LogonCount is 1 today) — tracked as a follow-up.
+  const cdpSetupScript = String.raw`$ErrorActionPreference='SilentlyContinue'
+New-NetFirewallRule -Name 'FoulFox-CDP-In' -DisplayName 'FoulFox Chrome DevTools (CDP)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 9222 -ErrorAction SilentlyContinue
+netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=9222 connectaddress=127.0.0.1 connectport=9222
+$chrome=Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'
+if (Test-Path $chrome) {
+  $a=New-ScheduledTaskAction -Execute $chrome -Argument '--remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 --user-data-dir=C:\cdp-profile --no-first-run --no-default-browser-check --remote-allow-origins=*'
+  $t=New-ScheduledTaskTrigger -AtLogOn
+  $p=New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest
+  Register-ScheduledTask -TaskName 'FoulFoxCDP' -Action $a -Trigger $t -Principal $p -Force
+  Start-ScheduledTask -TaskName 'FoulFoxCDP'
+}
+exit 0`;
+  const browserAutomationCommands =
+    sync(5, psEncoded(nodeInstallScript)) +
+    sync(6, psEncoded(chromeInstallScript)) +
+    sync(7, psEncoded(playwrightInstallScript)) +
+    sync(8, psEncoded(cdpSetupScript));
+
   return `<?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
   <settings pass="windowsPE">
@@ -502,7 +583,7 @@ ${keyCommand}        <SynchronousCommand wcm:action="add">
           <Order>4</Order>
           <CommandLine>netsh advfirewall firewall set rule group="remote desktop" new enable=Yes</CommandLine>
         </SynchronousCommand>
-      </FirstLogonCommands>
+${browserAutomationCommands}      </FirstLogonCommands>
     </component>
   </settings>
 </unattend>

@@ -8,6 +8,7 @@ export interface VmPorts {
   vnc: number;        // QEMU VNC display (raw RFB over TCP)
   vncWs: number;      // QEMU VNC websocket (consumed by noVNC in the browser)
   monitor: number;    // QMP / monitor TCP (lifecycle + snapshot control)
+  cdp: number;        // host-forwarded guest :9222 (Chrome DevTools / CDP for Playwright)
 }
 
 // Base ranges chosen to avoid the dev-server ports and the legacy fixed ports
@@ -18,6 +19,7 @@ const RANGES = {
   vnc: { start: 23000, span: 200 },
   vncWs: { start: 24000, span: 200 },
   monitor: { start: 25000, span: 200 },
+  cdp: { start: 26000, span: 200 },
 } as const;
 
 // Hard guardrails so a runaway "+" can't exhaust the host.
@@ -70,10 +72,23 @@ export async function allocatePorts(claimed: Iterable<number>): Promise<VmPorts>
   const vnc = await pickInRange(RANGES.vnc.start, RANGES.vnc.span, used); used.add(vnc);
   const vncWs = await pickInRange(RANGES.vncWs.start, RANGES.vncWs.span, used); used.add(vncWs);
   const monitor = await pickInRange(RANGES.monitor.start, RANGES.monitor.span, used); used.add(monitor);
-  return { ssh, rdp, vnc, vncWs, monitor };
+  const cdp = await pickInRange(RANGES.cdp.start, RANGES.cdp.span, used); used.add(cdp);
+  return { ssh, rdp, vnc, vncWs, monitor, cdp };
+}
+
+// Backfill the CDP port for VM records persisted before `cdp` existed so
+// vm.ports.cdp is always defined. Derives a deterministic, collision-free value
+// from the (already unique-per-VM) monitor port, so no async port scan is needed
+// in the synchronous registry read path.
+export function withCdpBackfill(ports: VmPorts): VmPorts {
+  if (typeof (ports as Partial<VmPorts>).cdp === "number") return ports;
+  const offset = Math.max(0, (ports.monitor ?? RANGES.monitor.start) - RANGES.monitor.start);
+  return { ...ports, cdp: RANGES.cdp.start + offset };
 }
 
 // Flatten a port set to a list for collision tracking across VMs.
 export function portValues(p: VmPorts): number[] {
-  return [p.ssh, p.rdp, p.vnc, p.vncWs, p.monitor];
+  return [p.ssh, p.rdp, p.vnc, p.vncWs, p.monitor, p.cdp].filter(
+    (n): n is number => typeof n === "number",
+  );
 }

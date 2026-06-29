@@ -29,6 +29,7 @@ export interface VmPorts {
   vnc: number;
   vncWs: number;
   monitor: number;
+  cdp: number;
 }
 
 export interface VmSummary {

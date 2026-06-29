@@ -34,12 +34,14 @@ export function buildQemuArgs(vm: VmRecord, accel: AcceleratorInfo): string[] {
   args.push("-m", `${c.ramGb}G`);
   args.push("-smp", `cores=${c.cpuCores}`);
 
-  // Networking: localhost-only host-forwards for SSH and RDP. Windows has no
-  // inbox virtio-net driver, so a fresh install would have no network (and the
-  // auto-enabled OpenSSH/RDP would be unreachable) until virtio drivers are
-  // installed — use e1000e, which Windows drives out of the box. Linux keeps the
-  // faster virtio-net.
-  args.push("-netdev", `user,id=net0,hostfwd=tcp:127.0.0.1:${vm.ports.ssh}-:22,hostfwd=tcp:127.0.0.1:${vm.ports.rdp}-:3389`);
+  // Networking: localhost-only host-forwards for SSH, RDP, and CDP (Chrome
+  // DevTools :9222, for Playwright). Windows has no inbox virtio-net driver, so a
+  // fresh install would have no network (and the auto-enabled OpenSSH/RDP would
+  // be unreachable) until virtio drivers are installed — use e1000e, which
+  // Windows drives out of the box. Linux keeps the faster virtio-net. NOTE: the
+  // CDP forward arrives on the guest NIC IP (not loopback), so the in-guest side
+  // must listen on 0.0.0.0 — a netsh portproxy handles that (see vm-provision.ts).
+  args.push("-netdev", `user,id=net0,hostfwd=tcp:127.0.0.1:${vm.ports.ssh}-:22,hostfwd=tcp:127.0.0.1:${vm.ports.rdp}-:3389,hostfwd=tcp:127.0.0.1:${vm.ports.cdp}-:9222`);
   args.push("-device", `${vm.osKind === "windows" ? "e1000e" : "virtio-net"},netdev=net0`);
 
   // Graphical display: QEMU VNC bound to localhost with a websocket for noVNC.

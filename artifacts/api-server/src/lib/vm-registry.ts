@@ -3,7 +3,7 @@ import path from "path";
 import crypto from "crypto";
 import { type ChildProcess } from "child_process";
 import { type OsKind } from "./vm-capabilities";
-import { type VmPorts, allocatePorts, portValues } from "./vm-ports";
+import { type VmPorts, allocatePorts, portValues, withCdpBackfill } from "./vm-ports";
 import { logger } from "./logger";
 import { type DisplayMode } from "./vm-state";
 
@@ -164,7 +164,14 @@ function readRegistryFile(): RegistryFile {
   try {
     if (fs.existsSync(REGISTRY_PATH)) {
       const parsed = JSON.parse(fs.readFileSync(REGISTRY_PATH, "utf-8"));
-      if (parsed && Array.isArray(parsed.vms)) return parsed as RegistryFile;
+      if (parsed && Array.isArray(parsed.vms)) {
+        // Backfill the CDP port for records persisted before it existed so
+        // vm.ports.cdp is always defined (the QEMU host-forward reads it).
+        for (const vm of parsed.vms) {
+          if (vm && vm.ports) vm.ports = withCdpBackfill(vm.ports);
+        }
+        return parsed as RegistryFile;
+      }
     }
   } catch (err) {
     logger.error({ err }, "Failed to read VM registry; starting empty");
