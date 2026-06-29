@@ -484,15 +484,19 @@ exit 0`;
   // (the QEMU host-forward targets the guest NIC IP 10.0.2.15, but Chrome's
   // DevTools port binds loopback only), then (re)launch HEADED Chrome with remote
   // debugging at every logon. Headed (not --headless) preserves the real-desktop
-  // anti-detection benefit; --remote-allow-origins=* lets Playwright's
-  // connectOverCDP attach on Chrome M111+. NOTE: across reboots this needs
-  // persistent auto-logon (LogonCount is 1 today) — tracked as a follow-up.
+  // anti-detection benefit. We do NOT pass --remote-allow-origins=*: Playwright's
+  // Node connectOverCDP sends no Origin header, so Chrome M111+ still accepts it,
+  // while the wildcard would let any browser page attach (DNS-rebind / cross-origin
+  // CDP hijack). Chrome's debug port also binds guest loopback (127.0.0.1) and the
+  // QEMU host-forward binds host loopback, so the only reachable surface is the
+  // host itself. NOTE: across reboots this needs persistent auto-logon (LogonCount
+  // is 1 today) — tracked as a follow-up.
   const cdpSetupScript = String.raw`$ErrorActionPreference='SilentlyContinue'
 New-NetFirewallRule -Name 'FoulFox-CDP-In' -DisplayName 'FoulFox Chrome DevTools (CDP)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 9222 -ErrorAction SilentlyContinue
 netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=9222 connectaddress=127.0.0.1 connectport=9222
 $chrome=Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'
 if (Test-Path $chrome) {
-  $a=New-ScheduledTaskAction -Execute $chrome -Argument '--remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 --user-data-dir=C:\cdp-profile --no-first-run --no-default-browser-check --remote-allow-origins=*'
+  $a=New-ScheduledTaskAction -Execute $chrome -Argument '--remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 --user-data-dir=C:\cdp-profile --no-first-run --no-default-browser-check'
   $t=New-ScheduledTaskTrigger -AtLogOn
   $p=New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest
   Register-ScheduledTask -TaskName 'FoulFoxCDP' -Action $a -Trigger $t -Principal $p -Force
