@@ -1,0 +1,26 @@
+Perfect — that's exactly what I need. To get Playwright working with the FoulFox VM, the deciding factor is where the browser lives relative to the Peekaboo Node process, and what's available in the VM. Right now our integration only talks to the VM through the computer-use broker (screenshots + simulated keyboard/mouse), which is why I can't inspect it from here.
+
+Could you ask the FoulFox VM agent to run and print the output of these? It's a Windows VM per the docs, so PowerShell:
+
+# 1. OS, version, CPU architecture
+[System.Environment]::OSVersion.VersionString
+$env:PROCESSOR_ARCHITECTURE
+# 2. Is Node.js available in the VM? (and npm)
+node -v
+npm -v
+# 3. What browsers are installed + their versions/paths
+(Get-Item "C:\Program Files\Google\Chrome\Application\chrome.exe" -ErrorAction SilentlyContinue).VersionInfo.ProductVersion
+(Get-Item "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" -ErrorAction SilentlyContinue).VersionInfo.ProductVersion
+# 4. Is a remote-debugging port already open? (Playwright connects over this)
+netstat -ano | findstr 9222
+# 5. Does the VM have outbound internet (to download Playwright's browser)?
+curl.exe -I https://playwright.azureedge.net 2>&1 | Select-Object -First 1
+
+Here's why each one matters for the approach:
+
+OS / arch — confirms which Playwright build and browser channel to target.
+Node in the VM — tells me whether Playwright can run inside the VM (launching the browser locally), or whether it has to drive the VM's browser remotely from the Peekaboo process.
+Installed browsers — if Chrome/Edge is already there, Playwright can use it via channel: "chrome"/"msedge" instead of downloading its own ~300 MB Chromium.
+Port 9222 — the cleanest path is chromium.connectOverCDP() to a browser launched with --remote-debugging-port. If that port is reachable, Playwright gets full programmatic control while still running in the VM's stealthy desktop environment.
+Internet egress — determines whether we can playwright install browsers or must reuse an installed one.
+Paste back whatever it prints and I'll wire up the right path. My hunch: the best outcome is connecting Playwright to the VM's real browser over CDP — that gives us reliable DOM extraction and network capture (much better than the vision agent) while keeping the anti-detection benefit of the real desktop browser.
