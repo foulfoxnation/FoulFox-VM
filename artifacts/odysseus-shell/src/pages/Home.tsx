@@ -13,6 +13,7 @@ import { OsPicker } from "@/components/OsPicker";
 import { DownloadTab } from "@/components/DownloadTab";
 import { BrowserTab } from "@/components/BrowserTab";
 import { DevicesTab } from "@/components/DevicesTab";
+import { AppsTab } from "@/components/AppsTab";
 import foxLogo from "@assets/FoxQuest_Logo_1781378611335.png";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { useShellToken } from "@/hooks/use-shell-token";
@@ -31,6 +32,7 @@ import {
   Disc3,
   Globe,
   Plug,
+  Boxes,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -214,6 +216,14 @@ export default function Home() {
               <Plug className="mr-2 h-4 w-4" />
               Devices
             </TabsTrigger>
+            <TabsTrigger
+              value="apps"
+              className={TAB_TRIGGER}
+              data-testid="tab-apps"
+            >
+              <Boxes className="mr-2 h-4 w-4" />
+              Apps
+            </TabsTrigger>
 
             {vms.map((vm) => {
               const Icon = OS_ICON[vm.osKind] ?? Monitor;
@@ -339,6 +349,9 @@ export default function Home() {
             </Body>
             <Body show={activeTab === "devices"}>
               <DevicesTab />
+            </Body>
+            <Body show={activeTab === "apps"}>
+              <AppsTab />
             </Body>
             {vms.map((vm) => (
               <Body key={vm.id} show={activeTab === `vm:${vm.id}`}>

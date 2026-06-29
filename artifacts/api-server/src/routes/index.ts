@@ -14,6 +14,7 @@ import bluetoothRouter from "./bluetooth";
 import localModelRouter from "./local-model";
 import storageSetupRouter from "./storage-setup";
 import setupHealRouter from "./setup-heal";
+import appsRouter from "./apps";
 
 const router: IRouter = Router();
 
@@ -30,6 +31,7 @@ router.use(bluetoothRouter);
 router.use(localModelRouter);
 router.use(storageSetupRouter);
 router.use(setupHealRouter);
+router.use(appsRouter);
 router.use(odysseusLifecycleRouter);
 router.use(odysseusProxyRouter);
 

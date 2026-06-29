@@ -7,6 +7,7 @@
 - [Odysseus service tests](odysseus-service-tests.md) — run pytest from artifacts/odysseus-service with DATABASE_URL=sqlite:///:memory: (workspace Postgres has no psycopg2); needs pytest-asyncio.
 - [Static-testing odysseus tools](odysseus-static-tool-tests.md) — stub sys.modules['core'] + monkeypatch VM bridges to exercise do_* fns without booting the service (no KVM).
 - [api-server typecheck](api-server-typecheck.md) — cold `tsc -p` times out building project refs; build `@workspace/db`+`@workspace/api-zod` with `tsc -b` first.
+- [api-server route params](api-server-route-params.md) — `req.params.x` is typed `string | string[]` here; narrow with a type guard or normalize before passing to `string` params.
 - [FoulFox VM agent access](foulfox-vm-agent-access.md) — per-VM ed25519 SSH key auth (use `-l`+validation, key-only, health requires key mode); dev host has no KVM so guests can't boot-test.
 - [FoulFox agent-in-VM reality](foulfox-agent-vm-reality.md) — agent VM exec auth NOT wired (no key/sshpass, sshPassword cosmetic); live launcher emits VNC not SPICE (appliance viewer broken); foulfox user not in sudo.
 - [FoulFox rebrand load-bearing](foulfox-rebrand-load-bearing.md) — rename brand in frontends only; DON'T rename email reminder subject/TOTP issuer/MCP client_name (matched by external systems/existing data).

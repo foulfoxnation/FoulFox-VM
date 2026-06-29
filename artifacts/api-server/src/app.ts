@@ -153,6 +153,11 @@ app.use("/api/local-model", localhostOnly, requireStateChangeToken);
 // privileged partitioner via sudo).
 app.use("/api/setup", localhostOnly, requireStateChangeToken);
 
+// FoulFox App fetch/install: localhost only. requireStateChangeToken lets the
+// read-only GETs (list / install status / logs) through while requiring the
+// shell token for the state-changing install (POST) and uninstall (DELETE).
+app.use("/api/apps", localhostOnly, requireStateChangeToken);
+
 // Shell session token endpoint — localhost only so remote callers can't obtain it
 app.get("/api/shell/session-token", localhostOnly, (_req, res) => {
   res.json({ token: SHELL_SESSION_TOKEN });
