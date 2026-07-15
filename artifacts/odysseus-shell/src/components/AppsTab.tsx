@@ -3,6 +3,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useApps,
   useInstallApp,
+  useInstallZip,
+  useInstallFromPath,
+  useDrives,
+  useDirectory,
   useInstallJob,
   useUninstallApp,
   APPS_KEY,
@@ -34,10 +38,17 @@ import {
   CheckCircle2,
   ExternalLink,
   FileText,
+  Upload,
+  Usb,
+  Folder,
+  FileArchive,
+  ArrowLeft,
+  RefreshCw,
 } from "lucide-react";
 
 const PHASE_LABEL: Record<InstallPhase, string> = {
   cloning: "Cloning repository…",
+  extracting: "Extracting zip…",
   parsing: "Reading foxapp.json…",
   installing: "Running install…",
   building: "Building…",
@@ -56,10 +67,21 @@ export function AppsTab() {
   const install = useInstallApp();
   const qc = useQueryClient();
 
+  const installZip = useInstallZip();
+  const installFromPath = useInstallFromPath();
+
   const [repoUrl, setRepoUrl] = useState("");
   const [jobId, setJobId] = useState<string | null>(null);
   const { data: job } = useInstallJob(jobId);
   const logRef = useRef<HTMLPreElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Flash-drive picker state: null = closed; otherwise the directory shown.
+  const [drivePath, setDrivePath] = useState<string | null>(null);
+  const [driveOpen, setDriveOpen] = useState(false);
+  const { data: drives = [], isLoading: drivesLoading, refetch: refetchDrives } =
+    useDrives(driveOpen, token);
+  const { data: dirListing, isLoading: dirLoading } = useDirectory(drivePath, token);
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -72,7 +94,12 @@ export function AppsTab() {
   }, [job?.phase, qc]);
 
   const installing = !!job && job.phase !== "done" && job.phase !== "error";
-  const busy = install.isPending || installing;
+  const busy =
+    install.isPending || installZip.isPending || installFromPath.isPending || installing;
+  const startError =
+    (install.error as Error | null) ??
+    (installZip.error as Error | null) ??
+    (installFromPath.error as Error | null);
 
   const onInstall = () => {
     const url = repoUrl.trim();
@@ -80,6 +107,29 @@ export function AppsTab() {
     install.mutate(
       { repoUrl: url, capabilities: ALL_CAPABILITIES },
       { onSuccess: (r) => setJobId(r.jobId) },
+    );
+  };
+
+  const onZipPicked = (file: File | null) => {
+    if (!file || busy) return;
+    installZip.mutate(
+      { file, capabilities: ALL_CAPABILITIES },
+      { onSuccess: (r) => setJobId(r.jobId) },
+    );
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const onDriveZip = (path: string) => {
+    if (busy) return;
+    installFromPath.mutate(
+      { path, capabilities: ALL_CAPABILITIES },
+      {
+        onSuccess: (r) => {
+          setJobId(r.jobId);
+          setDriveOpen(false);
+          setDrivePath(null);
+        },
+      },
     );
   };
 
@@ -132,14 +182,171 @@ export function AppsTab() {
               </Button>
             </div>
 
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">or install from</span>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".zip,application/zip"
+                className="hidden"
+                onChange={(e) => onZipPicked(e.target.files?.[0] ?? null)}
+                data-testid="input-app-zip"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy || !token}
+                onClick={() => fileRef.current?.click()}
+                data-testid="button-upload-zip"
+              >
+                <Upload className="mr-2 h-4 w-4" /> Zip file
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy || !token}
+                onClick={() => {
+                  setDriveOpen((v) => !v);
+                  setDrivePath(null);
+                }}
+                data-testid="button-flash-drive"
+              >
+                <Usb className="mr-2 h-4 w-4" /> Flash drive
+              </Button>
+            </div>
+
+            {driveOpen && (
+              <div className="rounded-md border bg-muted/30 p-3" data-testid="panel-flash-drive">
+                {drivePath === null ? (
+                  <>
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        Plugged-in drives
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => refetchDrives()}
+                      >
+                        <RefreshCw className="mr-1 h-3 w-3" /> Refresh
+                      </Button>
+                    </div>
+                    {drivesLoading ? (
+                      <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Looking for drives…
+                      </div>
+                    ) : drives.length === 0 ? (
+                      <p className="py-2 text-xs text-muted-foreground">
+                        No drives found. Plug in a USB flash drive with your app&apos;s
+                        .zip on it — it should appear here within a few seconds.
+                      </p>
+                    ) : (
+                      <div className="space-y-1">
+                        {drives.map((d) => (
+                          <button
+                            key={d.path}
+                            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+                            onClick={() => setDrivePath(d.path)}
+                            data-testid={`drive-${d.name}`}
+                          >
+                            <Usb className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-medium">{d.label || d.name}</span>
+                            <span className="ml-auto text-xs text-muted-foreground">
+                              {d.fsType ?? ""}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="mb-2 flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() =>
+                          setDrivePath(
+                            dirListing?.parent &&
+                              drives.some((d) => dirListing.path.startsWith(d.path)) &&
+                              !drives.some((d) => d.path === dirListing.path)
+                              ? dirListing.parent
+                              : null,
+                          )
+                        }
+                      >
+                        <ArrowLeft className="mr-1 h-3 w-3" /> Back
+                      </Button>
+                      <span className="truncate text-xs text-muted-foreground">
+                        {dirListing?.path ?? drivePath}
+                      </span>
+                    </div>
+                    {dirLoading ? (
+                      <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Reading…
+                      </div>
+                    ) : (
+                      <div className="max-h-56 space-y-1 overflow-auto">
+                        {(dirListing?.entries ?? [])
+                          .filter(
+                            (e) =>
+                              e.type === "directory" ||
+                              (e.type === "file" && /\.zip$/i.test(e.name)),
+                          )
+                          .map((e) =>
+                            e.type === "directory" ? (
+                              <button
+                                key={e.path}
+                                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+                                onClick={() => setDrivePath(e.path)}
+                              >
+                                <Folder className="h-4 w-4 text-muted-foreground" />
+                                {e.name}
+                              </button>
+                            ) : (
+                              <button
+                                key={e.path}
+                                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+                                onClick={() => onDriveZip(e.path)}
+                                data-testid={`zip-${e.name}`}
+                              >
+                                <FileArchive className="h-4 w-4 text-primary" />
+                                <span className="font-medium">{e.name}</span>
+                                {e.sizeBytes != null && (
+                                  <span className="ml-auto text-xs text-muted-foreground">
+                                    {(e.sizeBytes / (1024 * 1024)).toFixed(1)} MB
+                                  </span>
+                                )}
+                              </button>
+                            ),
+                          )}
+                        {dirListing &&
+                          dirListing.entries.filter(
+                            (e) =>
+                              e.type === "directory" ||
+                              (e.type === "file" && /\.zip$/i.test(e.name)),
+                          ).length === 0 && (
+                            <p className="py-2 text-xs text-muted-foreground">
+                              No folders or .zip files here.
+                            </p>
+                          )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
             {!token && (
               <p className="text-xs text-amber-500">
                 Waiting for a shell session token before installs can run…
               </p>
             )}
-            {install.isError && (
+            {startError && (
               <p className="text-xs text-destructive">
-                {(install.error as Error)?.message ?? "Install failed to start."}
+                {startError.message ?? "Install failed to start."}
               </p>
             )}
 

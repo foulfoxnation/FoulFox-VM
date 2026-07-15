@@ -39,6 +39,7 @@ import {
 } from "./app-registry";
 
 const CLONE_TIMEOUT_MS = 180_000;
+const UNZIP_TIMEOUT_MS = 180_000;
 const STEP_TIMEOUT_MS = 600_000;
 const LOG_TAIL_BYTES = 256 * 1024; // in-memory tail returned to the poller
 const FILE_CAP_BYTES = 4 * 1024 * 1024; // cap the persisted install.log
@@ -47,11 +48,18 @@ const JOB_TTL_MS = 60 * 60_000;
 
 export type InstallPhase =
   | "cloning"
+  | "extracting"
   | "parsing"
   | "installing"
   | "building"
   | "done"
   | "error";
+
+// Where an install job's source tree comes from: a GitHub clone or an uploaded
+// zip archive already sitting on local disk (the route streams it there).
+export type InstallSource =
+  | { kind: "git"; repoUrl: string }
+  | { kind: "zip"; zipPath: string; fileName: string };
 
 export interface InstallJob {
   jobId: string;
@@ -271,6 +279,18 @@ export function getJob(jobId: string): InstallJob | undefined {
 }
 
 export function startInstall(repoUrl: string, approvedCaps: AppCapability[]): InstallJob {
+  return startInstallJob({ kind: "git", repoUrl }, approvedCaps);
+}
+
+export function startInstallFromZip(
+  zipPath: string,
+  fileName: string,
+  approvedCaps: AppCapability[],
+): InstallJob {
+  return startInstallJob({ kind: "zip", zipPath, fileName }, approvedCaps);
+}
+
+function startInstallJob(source: InstallSource, approvedCaps: AppCapability[]): InstallJob {
   pruneJobs();
   if (active >= MAX_CONCURRENT) {
     throw new Error("Too many installs are running right now — try again in a moment.");
@@ -278,8 +298,8 @@ export function startInstall(repoUrl: string, approvedCaps: AppCapability[]): In
   const jobId = crypto.randomBytes(8).toString("hex");
   const job: InstallJob = {
     jobId,
-    repoUrl,
-    phase: "cloning",
+    repoUrl: source.kind === "git" ? source.repoUrl : `upload:${source.fileName}`,
+    phase: source.kind === "git" ? "cloning" : "extracting",
     appId: null,
     appName: null,
     error: null,
@@ -289,7 +309,7 @@ export function startInstall(repoUrl: string, approvedCaps: AppCapability[]): In
   };
   jobs.set(jobId, job);
   active++;
-  void runInstall(job, approvedCaps)
+  void runInstall(job, source, approvedCaps)
     .catch((err) => logger.error({ err, jobId }, "app install crashed"))
     .finally(() => {
       active = Math.max(0, active - 1);
@@ -297,7 +317,11 @@ export function startInstall(repoUrl: string, approvedCaps: AppCapability[]): In
   return job;
 }
 
-async function runInstall(job: InstallJob, approvedCaps: AppCapability[]): Promise<void> {
+async function runInstall(
+  job: InstallJob,
+  source: InstallSource,
+  approvedCaps: AppCapability[],
+): Promise<void> {
   const log = new InstallLog(job);
   const staging = path.join(STAGING_DIR, job.jobId);
   let lockedId: string | null = null;
@@ -310,24 +334,63 @@ async function runInstall(job: InstallJob, approvedCaps: AppCapability[]): Promi
       /* ignore */
     }
 
-    // ── clone ────────────────────────────────────────────────────────────────
-    job.phase = "cloning";
-    const { cloneUrl } = normalizeGithubUrl(job.repoUrl);
-    log.write(`$ git clone --depth 1 ${cloneUrl}\n`);
-    await runStep(
-      ["git", "clone", "--depth", "1", cloneUrl, staging],
-      STAGING_DIR,
-      cloneEnv(),
-      log,
-      CLONE_TIMEOUT_MS,
-    );
+    // ── fetch: clone the repo, or extract the uploaded zip ────────────────────
+    let sourceLabel: string;
+    let srcRoot = staging; // dir that must contain foxapp.json
+    if (source.kind === "git") {
+      job.phase = "cloning";
+      const { cloneUrl } = normalizeGithubUrl(source.repoUrl);
+      sourceLabel = cloneUrl;
+      log.write(`$ git clone --depth 1 ${cloneUrl}\n`);
+      await runStep(
+        ["git", "clone", "--depth", "1", cloneUrl, staging],
+        STAGING_DIR,
+        cloneEnv(),
+        log,
+        CLONE_TIMEOUT_MS,
+      );
+    } else {
+      job.phase = "extracting";
+      sourceLabel = `upload:${source.fileName}`;
+      fs.mkdirSync(staging, { recursive: true });
+      log.write(`$ unzip -q ${source.fileName}\n`);
+      // -q quiet, -o overwrite; argv (no shell) and confined to the staging dir.
+      await runStep(
+        ["unzip", "-q", "-o", source.zipPath, "-d", staging],
+        STAGING_DIR,
+        cloneEnv(),
+        log,
+        UNZIP_TIMEOUT_MS,
+      );
+      try {
+        fs.rmSync(source.zipPath, { force: true });
+      } catch {
+        /* ignore */
+      }
+      // Zips made by GitHub ("Download ZIP") or by zipping a folder usually wrap
+      // everything in a single top-level directory — descend into it.
+      if (!fs.existsSync(path.join(staging, "foxapp.json"))) {
+        const entries = fs
+          .readdirSync(staging, { withFileTypes: true })
+          .filter((e) => !e.name.startsWith("__MACOSX"));
+        if (
+          entries.length === 1 &&
+          entries[0].isDirectory() &&
+          fs.existsSync(path.join(staging, entries[0].name, "foxapp.json"))
+        ) {
+          srcRoot = path.join(staging, entries[0].name);
+        }
+      }
+    }
 
     // ── parse + validate manifest ──────────────────────────────────────────────
     job.phase = "parsing";
-    const manifestPath = path.join(staging, "foxapp.json");
+    const manifestPath = path.join(srcRoot, "foxapp.json");
     if (!fs.existsSync(manifestPath)) {
       throw new Error(
-        "This repository has no foxapp.json at its root, so it isn't a FoulFox App.",
+        source.kind === "git"
+          ? "This repository has no foxapp.json at its root, so it isn't a FoulFox App."
+          : "This zip has no foxapp.json at its root (or inside its single top-level folder), so it isn't a FoulFox App.",
       );
     }
     let raw: unknown;
@@ -370,14 +433,19 @@ async function runInstall(job: InstallJob, approvedCaps: AppCapability[]): Promi
       /* ignore */
     }
     try {
-      fs.renameSync(staging, repoDir);
+      fs.renameSync(srcRoot, repoDir);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "EXDEV") {
-        fs.cpSync(staging, repoDir, { recursive: true });
-        fs.rmSync(staging, { recursive: true, force: true });
+        fs.cpSync(srcRoot, repoDir, { recursive: true });
       } else {
         throw err;
       }
+    }
+    // Drop whatever is left of staging (e.g. the emptied zip wrapper dir).
+    try {
+      fs.rmSync(staging, { recursive: true, force: true });
+    } catch {
+      /* ignore */
     }
 
     // Persist the log from here on (flushes the clone/parse preamble too).
@@ -391,7 +459,7 @@ async function runInstall(job: InstallJob, approvedCaps: AppCapability[]): Promi
       version: manifest.version,
       description: manifest.description,
       icon: manifest.icon,
-      repoUrl: cloneUrl,
+      repoUrl: sourceLabel,
       runtime: manifest.runtime,
       capabilities: manifest.capabilities,
       grantedCapabilities: granted,
@@ -446,6 +514,15 @@ async function runInstall(job: InstallJob, approvedCaps: AppCapability[]): Promi
     logger.warn({ jobId: job.jobId, err: message }, "app install failed");
   } finally {
     if (lockedId) installingIds.delete(lockedId);
+    if (source.kind === "zip") {
+      // If extraction failed before the post-unzip cleanup ran, don't orphan
+      // the temp zip in the staging dir.
+      try {
+        fs.rmSync(source.zipPath, { force: true });
+      } catch {
+        /* ignore */
+      }
+    }
     try {
       fs.rmSync(staging, { recursive: true, force: true });
     } catch {

@@ -8,6 +8,7 @@ export const ALL_CAPABILITIES: AppCapability[] = ["agent.task", "vm.computer_use
 
 export type InstallPhase =
   | "cloning"
+  | "extracting"
   | "parsing"
   | "installing"
   | "building"
@@ -76,6 +77,82 @@ export async function startAppInstall(
     method: "POST",
     headers: jsonHeaders(token),
     body: JSON.stringify({ repoUrl, capabilities }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+// Upload a .zip from the browser (raw body = the zip). Capabilities ride in the
+// query string because the body is the file itself.
+export async function startAppZipUpload(
+  file: File,
+  capabilities: AppCapability[],
+  token?: string | null,
+): Promise<{ jobId: string; status: string }> {
+  const params = new URLSearchParams({
+    name: file.name,
+    capabilities: capabilities.join(","),
+  });
+  const headers: Record<string, string> = { "Content-Type": "application/zip" };
+  if (token) headers["X-Shell-Token"] = token;
+  const res = await fetch(apiUrl(`/api/apps/install-zip?${params}`), {
+    method: "POST",
+    headers,
+    body: file,
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+// Install a .zip that is already on this machine (e.g. a plugged-in flash drive).
+export async function startAppFileInstall(
+  path: string,
+  capabilities: AppCapability[],
+  token?: string | null,
+): Promise<{ jobId: string; status: string }> {
+  const res = await fetch(apiUrl("/api/apps/install-file"), {
+    method: "POST",
+    headers: jsonHeaders(token),
+    body: JSON.stringify({ path, capabilities }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+// ── Flash-drive browsing (reuses the host files API) ──────────────────────────
+export interface DriveInfo {
+  name: string;
+  path: string;
+  label: string | null;
+  fsType: string | null;
+  sizeBytes: number | null;
+  removable: boolean;
+}
+
+export interface DirEntry {
+  name: string;
+  path: string;
+  type: "file" | "directory" | "symlink" | "other";
+  sizeBytes: number | null;
+  modifiedMs: number | null;
+}
+
+export interface DirListing {
+  path: string;
+  parent: string | null;
+  entries: DirEntry[];
+}
+
+export async function listDrives(token?: string | null): Promise<DriveInfo[]> {
+  const res = await fetch(apiUrl("/api/files/drives"), { headers: jsonHeaders(token) });
+  if (!res.ok) throw new Error(await parseError(res));
+  const j = await res.json();
+  return Array.isArray(j) ? j : [];
+}
+
+export async function listDirectory(path: string, token?: string | null): Promise<DirListing> {
+  const res = await fetch(apiUrl(`/api/files/list?path=${encodeURIComponent(path)}`), {
+    headers: jsonHeaders(token),
   });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();

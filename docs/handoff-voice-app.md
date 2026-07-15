@@ -103,8 +103,11 @@ curl -s http://127.0.0.1:5055/ | head                                    # UI HT
       error (not a crash) when Ollama is unreachable.
 - [ ] UI works inside an iframe without `allow-same-origin`; mic-denied fallback exists.
 - [ ] After first-run model download, the app runs with networking disabled.
-- [ ] Push to GitHub (public, or accessible to the installing machine). Deliverable =
-      the repo URL.
+- [ ] Deliver either way: push to GitHub (deliverable = the repo URL), **or** zip the
+      project (foxapp.json at the zip root, or inside a single top-level folder —
+      "Download ZIP" from GitHub and zipping the project folder both work) and hand
+      over the .zip. FoulFox installs from a pasted repo URL, an uploaded .zip, or a
+      .zip on a plugged-in USB flash drive.
 
 ## 6. Known limitation on the FoulFox side (not your problem, but be aware)
 
