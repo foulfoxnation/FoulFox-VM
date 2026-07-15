@@ -9,14 +9,20 @@ import {
   useDirectory,
   useInstallJob,
   useUninstallApp,
+  useStartApp,
+  useStopApp,
   APPS_KEY,
 } from "@/hooks/use-apps";
 import {
   ALL_CAPABILITIES,
   fetchAppLogs,
+  fetchRunLog,
+  appUiUrl,
+  fetchAppUiBase,
   type AppCapability,
   type InstalledApp,
   type InstallPhase,
+  type RunPhase,
 } from "@/lib/apps-api";
 import { useShellToken } from "@/hooks/use-shell-token";
 import { Button } from "@/components/ui/button";
@@ -44,6 +50,11 @@ import {
   FileArchive,
   ArrowLeft,
   RefreshCw,
+  Play,
+  Square,
+  Monitor,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 const PHASE_LABEL: Record<InstallPhase, string> = {
@@ -428,11 +439,37 @@ function StatusBadge({ status }: { status: InstalledApp["status"] }) {
   return <Badge variant="destructive">Error</Badge>;
 }
 
+const RUN_BADGE: Record<RunPhase, { label: string; cls: string }> = {
+  stopped: { label: "Stopped", cls: "text-muted-foreground" },
+  starting: { label: "Starting…", cls: "text-amber-500" },
+  running: { label: "Running", cls: "text-green-500" },
+  crashed: { label: "Crashed — restarting", cls: "text-destructive" },
+};
+
 function AppCard({ app, token }: { app: InstalledApp; token?: string | null }) {
-  void token;
   const uninstall = useUninstallApp();
+  const start = useStartApp();
+  const stop = useStopApp();
   const [logs, setLogs] = useState<string | null>(null);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [windowOpen, setWindowOpen] = useState(true);
+  // Where to embed the app UI from: a dedicated loopback origin on the
+  // appliance (privilege separation), null in dev (same-origin, opaque sandbox).
+  const [uiBase, setUiBase] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchAppUiBase().then((b) => {
+      if (alive) setUiBase(b);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const phase = app.run?.phase ?? "stopped";
+  const isUp = phase === "running" || phase === "starting";
+  const runBusy = start.isPending || stop.isPending;
+  const runError = (start.error as Error | null) ?? (stop.error as Error | null);
 
   const toggleLogs = async () => {
     if (logs !== null) {
@@ -441,7 +478,9 @@ function AppCard({ app, token }: { app: InstalledApp; token?: string | null }) {
     }
     setLoadingLogs(true);
     try {
-      setLogs(await fetchAppLogs(app.id));
+      // Prefer the live runtime log when the app has run; fall back to install log.
+      const runLog = isUp || phase === "crashed" ? await fetchRunLog(app.id) : "";
+      setLogs(runLog || (await fetchAppLogs(app.id)));
     } catch (e) {
       setLogs(`Could not load logs: ${(e as Error).message}`);
     } finally {
@@ -480,6 +519,40 @@ function AppCard({ app, token }: { app: InstalledApp; token?: string | null }) {
             )}
           </div>
           <div className="flex shrink-0 gap-1">
+            {app.status === "installed" &&
+              (isUp ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-xs"
+                  onClick={() => stop.mutate(app.id)}
+                  disabled={runBusy || !token}
+                  title="Stop app"
+                  data-testid={`button-stop-app-${app.id}`}
+                >
+                  {stop.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Square className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-xs"
+                  onClick={() => start.mutate(app.id)}
+                  disabled={runBusy || !token}
+                  title="Start app"
+                  data-testid={`button-start-app-${app.id}`}
+                >
+                  {start.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Play className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              ))}
             <Button
               variant="ghost"
               size="sm"
@@ -505,6 +578,45 @@ function AppCard({ app, token }: { app: InstalledApp; token?: string | null }) {
             </Button>
           </div>
         </div>
+
+        {app.status === "installed" && (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span
+              className={`inline-flex items-center gap-1.5 font-medium ${RUN_BADGE[phase].cls}`}
+              data-testid={`text-run-phase-${app.id}`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  phase === "running"
+                    ? "bg-green-500"
+                    : phase === "starting"
+                      ? "bg-amber-500 animate-pulse"
+                      : phase === "crashed"
+                        ? "bg-destructive"
+                        : "bg-zinc-500"
+                }`}
+              />
+              {RUN_BADGE[phase].label}
+            </span>
+            {app.autostart && (
+              <Badge variant="outline" className="text-[10px]">
+                Autostart
+              </Badge>
+            )}
+            {app.run?.restarts > 0 && (
+              <span className="text-muted-foreground">
+                restarts: {app.run.restarts}
+              </span>
+            )}
+            {phase === "crashed" && app.run?.lastExit && (
+              <span className="text-muted-foreground">({app.run.lastExit})</span>
+            )}
+          </div>
+        )}
+
+        {runError && (
+          <p className="text-xs text-destructive">{runError.message}</p>
+        )}
 
         {app.status === "error" && app.error && (
           <p className="whitespace-pre-wrap rounded bg-destructive/10 p-2 text-xs text-destructive">
@@ -543,6 +655,56 @@ function AppCard({ app, token }: { app: InstalledApp; token?: string | null }) {
           >
             {logs || "(no log output)"}
           </pre>
+        )}
+
+        {/* App window: mounted the entire time the app is up (even while the
+            panel is collapsed or another shell tab is shown) so a voice app's
+            microphone session and audio playback are never torn down. */}
+        {app.hasWindow && isUp && (
+          <div className="overflow-hidden rounded-md border">
+            <button
+              className="flex w-full items-center gap-2 bg-muted/40 px-3 py-1.5 text-xs font-medium hover:bg-muted"
+              onClick={() => setWindowOpen((v) => !v)}
+              data-testid={`button-toggle-window-${app.id}`}
+            >
+              <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
+              {app.window?.title || app.name}
+              {windowOpen ? (
+                <ChevronUp className="ml-auto h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown className="ml-auto h-3.5 w-3.5" />
+              )}
+            </button>
+            <div
+              className={windowOpen ? "bg-background" : "h-0 overflow-hidden"}
+              style={
+                windowOpen
+                  ? { height: Math.min(app.window?.height ?? 480, 640) }
+                  : undefined
+              }
+            >
+              <iframe
+                src={appUiUrl(app.id, uiBase)}
+                title={app.window?.title || app.name}
+                className="h-full w-full border-0"
+                // Hands-free voice needs a live mic + gesture-free audio inside
+                // the embed. On the appliance, app UIs come from a DEDICATED
+                // loopback origin (uiBase) so allow-same-origin is safe: app JS
+                // is same-origin only with the UI-proxy server, never with the
+                // shell API (it cannot read the shell session token). In dev
+                // there is no second origin, so the same-origin path is used
+                // WITHOUT allow-same-origin (opaque origin — mic is a
+                // hardware/appliance concern anyway).
+                sandbox={
+                  uiBase
+                    ? "allow-scripts allow-same-origin allow-forms"
+                    : "allow-scripts allow-forms"
+                }
+                allow="microphone; camera; autoplay; speaker-selection"
+                data-testid={`iframe-app-${app.id}`}
+              />
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>

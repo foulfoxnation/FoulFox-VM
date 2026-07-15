@@ -67,6 +67,7 @@ exposeLocalhost = true
 [[ports]]
 localPort = 8081
 externalPort = 80
+exposeLocalhost = true
 
 [[ports]]
 localPort = 8082
@@ -84,3 +85,6 @@ packages = ["cargo", "libiconv", "libxcrypt", "openssl", "pkg-config", "rustc"]
 
 [userenv.shared]
 FOULFOX_GITHUB_REPO = "foulfoxnation/FoulFox-VM"
+
+[userenv.development]
+ODYSSEUS_INTERNAL_TOKEN = "fa07fc38435e0942d1da135b3dfd9c11a7dfd34d98680420baf3e62866c281bb"

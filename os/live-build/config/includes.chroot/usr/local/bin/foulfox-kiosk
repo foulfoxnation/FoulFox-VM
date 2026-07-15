@@ -25,6 +25,10 @@ while [ "$i" -lt 60 ]; do
   sleep 1
 done
 
+# Hands-free voice apps: no gesture requirement for audio playback. The mic
+# grant itself comes from the managed policy in
+# /etc/chromium/policies/managed/foulfox-media.json (AudioCaptureAllowedUrls),
+# which auto-allows getUserMedia for the local shell origin without a prompt.
 exec chromium \
   --kiosk \
   --no-first-run \
@@ -34,4 +38,5 @@ exec chromium \
   --disable-session-crashed-bubble \
   --check-for-update-interval=31536000 \
   --password-store=basic \
+  --autoplay-policy=no-user-gesture-required \
   "$url"

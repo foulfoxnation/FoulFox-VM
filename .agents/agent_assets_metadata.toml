@@ -11,7 +11,7 @@ title = "Cloud Ollama Handoff (plan + code for the new Repl)"
 id = "VcialBagKVRzdDjNbmFqN"
 uri = "file://docs/foulfox-app-spec.md"
 type = "text"
-title = "FoulFox App Spec (attach alongside)"
+title = "FoulFox App Spec (binding contract for VoiceForge)"
 
 [[outputs]]
 id = "HjOHWzPWN_Ss4BQdBLSPa"

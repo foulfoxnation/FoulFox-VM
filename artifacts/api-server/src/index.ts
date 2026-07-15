@@ -1,10 +1,13 @@
 import http from "http";
+import express, { type Request, type Response, type NextFunction } from "express";
 import app from "./app";
 import { logger } from "./lib/logger";
+import appUiRouter from "./routes/app-ui";
 import { createShellWss } from "./routes/shell";
 import { ensureDefaultVm } from "./lib/vm-registry";
 import { reconcileOrphans } from "./lib/vm-launch";
 import { createDisplayWss } from "./lib/vm-display";
+import { autostartApps } from "./lib/app-runner";
 
 const rawPort = process.env["PORT"];
 
@@ -49,9 +52,52 @@ const host = process.env["HOST"] ?? "127.0.0.1";
 
 server.listen(port, host, () => {
   logger.info({ port, host }, "Server listening");
+  // Launch installed apps marked autostart:true (e.g. the hands-free voice
+  // agent) so they are live at login without any interaction.
+  try {
+    autostartApps();
+  } catch (err) {
+    logger.error({ err }, "App autostart failed");
+  }
 });
 
 server.on("error", (err) => {
   logger.error({ err }, "Server error");
   process.exit(1);
 });
+
+// ── Dedicated app-UI origin (privilege separation) ────────────────────────────
+// On the appliance the shell embeds installed-app UIs from this SEPARATE
+// loopback origin (http://127.0.0.1:<APP_UI_PORT>) instead of the shell origin.
+// The iframe keeps allow-same-origin (so mic/getUserMedia works via the kiosk
+// policy for this origin) but app JS is same-origin only with THIS server,
+// which serves nothing except the UI proxy — it cannot read the shell session
+// token or call any token-gated shell API cross-origin. Only started in
+// appliance mode (SERVE_SHELL_STATIC); the Replit dev preview can't reach a
+// second port, so dev uses the same-origin path with an opaque-sandbox iframe.
+if (process.env["SERVE_SHELL_STATIC"]) {
+  const appUiPort = Number(process.env["APP_UI_PORT"] ?? "8081");
+  const appUiApp = express();
+  appUiApp.use((req: Request, res: Response, next: NextFunction) => {
+    const remoteAddr = req.socket.remoteAddress;
+    const isLocal =
+      remoteAddr === "127.0.0.1" ||
+      remoteAddr === "::1" ||
+      remoteAddr === "::ffff:127.0.0.1";
+    if (!isLocal) {
+      res.status(403).json({ error: "Only accessible from localhost" });
+      return;
+    }
+    next();
+  });
+  // Same mount path as the dev same-origin route so the proxy's prefix
+  // rewriting and runtime shim work unchanged.
+  appUiApp.use("/api/apps", appUiRouter);
+  appUiApp
+    .listen(appUiPort, "127.0.0.1", () => {
+      logger.info({ appUiPort }, "App UI origin listening");
+    })
+    .on("error", (err) => {
+      logger.error({ err, appUiPort }, "App UI origin failed to start");
+    });
+}

@@ -6,6 +6,8 @@ import fs from "fs";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { SHELL_SESSION_TOKEN } from "./lib/shell-token";
+import appUiRouter from "./routes/app-ui";
+import appBrokerRouter from "./routes/app-broker";
 
 const app: Express = express();
 
@@ -31,9 +33,15 @@ const localCors = cors({
   // whose scripts run with Origin: null, and such a page must never be able to
   // read a loopback API response (e.g. the shell session token) cross-origin.
   origin: (origin, cb) => {
+    // The dedicated app-UI origin (APP_UI_PORT, appliance mode) is explicitly
+    // excluded: installed-app JS runs there and must not be able to CORS-read
+    // any shell API response — the origin split exists precisely so apps and
+    // the shell share no readable surface.
+    const appUiPort = process.env["APP_UI_PORT"] ?? "8081";
     if (
       !origin ||
-      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+      (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) &&
+        !origin.endsWith(`:${appUiPort}`))
     ) {
       cb(null, true);
     } else {
@@ -153,9 +161,45 @@ app.use("/api/local-model", localhostOnly, requireStateChangeToken);
 // privileged partitioner via sudo).
 app.use("/api/setup", localhostOnly, requireStateChangeToken);
 
-// FoulFox App fetch/install: localhost only. requireStateChangeToken lets the
-// read-only GETs (list / install status / logs) through while requiring the
-// shell token for the state-changing install (POST) and uninstall (DELETE).
+// FoulFox App UI proxy: localhost only, NO shell token — an iframe navigation
+// and its subresources can't carry custom headers. It can only reach a running
+// app's own loopback server; the broker token never transits this path. Mounted
+// before express.json() so request bodies stream through untouched.
+//
+// SECURITY: on the appliance (SERVE_SHELL_STATIC set) app UIs are served ONLY
+// from the dedicated loopback origin (see appUiApp in index.ts / APP_UI_PORT),
+// never from the shell origin. If untrusted app JS ran same-origin with the
+// shell it could read /api/shell/session-token and escalate to every
+// token-gated endpoint. In the Replit dev workspace there is no second
+// reachable origin, so the same-origin mount stays — but the shell then embeds
+// it WITHOUT allow-same-origin (opaque origin), which blocks that read.
+const APP_UI_SEPARATE_ORIGIN = !!process.env["SERVE_SHELL_STATIC"];
+if (!APP_UI_SEPARATE_ORIGIN) {
+  app.use("/api/apps", localhostOnly, appUiRouter);
+}
+
+// Tells the shell where to embed app UIs from: a distinct loopback origin on
+// the appliance (privilege separation), or null in dev (same-origin path with
+// an opaque-sandboxed iframe).
+app.get("/api/apps/ui-base", localhostOnly, (_req, res) => {
+  res.json({
+    base: APP_UI_SEPARATE_ORIGIN
+      ? `http://127.0.0.1:${process.env["APP_UI_PORT"] ?? "8081"}`
+      : null,
+  });
+});
+
+// FoulFox App broker (spec §5): localhost only, authenticated by each app's
+// per-boot bearer token (Authorization header), NOT the shell token — the
+// caller is the app's backend process, not the browser. Capability checks are
+// enforced inside the router. Needs its own json() since it precedes the
+// global body parsers.
+app.use("/api/apps", localhostOnly, express.json(), appBrokerRouter);
+
+// FoulFox App fetch/install/runtime: localhost only. requireStateChangeToken
+// lets the read-only GETs (list / install status / logs / run status) through
+// while requiring the shell token for state changes (install, start/stop,
+// uninstall).
 app.use("/api/apps", localhostOnly, requireStateChangeToken);
 
 // Shell session token endpoint — localhost only so remote callers can't obtain it

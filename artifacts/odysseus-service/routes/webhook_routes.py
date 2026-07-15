@@ -233,11 +233,24 @@ def setup_webhook_routes(
 
     @router.post("/v1/chat")
     async def sync_chat(request: Request, body: SyncChatRequest):
-        if not getattr(request.state, "api_token", False):
-            raise HTTPException(403, "This endpoint requires an API token")
-        scopes = set(getattr(request.state, "api_token_scopes", []) or [])
-        if "chat" not in scopes:
-            raise HTTPException(403, "API token is not scoped for chat")
+        # Loopback OS callers (the FoulFox app broker in the api-server) carry
+        # the internal-tool token instead of a user API token. The auth
+        # middleware stamps them current_user="internal-tool"; treat that as a
+        # fully trusted chat caller — the token never leaves the machine and is
+        # stripped from app processes, so only OS components can present it.
+        from core.middleware import INTERNAL_TOOL_HEADER, INTERNAL_TOOL_TOKEN
+        import secrets as _secrets
+        _hdr = request.headers.get(INTERNAL_TOOL_HEADER)
+        is_internal = (
+            getattr(request.state, "current_user", None) == "internal-tool"
+            or (_hdr and _secrets.compare_digest(_hdr, INTERNAL_TOOL_TOKEN))
+        )
+        if not is_internal:
+            if not getattr(request.state, "api_token", False):
+                raise HTTPException(403, "This endpoint requires an API token")
+            scopes = set(getattr(request.state, "api_token_scopes", []) or [])
+            if "chat" not in scopes:
+                raise HTTPException(403, "API token is not scoped for chat")
         token_owner = getattr(request.state, "api_token_owner", None)
 
         from core.models import ChatMessage

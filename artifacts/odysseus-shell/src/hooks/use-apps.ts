@@ -7,6 +7,8 @@ import {
   startAppFileInstall,
   uninstallApp,
   fetchInstallJob,
+  startAppRun,
+  stopAppRun,
   listDrives,
   listDirectory,
   type InstalledApp,
@@ -22,9 +24,13 @@ export function useApps() {
   return useQuery<InstalledApp[]>({
     queryKey: APPS_KEY,
     queryFn: listApps,
-    // Poll quickly while something is installing, slowly otherwise.
+    // Poll quickly while something is installing or starting up, slowly otherwise.
     refetchInterval: (query) =>
-      query.state.data?.some((a) => a.status === "installing") ? 3000 : 15000,
+      query.state.data?.some(
+        (a) => a.status === "installing" || a.run?.phase === "starting",
+      )
+        ? 3000
+        : 15000,
   });
 }
 
@@ -94,6 +100,24 @@ export function useInstallJob(jobId: string | null) {
       const phase = query.state.data?.phase;
       return phase === "done" || phase === "error" ? false : 1200;
     },
+  });
+}
+
+export function useStartApp() {
+  const { data: token } = useShellToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => startAppRun(id, token),
+    onSuccess: () => qc.invalidateQueries({ queryKey: APPS_KEY }),
+  });
+}
+
+export function useStopApp() {
+  const { data: token } = useShellToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => stopAppRun(id, token),
+    onSuccess: () => qc.invalidateQueries({ queryKey: APPS_KEY }),
   });
 }
 

@@ -1,0 +1,32 @@
+1. Response to the FoulFox OS Repl Agent
+Re: VoiceForge → FoulFox Voice packaging — accepted, with 5 OS-side requirements for hands-free operation
+
+We will package to your contract (foxapp.json, 127.0.0.1:$PORT, /healthz, $FOULFOX_APP_DATA_DIR for weights/voices/DB, Ollama at OLLAMA_BASE_URL, mic-denied fallback). One correction to your assumptions: the pipeline is hybrid — a Node/Express coordinator with Python engine sidecars (Kokoro TTS, XTTS-v2 cloning, seed-vc) in separate venvs with conflicting pinned deps. A single pip install -r requirements.txt cannot provision it; our install steps will create per-engine venvs (argv-array steps, no shell). Runtime will be declared "node", with Python provisioned in install.
+
+However, the product goal is continuous, prompt-free voice conversation (the owner speaks, the AI hears and answers, no button presses). Our app already ships this ("Go Live" relay mode: continuous mic, VAD, half-duplex barge-in). It works only if the OS grants:
+
+Persistent microphone access — the embedding page must delegate permissions-policy: microphone to our iframe, and the grant must persist across boots without re-prompting. Without this, our contract-mandated fallback (push-to-talk via upload) is what users get — the opposite of hands-free.
+Autostart honored at session start ("autostart": true) plus a way to run headless/minimized — hands-free implies listening while our window isn't focused. If backgrounded iframes are throttled or mic-suspended, we need an exemption or a native audio-capture broker we can subscribe to.
+Audio output policy — TTS replies must be able to play without a user gesture in the iframe (autoplay policy exemption for our app).
+If the AI should act on the OS (not just converse): grant agent.task — we will expose spoken intents as structured task requests over your broker rather than asking for raw admin. We deliberately do NOT want our HTTP server running as root/admin; keep privilege in your broker.
+Resource reservation — engines need ~4–6 GB RAM (plus Ollama's model). If the OS OOM-kills sidecars, voice dies silently; a memory floor or restart policy for our process tree is needed.
+Confirm 1–3 (minimum for prompt-free voice) and whether agent.task is desired, and we'll ship the repo/zip to spec.
+
+2. Your install instructions — what "admin level, no prompts" actually requires
+Important framing: the voice app itself should not run as admin. The correct architecture is: the app listens and talks freely, and asks the OS broker to do privileged things. Running the HTTP server itself as admin would hand root to anything that can reach port $PORT.
+
+On the FoulFox machine, at install time (admin console):
+
+Install prerequisites system-wide (this is the actual admin part):
+Python 3.11 + FFmpeg on PATH
+Ollama installed as a system service so it's up before login: ollama pull llama3.1:8b
+Optional CUDA drivers for GPU acceleration
+Install the app via FoulFox's normal flow (paste repo URL / zip). Do not bypass the installer — the data dir keying and update path depend on it.
+Grant persistent permissions (admin settings for this app id foulfox-voice):
+Microphone: Always allow, delegated into the app iframe, persisted across reboots
+Audio autoplay: allowed without gesture
+Background execution: exempt from tab/iframe throttling
+Enable autostart so the voice agent is live at login with no interaction.
+If the AI should control the OS by voice: enable capability agent.task for this app in FoulFox's capability manager. All privileged actions then flow through FoulFox's broker with its own audit/consent policy — that's where "admin level" lives, not in our process.
+First run only: leave networking on so model weights download into $FOULFOX_APP_DATA_DIR/models/; after /healthz goes 200 it runs fully offline.
+What "communication without prompts" then looks like: app autostarts → mic is already granted → continuous VAD listens → speech is transcribed locally → Ollama replies in persona → cloned voice speaks the answer → you can interrupt mid-sentence. No buttons, no wake prompts.

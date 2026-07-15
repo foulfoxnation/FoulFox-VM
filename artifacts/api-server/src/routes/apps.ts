@@ -20,6 +20,13 @@ import {
 } from "../lib/app-registry";
 import { startInstall, startInstallFromZip, getJob } from "../lib/app-installer";
 import { ALLOWED_CAPABILITIES, type AppCapability } from "../lib/app-manifest";
+import {
+  startApp,
+  stopApp,
+  runSummary,
+  runLog,
+  forgetApp,
+} from "../lib/app-runner";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -47,6 +54,8 @@ function summarize(a: AppRecord) {
     uiPath: a.manifest.uiPath,
     hasWindow: !!a.manifest.window,
     autostart: a.manifest.autostart,
+    window: a.manifest.window,
+    run: runSummary(a.id),
     createdAt: a.createdAt,
     installedAt: a.installedAt,
     updatedAt: a.updatedAt,
@@ -263,6 +272,50 @@ router.get("/apps/:id/logs", (req: Request, res: Response) => {
   }
 });
 
+// POST /apps/:id/start — launch the app's backend (runtime contract env,
+// health polling, crash restarts). Idempotent if already running.
+router.post("/apps/:id/start", (req: Request, res: Response) => {
+  const id = pathParam(req.params.id);
+  startApp(id)
+    .then(() => res.json({ ok: true, run: runSummary(id) }))
+    .catch((err) => {
+      res
+        .status(409)
+        .json({ error: err instanceof Error ? err.message : "Could not start the app." });
+    });
+});
+
+// POST /apps/:id/stop — graceful SIGTERM then SIGKILL after a grace period.
+router.post("/apps/:id/stop", (req: Request, res: Response) => {
+  const id = pathParam(req.params.id);
+  if (!getApp(id)) {
+    res.status(404).json({ error: "No such app." });
+    return;
+  }
+  stopApp(id);
+  res.json({ ok: true, run: runSummary(id) });
+});
+
+// GET /apps/:id/run — live runtime status.
+router.get("/apps/:id/run", (req: Request, res: Response) => {
+  const id = pathParam(req.params.id);
+  if (!getApp(id)) {
+    res.status(404).json({ error: "No such app." });
+    return;
+  }
+  res.json(runSummary(id));
+});
+
+// GET /apps/:id/run-log — recent stdout/stderr of the running app.
+router.get("/apps/:id/run-log", (req: Request, res: Response) => {
+  const id = pathParam(req.params.id);
+  if (!getApp(id)) {
+    res.status(404).json({ error: "No such app." });
+    return;
+  }
+  res.type("text/plain").send(runLog(id));
+});
+
 // GET /apps/:id — a single app summary.
 router.get("/apps/:id", (req: Request, res: Response) => {
   const a = getApp(pathParam(req.params.id));
@@ -281,6 +334,7 @@ router.delete("/apps/:id", (req: Request, res: Response) => {
     res.status(404).json({ error: "No such app." });
     return;
   }
+  forgetApp(id); // stop the running process (if any) before removing files
   deleteApp(id);
   try {
     fs.rmSync(appDir(id), { recursive: true, force: true });

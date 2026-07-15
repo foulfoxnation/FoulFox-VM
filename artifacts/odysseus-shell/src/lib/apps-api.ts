@@ -15,6 +15,25 @@ export type InstallPhase =
   | "done"
   | "error";
 
+export type RunPhase = "stopped" | "starting" | "running" | "crashed";
+
+export interface RunSummary {
+  appId: string;
+  phase: RunPhase;
+  pid: number | null;
+  port: number | null;
+  startedAt: number | null;
+  healthyAt: number | null;
+  restarts: number;
+  lastExit: string | null;
+}
+
+export interface AppWindow {
+  title?: string;
+  width?: number;
+  height?: number;
+}
+
 export interface InstalledApp {
   id: string;
   name: string;
@@ -30,6 +49,8 @@ export interface InstalledApp {
   uiPath: string;
   hasWindow: boolean;
   autostart: boolean;
+  window?: AppWindow | null;
+  run: RunSummary;
   createdAt: number;
   installedAt: number | null;
   updatedAt: number;
@@ -171,6 +192,56 @@ export async function uninstallApp(id: string, token?: string | null): Promise<{
   });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
+}
+
+export async function startAppRun(
+  id: string,
+  token?: string | null,
+): Promise<{ ok: boolean; run: RunSummary }> {
+  const res = await fetch(apiUrl(`/api/apps/${encodeURIComponent(id)}/start`), {
+    method: "POST",
+    headers: jsonHeaders(token),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function stopAppRun(
+  id: string,
+  token?: string | null,
+): Promise<{ ok: boolean; run: RunSummary }> {
+  const res = await fetch(apiUrl(`/api/apps/${encodeURIComponent(id)}/stop`), {
+    method: "POST",
+    headers: jsonHeaders(token),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function fetchRunLog(id: string): Promise<string> {
+  const res = await fetch(apiUrl(`/api/apps/${encodeURIComponent(id)}/run-log`));
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.text();
+}
+
+// The proxied UI path the shell embeds in an iframe. On the appliance the
+// server reports a dedicated loopback origin for app UIs (privilege
+// separation: app JS must never be same-origin with the shell API); in dev it
+// reports null and the same-origin path is used with an opaque-sandbox iframe.
+export function appUiUrl(id: string, uiBase: string | null): string {
+  const p = `/api/apps/${encodeURIComponent(id)}/ui/`;
+  return uiBase ? `${uiBase}${p}` : apiUrl(p);
+}
+
+export async function fetchAppUiBase(): Promise<string | null> {
+  try {
+    const res = await fetch(apiUrl("/api/apps/ui-base"));
+    if (!res.ok) return null;
+    const data = (await res.json()) as { base?: string | null };
+    return data.base ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchAppLogs(id: string): Promise<string> {

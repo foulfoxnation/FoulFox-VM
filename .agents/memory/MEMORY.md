@@ -36,3 +36,4 @@
 - [Shell→Python stdin gotcha](shell-python-stdin-heredoc.md) — pipe JSON to `python3 -c`, NOT `python3 - <<EOF` (heredoc steals stdin, pipe is discarded → silent no-op).
 - [In-shell browser proxy security](foulfox-browser-proxy-security.md) — loopback CORS must NEVER allow Origin:null (sandboxed proxy iframe is null-origin); SSRF guard must pin the socket to the validated IP (custom lookup).
 - [Agent-suite endpoint assignment](agent-suite-endpoint-assignment.md) — creating a ModelEndpoint ≠ using it; must provision it to all 3 roles or AI cost stays on the paid default; switch-model UI must call provision itself.
+- [FoulFox app runtime](foulfox-app-runtime.md) — app UIs must live on a separate loopback origin (:8081, appliance) or opaque iframe (dev); never same-origin with shell API; runner start-dedupe + enforced health budget.
