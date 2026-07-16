@@ -57,4 +57,5 @@ systemctl set-default graphical.target
 chmod +x /usr/local/bin/foulfox-first-run \
          /usr/local/bin/foulfox-kiosk \
          /usr/local/bin/foulfox-open-vm-viewer \
+         /usr/local/bin/foulfox-open-browser \
          /usr/local/bin/foulfox-vm-autostart

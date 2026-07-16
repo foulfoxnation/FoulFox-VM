@@ -140,6 +140,7 @@ app.use("/api/os/update", localhostOnly, requireStateChangeToken);
 app.use("/api/browser", localhostOnly);
 app.use("/api/browser/session", requireShellToken);
 app.use("/api/browser/launch", requireShellToken);
+app.use("/api/browser/open", requireShellToken);
 
 // Hardware/peripheral endpoints: localhost only, with requireStateChangeToken
 // letting read-only GETs (capabilities/status/list/scan) through while requiring

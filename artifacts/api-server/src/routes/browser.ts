@@ -322,14 +322,62 @@ router.post("/browser/launch", async (req: Request, res: Response) => {
   }
 });
 
+// ── Standalone browser windows (Task: general web/coding PC use) ─────────────
+// POST /browser/open {browser: "firefox"|"chromium"} — open a normal,
+// decorated, movable browser window over the kiosk via the session-side
+// launcher script. The api-server runs as the same `foulfox` user as the kiosk
+// X session, so the launcher only needs DISPLAY (defaulted to :0 inside the
+// script). Honest failure in dev: no launcher script / no display.
+const OPEN_BROWSER_LAUNCHER = "/usr/local/bin/foulfox-open-browser";
+
+router.post("/browser/open", async (req: Request, res: Response) => {
+  const browser = req.body?.browser === "chromium" ? "chromium" : req.body?.browser === "firefox" ? "firefox" : null;
+  if (!browser) {
+    res.status(400).json({ error: 'Expected {"browser": "firefox" | "chromium"}.' });
+    return;
+  }
+  const { existsSync } = await import("fs");
+  if (!existsSync(OPEN_BROWSER_LAUNCHER)) {
+    res.status(503).json(unavailable("Browser launching is only available on the booted FoulFox OS appliance (no launcher on this machine)."));
+    return;
+  }
+  const binary = browser === "firefox" ? "firefox-esr" : "chromium";
+  if (!(await commandExists(binary))) {
+    res.status(503).json(unavailable(`${browser === "firefox" ? "Firefox" : "Chromium"} is not installed on this machine.`));
+    return;
+  }
+  if (!process.env["DISPLAY"] && !existsSync("/tmp/.X11-unix/X0")) {
+    res.status(503).json(unavailable("No graphical display is running (available on the booted FoulFox OS appliance)."));
+    return;
+  }
+  try {
+    const child = spawn(OPEN_BROWSER_LAUNCHER, [browser], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, DISPLAY: process.env["DISPLAY"] ?? ":0" },
+    });
+    child.unref();
+    res.json({ ok: true, message: `Opening ${browser === "firefox" ? "Firefox" : "Chromium"}…` });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 // Capability probe for the Browser tab (drives the "open in full browser" affordance).
 router.get("/browser/capabilities", async (_req: Request, res: Response) => {
   const chromium = await commandExists("chromium");
+  const firefox = await commandExists("firefox-esr");
+  const { existsSync } = await import("fs");
+  const hasLauncher = existsSync(OPEN_BROWSER_LAUNCHER);
+  const hasDisplay = !!process.env["DISPLAY"] || existsSync("/tmp/.X11-unix/X0");
   res.json({
     proxy: true, // the in-frame proxy always works
     nativeBrowser: chromium && !!process.env["DISPLAY"],
     chromium,
+    firefox,
     hasDisplay: !!process.env["DISPLAY"],
+    // "Open Browser" (standalone window over the kiosk) availability:
+    openBrowser: hasLauncher && hasDisplay && (chromium || firefox),
   });
 });
 

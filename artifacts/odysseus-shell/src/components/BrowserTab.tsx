@@ -17,7 +17,15 @@ import {
   initBrowserSession,
   browserProxySrc,
   launchNativeBrowser,
+  openStandaloneBrowser,
 } from "@/lib/peripherals-api";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Compass, ChevronDown } from "lucide-react";
 
 // Turn whatever the user typed into a URL: keep explicit http(s), promote a
 // bare domain to https, otherwise run it as a web search.
@@ -88,6 +96,20 @@ export function BrowserTab() {
     return () => window.removeEventListener("message", onMsg);
   }, [history, idx]);
 
+  // Open a standalone, movable browser window (Firefox/Chromium) over the
+  // kiosk on the appliance. In dev this fails honestly with a clear message.
+  const openBrowserMut = useMutation({
+    mutationFn: (browser: "firefox" | "chromium") => openStandaloneBrowser(browser, token),
+    onSuccess: (r) => toast({ title: r.message || "Opening browser…", duration: 2500 }),
+    onError: (e) =>
+      toast({
+        title: "Couldn't open the browser",
+        description: (e as Error).message,
+        variant: "destructive",
+        duration: 4000,
+      }),
+  });
+
   const launchMut = useMutation({
     mutationFn: () => launchNativeBrowser(current || normalizeUrl(address), token),
     onSuccess: (r) => toast({ title: r.message || "Opened in Chromium", duration: 2500 }),
@@ -142,6 +164,40 @@ export function BrowserTab() {
           <ExternalLink className="h-4 w-4" />
           Full browser
         </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5"
+              disabled={!token || openBrowserMut.isPending}
+              title={
+                caps?.openBrowser
+                  ? "Open a standalone browser window over the FoulFox desktop"
+                  : "Available on the booted FoulFox OS appliance"
+              }
+              data-testid="button-open-browser"
+            >
+              <Compass className="h-4 w-4" />
+              Open Browser
+              <ChevronDown className="h-3 w-3 opacity-60" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              onClick={() => openBrowserMut.mutate("firefox")}
+              data-testid="menu-open-firefox"
+            >
+              Firefox
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => openBrowserMut.mutate("chromium")}
+              data-testid="menu-open-chromium"
+            >
+              Chromium
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Page area */}

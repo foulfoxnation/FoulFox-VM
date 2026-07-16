@@ -44,7 +44,9 @@ export interface BrowserCapabilities {
   proxy: boolean;
   nativeBrowser: boolean;
   chromium: boolean;
+  firefox?: boolean;
   hasDisplay: boolean;
+  openBrowser?: boolean;
 }
 
 export async function fetchBrowserCapabilities(): Promise<BrowserCapabilities> {
@@ -65,6 +67,15 @@ export function browserProxySrc(url: string): string {
 
 export async function launchNativeBrowser(url: string, token?: string | null): Promise<{ ok: boolean; message?: string }> {
   return postJson("/api/browser/launch", { url }, token);
+}
+
+// Open a standalone, movable browser window (Firefox or Chromium) over the
+// kiosk on the appliance. Fails honestly in dev (no launcher / no display).
+export async function openStandaloneBrowser(
+  browser: "firefox" | "chromium",
+  token?: string | null,
+): Promise<{ ok: boolean; message?: string }> {
+  return postJson("/api/browser/open", { browser }, token);
 }
 
 // ── Network ──────────────────────────────────────────────────────────────────

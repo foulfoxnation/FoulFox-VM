@@ -60,6 +60,9 @@ openbox
 lightdm
 lightdm-gtk-greeter
 chromium
+# General-purpose browser alongside the Chromium kiosk: openable as a normal
+# window over the kiosk via foulfox-open-browser (shell button / W-f shortcut).
+firefox-esr
 
 # ── Live system (live-build boot + config) ───────────────────────────────────
 # By default live-build installs these in a SEPARATE, later apt transaction

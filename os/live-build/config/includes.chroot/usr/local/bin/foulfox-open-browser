@@ -1,0 +1,40 @@
+#!/bin/sh
+# Open a general-purpose browser as a normal, decorated, movable window inside
+# the kiosk X session (over the fullscreen FoulFox kiosk; Alt-Tab switches
+# back). Invoked by the shell's "Open Browser" control via the api-server, and
+# by the Openbox keyboard shortcuts (W-f / W-c).
+#
+# Usage: foulfox-open-browser [firefox|chromium] [url]
+
+BROWSER="${1:-firefox}"
+URL="${2:-}"
+
+# The api-server runs as the same foulfox user but outside the X session, so
+# default the display/session env when missing.
+export DISPLAY="${DISPLAY:-:0}"
+export HOME="${HOME:-/var/lib/foulfox}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+case "$BROWSER" in
+  firefox)
+    command -v firefox-esr >/dev/null 2>&1 || { echo "firefox-esr is not installed" >&2; exit 127; }
+    # shellcheck disable=SC2086
+    exec firefox-esr --new-window ${URL:+"$URL"}
+    ;;
+  chromium)
+    command -v chromium >/dev/null 2>&1 || { echo "chromium is not installed" >&2; exit 127; }
+    # A SEPARATE profile dir is required: without it Chromium merges into the
+    # already-running kiosk instance and inherits its --kiosk fullscreen mode
+    # instead of opening a normal window.
+    # shellcheck disable=SC2086
+    exec chromium \
+      --user-data-dir="$HOME/.config/foulfox-user-chromium" \
+      --no-first-run \
+      --password-store=basic \
+      --new-window ${URL:+"$URL"}
+    ;;
+  *)
+    echo "Unknown browser: $BROWSER (expected firefox or chromium)" >&2
+    exit 2
+    ;;
+esac

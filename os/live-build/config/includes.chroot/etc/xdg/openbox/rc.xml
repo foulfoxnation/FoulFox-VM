@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- FoulFox OS system-wide Openbox config for the kiosk session.
+     Purpose: window switching between the kiosk / browsers / VM viewer, plus
+     keyboard shortcuts to open a general-purpose browser over the kiosk:
+       Super+F -> Firefox      Super+C -> Chromium      Alt-Tab -> switch
+     Kept minimal but complete; the foulfox user has no per-user override, so
+     Openbox falls back to this XDG default. -->
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <focus>
+    <focusNew>yes</focusNew>
+    <followMouse>no</followMouse>
+  </focus>
+  <placement>
+    <policy>Smart</policy>
+    <center>yes</center>
+  </placement>
+  <theme>
+    <name>Clearlooks</name>
+    <keepBorder>yes</keepBorder>
+    <animateIconify>no</animateIconify>
+  </theme>
+  <desktops>
+    <number>1</number>
+    <firstdesk>1</firstdesk>
+  </desktops>
+  <keyboard>
+    <!-- Window switching between the kiosk and any open browser/viewer. -->
+    <keybind key="A-Tab">
+      <action name="NextWindow">
+        <finalactions>
+          <action name="Focus"/>
+          <action name="Raise"/>
+          <action name="Unshade"/>
+        </finalactions>
+      </action>
+    </keybind>
+    <keybind key="A-S-Tab">
+      <action name="PreviousWindow">
+        <finalactions>
+          <action name="Focus"/>
+          <action name="Raise"/>
+          <action name="Unshade"/>
+        </finalactions>
+      </action>
+    </keybind>
+    <!-- Open a browser over the kiosk. -->
+    <keybind key="W-f">
+      <action name="Execute">
+        <command>/usr/local/bin/foulfox-open-browser firefox</command>
+      </action>
+    </keybind>
+    <keybind key="W-c">
+      <action name="Execute">
+        <command>/usr/local/bin/foulfox-open-browser chromium</command>
+      </action>
+    </keybind>
+    <!-- Close the focused window (returns to the kiosk underneath). -->
+    <keybind key="A-F4">
+      <action name="Close"/>
+    </keybind>
+  </keyboard>
+  <mouse>
+    <context name="Titlebar">
+      <mousebind button="Left" action="Drag">
+        <action name="Move"/>
+      </mousebind>
+      <mousebind button="Left" action="DoubleClick">
+        <action name="ToggleMaximize"/>
+      </mousebind>
+    </context>
+    <context name="Frame">
+      <mousebind button="A-Left" action="Drag">
+        <action name="Move"/>
+      </mousebind>
+    </context>
+    <context name="Client">
+      <mousebind button="Left" action="Press">
+        <action name="Focus"/>
+        <action name="Raise"/>
+      </mousebind>
+    </context>
+  </mouse>
+  <applications>
+    <!-- Browsers open as normal decorated windows, maximized for usability;
+         still movable/closable. The kiosk Chromium (fullscreen kiosk mode) is
+         unaffected: fullscreen windows ignore decoration/maximize hints. -->
+    <application class="firefox-esr" type="normal">
+      <decor>yes</decor>
+      <maximized>yes</maximized>
+    </application>
+    <application class="Firefox-esr" type="normal">
+      <decor>yes</decor>
+      <maximized>yes</maximized>
+    </application>
+  </applications>
+</openbox_config>
