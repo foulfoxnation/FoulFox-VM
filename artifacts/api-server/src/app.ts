@@ -8,6 +8,7 @@ import { logger } from "./lib/logger";
 import { SHELL_SESSION_TOKEN } from "./lib/shell-token";
 import appUiRouter from "./routes/app-ui";
 import appBrokerRouter from "./routes/app-broker";
+import { isManagedAppPeer } from "./lib/app-runner";
 
 const app: Express = express();
 
@@ -203,8 +204,15 @@ app.use("/api/apps", localhostOnly, express.json(), appBrokerRouter);
 // uninstall).
 app.use("/api/apps", localhostOnly, requireStateChangeToken);
 
-// Shell session token endpoint — localhost only so remote callers can't obtain it
-app.get("/api/shell/session-token", localhostOnly, (_req, res) => {
+// Shell session token endpoint — localhost only so remote callers can't obtain
+// it. Additionally REFUSED to managed app processes (socket-peer check via
+// /proc): installed apps run on the same loopback interface but must only ever
+// hold their per-boot broker token, never the shell session token.
+app.get("/api/shell/session-token", localhostOnly, (req, res) => {
+  if (isManagedAppPeer(req.socket.remotePort)) {
+    res.status(403).json({ error: "App processes cannot obtain the shell session token." });
+    return;
+  }
   res.json({ token: SHELL_SESSION_TOKEN });
 });
 

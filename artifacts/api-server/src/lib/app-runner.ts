@@ -46,6 +46,11 @@ interface RunState {
 }
 
 const LOG_MAX_LINES = 500;
+// Fixed, predictable loopback port range for app backends (spec: 27000-27199).
+// A known range keeps future firewall rules / kiosk policies simple and makes
+// it possible to identify app sockets (see isManagedAppPeer below).
+const APP_PORT_MIN = 27000;
+const APP_PORT_MAX = 27199;
 const HEALTH_INTERVAL_MS = 2000;
 // Voice apps may compile/load models on first boot; be generous before we call
 // a start attempt failed. The process staying alive keeps us in "starting".
@@ -55,6 +60,9 @@ const BACKOFF_BASE_MS = 1000;
 const BACKOFF_MAX_MS = 30_000;
 // If the app stays healthy this long, the backoff counter resets.
 const BACKOFF_RESET_MS = 60_000;
+// Stop retrying after this many consecutive crashes: a permanently broken app
+// must not spin the CPU forever. The UI shows "crashed" with the last exit.
+const MAX_RESTARTS = 8;
 
 const runs = new Map<string, RunState>();
 
@@ -87,17 +95,28 @@ function pushLog(s: RunState, line: string): void {
   if (s.log.length > LOG_MAX_LINES) s.log.splice(0, s.log.length - LOG_MAX_LINES);
 }
 
-// Allocate a free loopback port by letting the kernel pick one.
-function allocPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
+// Allocate a free loopback port inside the fixed app range (27000-27199).
+function tryPort(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
     const srv = net.createServer();
-    srv.once("error", reject);
-    srv.listen(0, "127.0.0.1", () => {
-      const addr = srv.address();
-      const port = typeof addr === "object" && addr ? addr.port : 0;
-      srv.close(() => (port ? resolve(port) : reject(new Error("no port"))));
-    });
+    srv.once("error", () => resolve(false));
+    srv.listen(port, "127.0.0.1", () => srv.close(() => resolve(true)));
   });
+}
+
+async function allocPort(): Promise<number> {
+  const inUse = new Set(
+    [...runs.values()].filter((s) => s.port !== null).map((s) => s.port as number),
+  );
+  // Start at a random offset so restarts don't always contend for 27000.
+  const span = APP_PORT_MAX - APP_PORT_MIN + 1;
+  const start = APP_PORT_MIN + Math.floor(Math.random() * span);
+  for (let i = 0; i < span; i++) {
+    const port = APP_PORT_MIN + ((start - APP_PORT_MIN + i) % span);
+    if (inUse.has(port)) continue;
+    if (await tryPort(port)) return port;
+  }
+  throw new Error(`No free app port in ${APP_PORT_MIN}-${APP_PORT_MAX}`);
 }
 
 // Best-effort: make the kernel prefer OTHER processes when memory runs out.
@@ -237,6 +256,12 @@ async function launch(a: AppRecord, s: RunState): Promise<void> {
     // Unexpected death → crashed; schedule a restart with backoff.
     s.phase = "crashed";
     if (wasHealthyFor > BACKOFF_RESET_MS) s.restarts = 0;
+    if (s.restarts >= MAX_RESTARTS) {
+      s.desired = "stop"; // give up honestly; a manual Start resets the counter
+      pushLog(s, `[foulfox] crashed ${MAX_RESTARTS} times in a row (${s.lastExit}); giving up. Press Start to retry.`);
+      logger.error({ appId: s.appId, exit: s.lastExit }, "app crash limit reached; not restarting");
+      return;
+    }
     const delay = Math.min(BACKOFF_BASE_MS * 2 ** s.restarts, BACKOFF_MAX_MS);
     s.restarts += 1;
     pushLog(s, `[foulfox] crashed (${s.lastExit}); restarting in ${Math.round(delay / 1000)}s`);
@@ -377,6 +402,116 @@ export function autostartApps(): void {
       );
     }
   }
+}
+
+// Graceful shutdown: stop every managed app (SIGTERM, then SIGKILL after the
+// grace period). Called from the server's signal handlers so app processes are
+// never orphaned when the api-server exits.
+export function stopAllApps(): void {
+  for (const s of runs.values()) {
+    if (s.proc || s.phase !== "stopped") stopApp(s.appId);
+  }
+}
+
+// ── Managed-app socket-peer check ────────────────────────────────────────────
+// True when the loopback TCP peer (identified by ITS local port, i.e. the
+// remotePort of our accepted connection) belongs to a managed app process or
+// one of its descendants. Used to refuse /api/shell/session-token to app code:
+// apps talk to the API via their broker token, never the shell session token.
+// Best-effort and fail-open (a parsing error must not lock out the real shell).
+function descendantPids(rootPid: number): Set<number> {
+  const out = new Set<number>([rootPid]);
+  const queue = [rootPid];
+  while (queue.length) {
+    const pid = queue.pop() as number;
+    let tasks: string[] = [];
+    try {
+      tasks = fs.readdirSync(`/proc/${pid}/task`);
+    } catch {
+      continue;
+    }
+    for (const t of tasks) {
+      try {
+        const children = fs
+          .readFileSync(`/proc/${pid}/task/${t}/children`, "utf8")
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean)
+          .map(Number);
+        for (const c of children) {
+          if (!out.has(c)) {
+            out.add(c);
+            queue.push(c);
+          }
+        }
+      } catch {
+        /* task vanished */
+      }
+    }
+  }
+  return out;
+}
+
+// /proc/net/tcp{,6}: find the socket inode whose LOCAL side is loopback:<port>.
+function socketInodeForLocalPort(port: number): string | null {
+  const hexPort = port.toString(16).toUpperCase().padStart(4, "0");
+  for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+    let text: string;
+    try {
+      text = fs.readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of text.split("\n").slice(1)) {
+      const cols = line.trim().split(/\s+/);
+      if (cols.length < 10) continue;
+      const [addr, portHex] = (cols[1] ?? "").split(":");
+      if (portHex !== hexPort) continue;
+      // Loopback only: 0100007F (v4) or ::1/::ffff:127.0.0.1 forms in v6 file.
+      const a = (addr ?? "").toUpperCase();
+      const isLoop =
+        a === "0100007F" ||
+        a === "00000000000000000000000001000000" || // ::1
+        a.endsWith("0100007F"); // v4-mapped
+      if (!isLoop) continue;
+      return cols[9] ?? null;
+    }
+  }
+  return null;
+}
+
+export function isManagedAppPeer(remotePort: number | undefined): boolean {
+  if (!remotePort) return false;
+  try {
+    const pids = new Set<number>();
+    for (const s of runs.values()) {
+      if (s.pid && (s.phase === "running" || s.phase === "starting")) {
+        for (const p of descendantPids(s.pid)) pids.add(p);
+      }
+    }
+    if (pids.size === 0) return false;
+    const inode = socketInodeForLocalPort(remotePort);
+    if (!inode) return false;
+    const needle = `socket:[${inode}]`;
+    for (const pid of pids) {
+      let fds: string[] = [];
+      try {
+        fds = fs.readdirSync(`/proc/${pid}/fd`);
+      } catch {
+        continue;
+      }
+      for (const fd of fds) {
+        try {
+          if (fs.readlinkSync(`/proc/${pid}/fd/${fd}`) === needle) return true;
+        } catch {
+          /* fd closed mid-scan */
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, "app peer check failed (fail-open)");
+  }
+  return false;
 }
 
 // Stop a run and forget its state (used by uninstall).

@@ -116,8 +116,43 @@ function rewriteCss(css: string, targetPath: string): string {
   return css.replace(/url\((['"]?)\/(?!\/)/g, (_m, q) => `url(${q}${up}`);
 }
 
+// Foreign-Origin write rejection (CSRF hardening): browsers attach an Origin
+// header to every cross-origin non-GET request. Legitimate writes into an app
+// backend come only from loopback origins (the dedicated app-UI origin on the
+// appliance, or the shell/Vite origin in dev) — or from the dev shell's
+// opaque-sandboxed iframe, which sends "null" but ONLY exists when the
+// dedicated origin is off. Any real web origin (https://evil.example) is
+// refused before a byte reaches the app.
+const APP_UI_SEPARATE_ORIGIN = !!process.env["SERVE_SHELL_STATIC"];
+
+function originAllowed(origin: string | undefined): boolean {
+  if (!origin) return true; // non-browser callers (curl, native) send no Origin
+  if (origin === "null") return !APP_UI_SEPARATE_ORIGIN; // dev opaque iframe only
+  try {
+    const u = new URL(origin);
+    if (u.hostname === "127.0.0.1" || u.hostname === "localhost" || u.hostname === "::1") {
+      return true;
+    }
+    // Dev only: the Replit preview serves the shell from its own https origin.
+    if (!APP_UI_SEPARATE_ORIGIN && process.env["REPLIT_DEV_DOMAIN"]) {
+      if (u.hostname === process.env["REPLIT_DEV_DOMAIN"]) return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 router.all("/:id/ui{/*path}", (req: Request, res: Response) => {
   const id = pathParam(req.params.id);
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    const origin = req.headers.origin;
+    if (!originAllowed(origin)) {
+      logger.warn({ id, origin, method: req.method }, "app ui proxy: foreign-origin write refused");
+      res.status(403).json({ error: "Cross-origin writes into app backends are not allowed." });
+      return;
+    }
+  }
   const app = getApp(id);
   if (!app) {
     res.status(404).json({ error: "No such app." });

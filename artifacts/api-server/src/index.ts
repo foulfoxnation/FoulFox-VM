@@ -7,7 +7,7 @@ import { createShellWss } from "./routes/shell";
 import { ensureDefaultVm } from "./lib/vm-registry";
 import { reconcileOrphans } from "./lib/vm-launch";
 import { createDisplayWss } from "./lib/vm-display";
-import { autostartApps } from "./lib/app-runner";
+import { autostartApps, stopAllApps } from "./lib/app-runner";
 
 const rawPort = process.env["PORT"];
 
@@ -65,6 +65,25 @@ server.on("error", (err) => {
   logger.error({ err }, "Server error");
   process.exit(1);
 });
+
+// Graceful shutdown: stop every managed app process (SIGTERM → SIGKILL after
+// grace) so voice/AI sidecars are never orphaned when the api-server exits.
+let shuttingDown = false;
+function shutdown(signal: string): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info({ signal }, "shutting down: stopping managed apps");
+  try {
+    stopAllApps();
+  } catch (err) {
+    logger.error({ err }, "stopAllApps failed during shutdown");
+  }
+  server.close(() => process.exit(0));
+  // Hard deadline: don't hang forever on open connections.
+  setTimeout(() => process.exit(0), 10_000).unref();
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 // ── Dedicated app-UI origin (privilege separation) ────────────────────────────
 // On the appliance the shell embeds installed-app UIs from this SEPARATE

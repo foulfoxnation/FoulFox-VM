@@ -1,0 +1,32 @@
+Task #27: FoulFox App runtime for hands-free voice (rev2: security hardening)
+App process runner (app-runner.ts): supervised start argv, env contract,
+/healthz polling, crash-restart backoff 1s->30s (max 8), oom_score_adj
+-300, ports 27000-27199, autostart on boot, stopAllApps on shutdown.
+- Routes: /api/apps/:id/start|stop|status|runlogs; broker whoami + agent/task
+(per-app bearer; 401 unknown, 403 without grant) into Odysseus pipeline.
+- SECURITY (rev2, after code review): app UIs moved to a DEDICATED origin —
+apps-ui-server.ts on loopback port 8090 serves only the UI reverse proxy +
+WS upgrades. App iframes keep allow-same-origin (needed for getUserMedia)
+but are now cross-origin from every shell/API endpoint; main API CORS
+excludes the app-UI origin; /api/shell/session-token refuses managed app
+processes via a /proc socket-peer check; foreign-Origin POSTs into app
+backends rejected. Non-GET/WS app requests flow through the proxy with no
+shell token (no body parsers on the app-UI server).
+- Shell UI: Start/Stop/status/run-logs in Apps tab; kept-mounted app window
+iframes pointing at the app-UI origin, allow="microphone; autoplay".
+- Kiosk: managed Chromium policy (mic+autoplay for :8080 and :8090) +
+--autoplay-policy=no-user-gesture-required.
+- E2E artifacts/api-server/scripts/e2e-dummy-app.sh — 16 checks incl.
+crash-restart, tokenless POST via proxy, app-process token denial, CORS
+refusal — ALL PASS. Reply doc docs/handoff-voice-app-reply.md updated.
+
+Deviation: allow-same-origin retained (Chromium getUserMedia constraint) but
+made safe via origin separation; follow-up #28 retracted as now fixed.
+
+Rebase onto main-repl/main: upstream contained a parallel app-runtime
+implementation (origin split at :8081, zip/flash-drive install). Resolution
+kept this task's final architecture (dedicated app-UI origin :8090,
+apps-ui-server.ts, session-token peer check, getRuntimeStatus naming) while
+preserving upstream-only features (zip upload + file install routes,
+flash-drive browsing). Removed upstream's superseded routes/app-ui.ts.
+Post-rebase: both typechecks clean, all 16 E2E checks pass.
