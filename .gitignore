@@ -47,3 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# FoulFox runtime data (models, installed apps, VM disks — never commit)
+.foulfox-data/

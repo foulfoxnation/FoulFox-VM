@@ -24,6 +24,10 @@ args = "Odysseus AI Service"
 task = "workflow.run"
 args = "test-agent-kb"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "github-push"
+
 [[workflows.workflow]]
 name = "Odysseus AI Service"
 author = "agent"
@@ -46,6 +50,17 @@ args = "cd artifacts/odysseus-service && DATABASE_URL='sqlite:///:memory:' pytho
 
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow]]
+name = "github-push"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash .local/github-push.sh"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [agent]
 stack = "PNPM_WORKSPACE"
