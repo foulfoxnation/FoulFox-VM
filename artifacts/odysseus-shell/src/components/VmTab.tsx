@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { VmDisplay } from "./VmDisplay";
 import { Terminal } from "./Terminal";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,8 @@ import {
   ShieldCheck,
   ShieldAlert,
   Shield,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import { useVmLifecycle, useDeleteVm, useRetryProvision } from "@/hooks/use-vms";
 import { useToast } from "@/hooks/use-toast";
@@ -53,6 +55,7 @@ export function VmTab({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [health, setHealth] = useState<AgentHealth | null>(null);
   const [checking, setChecking] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
 
   const isRunning = vm.state === "running";
   const isTransitioning = vm.state === "starting" || vm.state === "stopping";
@@ -62,6 +65,16 @@ export function VmTab({
   const provBusy =
     p.status === "downloading" || p.status === "creating-disk" || p.status === "installing";
   const provFailed = p.status === "failed";
+
+  // Exit fullscreen on Escape
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen]);
 
   const act = (action: VmLifecycleAction) =>
     lifecycle.mutate(
@@ -103,6 +116,78 @@ export function VmTab({
         toast({ title: "Failed to delete VM", description: e.message, variant: "destructive" }),
     });
 
+  // ── Fullscreen overlay ───────────────────────────────────────────────────────
+  if (fullscreen) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex flex-col bg-zinc-950"
+        data-testid={`vm-fullscreen-${vm.id}`}
+      >
+        {/* Floating top bar */}
+        <div className="flex items-center justify-between gap-3 bg-zinc-900/90 px-4 py-1.5 backdrop-blur-sm">
+          <div className="flex items-center gap-2">
+            <Badge
+              variant={isRunning ? "default" : vm.state === "error" ? "destructive" : "secondary"}
+              className="text-[10px] font-bold uppercase tracking-wider"
+            >
+              {vm.state}
+            </Badge>
+            <span className="text-xs font-medium text-zinc-300">{vm.name}</span>
+            {isRunning && (
+              <span className="flex items-center font-mono text-xs text-zinc-500">
+                <Clock className="mr-1 h-3 w-3" />
+                {formatUptime(vm.uptime)}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="sm"
+              variant={isRunning ? "outline" : "default"}
+              disabled={isRunning || isTransitioning || provBusy || lifecycle.isPending}
+              onClick={() => act("start")}
+            >
+              <Play className="mr-1.5 h-3.5 w-3.5" /> Start
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isStopped || isTransitioning || lifecycle.isPending}
+              onClick={() => act("stop")}
+            >
+              <Square className="mr-1.5 h-3.5 w-3.5" /> Stop
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isStopped || isTransitioning || lifecycle.isPending}
+              onClick={() => act("restart")}
+            >
+              <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Restart
+            </Button>
+            <div className="mx-1 h-5 w-px bg-zinc-700" />
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-zinc-300 hover:text-white"
+              onClick={() => setFullscreen(false)}
+              title="Exit fullscreen (Esc)"
+              data-testid={`button-exit-fullscreen-${vm.id}`}
+            >
+              <Minimize2 className="mr-1.5 h-3.5 w-3.5" /> Exit fullscreen
+            </Button>
+          </div>
+        </div>
+
+        {/* Full-viewport VNC display */}
+        <div className="flex-1 overflow-hidden">
+          <VmDisplay vm={vm} />
+        </div>
+      </div>
+    );
+  }
+
+  // ── Normal (inline) view ─────────────────────────────────────────────────────
   return (
     <div className="flex h-full flex-col">
       {/* Per-VM control header */}
@@ -204,6 +289,19 @@ export function VmTab({
             <Cpu className="mr-1 h-3 w-3" />
             {vm.cpuCores}C
           </span>
+
+          {/* Fullscreen toggle */}
+          <button
+            type="button"
+            className="flex items-center hover:text-foreground"
+            onClick={() => setFullscreen(true)}
+            title="Enter fullscreen"
+            data-testid={`button-fullscreen-${vm.id}`}
+          >
+            <Maximize2 className="mr-1 h-3 w-3" />
+            Fullscreen
+          </button>
+
           {!isDefault &&
             (confirmDelete ? (
               <span className="flex items-center gap-1">
@@ -260,7 +358,7 @@ export function VmTab({
               onClick={() => retry.mutate(vm.id)}
               data-testid={`button-retry-${vm.id}`}
             >
-              <RefreshCw className="mr-1 h-3.5 w-3.5" /> Retry
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Retry
             </Button>
           )}
         </div>

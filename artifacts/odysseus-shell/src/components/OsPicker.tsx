@@ -85,16 +85,15 @@ export function OsPicker({
     }
   }, [open]);
 
-  // Once the catalog loads (or after a reset), default to the first supported
-  // OS so the picker always opens on a usable selection.
+  // Once the catalog loads (or after a reset), default to Windows 11 if it is
+  // supported, otherwise fall back to the first supported image.
   useEffect(() => {
     if (!open || images.length === 0) return;
-    // Keep a still-valid, still-supported selection; otherwise fall to the first
-    // supported image (so a late refetch marking the current pick unsupported
-    // moves off it rather than leaving a dead selection).
+    // Keep a still-valid, still-supported selection; otherwise re-pick.
     const current = images.find((i) => i.id === imageId);
     if (current && current.supported) return;
-    selectImage(images.find((i) => i.supported) ?? current ?? images[0]);
+    const win11 = images.find((i) => i.id === "windows-11" && i.supported);
+    selectImage(win11 ?? images.find((i) => i.supported) ?? current ?? images[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, images]);
 

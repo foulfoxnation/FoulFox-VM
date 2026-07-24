@@ -12,6 +12,15 @@ firmware-misc-nonfree
 # Broadcom/Cypress wifi + Bluetooth firmware (brcmfmac / many laptop BT radios).
 # Intel/Realtek/Atheros BT firmware already ships in the bundles above.
 firmware-brcm80211
+# MediaTek WiFi (MT7921/MT7922/MT7925) — very common in modern AMD-based
+# laptops (Lenovo IdeaPad, ASUS VivoBook, HP, etc.). Without this the wifi
+# adapter is detected but shows no firmware and stays down.
+firmware-mediatek
+# Broadcom NetXtreme I/II Ethernet — common in workstations and older desktops.
+firmware-bnx2
+firmware-bnx2x
+# Qualcomm/Atheros Ethernet (QCA8xxx NICs on many consumer motherboards).
+# Covered by firmware-misc-nonfree but listed explicitly for clarity.
 
 # ── Networking (auto bring-up, wired + wireless) ─────────────────────────────
 network-manager
@@ -19,6 +28,15 @@ network-manager-gnome
 iproute2
 iw
 wireless-tools
+# WPA2/WPA3 supplicant — required for joining protected WiFi networks.
+# NetworkManager pulls this as a dependency but listing it explicitly ensures
+# it is always present even if NM dependency resolution changes.
+wpasupplicant
+# DNS resolution: systemd-resolved provides a local stub DNS resolver that NM
+# writes to automatically. Without it, NM falls back to writing /etc/resolv.conf
+# directly, which can race with live-config on boot and leave the system
+# temporarily with no nameserver. resolved also handles mDNS and LLMNR.
+systemd-resolved
 
 # ── Bluetooth (plug-and-play pairing/management) ─────────────────────────────
 # bluez provides bluetoothd + the bluetoothctl CLI the api-server drives. The

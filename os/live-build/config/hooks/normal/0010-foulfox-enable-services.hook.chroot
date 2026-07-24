@@ -31,6 +31,16 @@ systemctl enable foulfox-vm-autostart.service
 systemctl enable NetworkManager.service
 systemctl enable bluetooth.service
 
+# ── DNS: systemd-resolved ─────────────────────────────────────────────────────
+# Enable the stub resolver so DNS works immediately on first boot. NM detects
+# resolved and writes nameserver 127.0.0.53 (the stub) into its internal config
+# rather than /etc/resolv.conf, preventing boot-time races.
+# The canonical symlink makes every process that reads /etc/resolv.conf use the
+# stub resolver (with DNSSEC + caching) instead of a plain forwarding file.
+if systemctl enable systemd-resolved 2>/dev/null; then
+  ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf || true
+fi
+
 # ── Graphical autologin straight into the kiosk session ──────────────────────
 mkdir -p /etc/lightdm/lightdm.conf.d
 cat > /etc/lightdm/lightdm.conf.d/50-foulfox-autologin.conf <<EOF

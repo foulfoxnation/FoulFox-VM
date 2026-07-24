@@ -1,12 +1,15 @@
 # services/stt/stt_service.py
-"""Multi-provider Speech-to-Text service — dispatches to local Whisper, OpenAI-compatible API, or browser."""
+"""Multi-provider Speech-to-Text service — dispatches to VoiceForge, local Whisper, OpenAI-compatible API, or browser."""
 
 import io
+import base64
 import logging
 import httpx
 import tempfile
 from pathlib import Path
 from typing import Optional, Dict, Any
+
+from services.tts.tts_service import _get_voiceforge_port
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +19,7 @@ class STTService:
 
     Reads provider config from data/settings.json on each call.
     Providers:
+      "voiceforge"      — VoiceForge app (default; neural Whisper STT, always running)
       "disabled"        — no STT
       "browser"         — client-side Web Speech API (no server transcription)
       "local"           — faster-whisper on CPU/GPU
@@ -31,8 +35,8 @@ class STTService:
         from src.settings import load_settings
         saved = load_settings()
         return {
-            "stt_enabled": saved.get("stt_enabled", False),
-            "stt_provider": saved.get("stt_provider", "disabled"),
+            "stt_enabled": saved.get("stt_enabled", True),
+            "stt_provider": saved.get("stt_provider", "voiceforge"),
             "stt_model": saved.get("stt_model", "base"),
             "stt_language": saved.get("stt_language", ""),
         }
@@ -47,11 +51,40 @@ class STTService:
             return False
         if provider == "browser":
             return True  # handled client-side
+        if provider == "voiceforge":
+            return _get_voiceforge_port() is not None
         if provider == "local":
             return self._get_whisper() is not None
         if provider.startswith("endpoint:"):
             return True  # assume reachable
         return False
+
+    # ── VoiceForge STT ──
+
+    def _transcribe_voiceforge(self, audio_bytes: bytes, language: str = "") -> Optional[str]:
+        """Transcribe via the running VoiceForge app."""
+        port = _get_voiceforge_port()
+        if not port:
+            logger.debug("VoiceForge not running — STT skipped")
+            return None
+        try:
+            audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+            payload: dict = {"audioBase64": audio_b64}
+            if language:
+                payload["language"] = language
+            r = httpx.post(
+                f"http://127.0.0.1:{port}/api/audio/transcribe",
+                json=payload,
+                timeout=60.0,
+            )
+            r.raise_for_status()
+            data = r.json()
+            text = data.get("text", "")
+            logger.info(f"VoiceForge STT: {len(text)} chars")
+            return text if text else None
+        except Exception as e:
+            logger.error(f"VoiceForge STT transcription failed: {e}")
+            return None
 
     # ── Local Whisper ──
 
@@ -164,7 +197,9 @@ class STTService:
         if provider in ("disabled", "browser"):
             return None
 
-        if provider == "local":
+        if provider == "voiceforge":
+            return self._transcribe_voiceforge(audio_bytes, language)
+        elif provider == "local":
             return self._transcribe_local(audio_bytes, language)
         elif provider.startswith("endpoint:"):
             endpoint_id = provider.split(":", 1)[1]
@@ -176,8 +211,7 @@ class STTService:
     def get_stats(self) -> Dict[str, Any]:
         settings = self._load_settings()
         provider = settings["stt_provider"]
-        stt_enabled = settings.get("stt_enabled", False)
-        # If toggle is off, report as disabled
+        stt_enabled = settings.get("stt_enabled", True)
         effective_provider = provider if stt_enabled else "disabled"
 
         stats = {
@@ -187,7 +221,12 @@ class STTService:
             "language": settings.get("stt_language", ""),
         }
 
-        if provider == "local":
+        if provider == "voiceforge":
+            port = _get_voiceforge_port()
+            stats["model"] = "VoiceForge (Whisper STT)"
+            stats["voiceforge_port"] = port
+            stats["voiceforge_running"] = port is not None
+        elif provider == "local":
             whisper = self._get_whisper()
             stats["model_loaded"] = whisper is not None
         elif provider == "browser":

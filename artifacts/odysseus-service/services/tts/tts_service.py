@@ -1,10 +1,11 @@
 # src/tts_service.py
-"""Multi-provider TTS service — dispatches to local Kokoro, OpenAI-compatible API, or browser."""
+"""Multi-provider TTS service — dispatches to VoiceForge, local Kokoro, OpenAI-compatible API, or browser."""
 
 import io
 import wave
 import logging
 import hashlib
+import base64
 import httpx
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -26,11 +27,36 @@ def _safe_speed(value, default: float = 1.0) -> float:
     return speed if speed > 0 else default
 
 
+# ── VoiceForge port discovery (shared by TTS + STT) ──────────────────────────
+
+def _get_voiceforge_port() -> Optional[int]:
+    """Ask the api-server for VoiceForge's running port.
+
+    Returns the port as an int when the app is running, None otherwise.
+    Never raises — all errors are logged at DEBUG level.
+    """
+    try:
+        r = httpx.get("http://127.0.0.1:8080/api/apps", timeout=2.0)
+        r.raise_for_status()
+        apps = r.json().get("apps", [])
+        for app in apps:
+            if app.get("id") == "foulfox-voice":
+                run = app.get("run") or {}
+                port = run.get("port")
+                phase = run.get("phase")
+                if port and phase == "running":
+                    return int(port)
+    except Exception as e:
+        logger.debug(f"VoiceForge port discovery: {e}")
+    return None
+
+
 class TTSService:
     """Multi-provider TTS service.
 
     Reads provider config from data/settings.json on each call.
     Providers:
+      "voiceforge"      — VoiceForge app (default; neural TTS, always running)
       "disabled"        — no TTS
       "browser"         — client-side Web Speech API (no server synthesis)
       "local"           — Kokoro-82M on GPU
@@ -49,7 +75,7 @@ class TTSService:
         saved = load_settings()
         return {
             "tts_enabled": saved.get("tts_enabled", True),
-            "tts_provider": saved.get("tts_provider", "disabled"),
+            "tts_provider": saved.get("tts_provider", "voiceforge"),
             "tts_model": saved.get("tts_model", "tts-1"),
             "tts_voice": saved.get("tts_voice", "alloy"),
             "tts_speed": saved.get("tts_speed", "1"),
@@ -65,6 +91,8 @@ class TTSService:
             return False
         if provider == "browser":
             return True  # handled client-side
+        if provider == "voiceforge":
+            return _get_voiceforge_port() is not None
         if provider == "local":
             kokoro = self._get_kokoro()
             return kokoro is not None and kokoro.available
@@ -95,6 +123,33 @@ class TTSService:
             f.unlink()
             count += 1
         logger.info(f"Cleared {count} cached TTS files")
+
+    # ── VoiceForge ──
+
+    def _synthesize_voiceforge(self, text: str) -> Optional[bytes]:
+        """Synthesize via the running VoiceForge app."""
+        port = _get_voiceforge_port()
+        if not port:
+            logger.debug("VoiceForge not running — TTS skipped")
+            return None
+        try:
+            r = httpx.post(
+                f"http://127.0.0.1:{port}/api/audio/synthesize",
+                json={"text": text, "format": "wav"},
+                timeout=60.0,
+            )
+            r.raise_for_status()
+            data = r.json()
+            audio_b64 = data.get("audioBase64")
+            if not audio_b64:
+                logger.error("VoiceForge /api/audio/synthesize returned no audioBase64")
+                return None
+            audio_bytes = base64.b64decode(audio_b64)
+            logger.info(f"VoiceForge TTS: {len(audio_bytes)} bytes for {len(text)} chars")
+            return audio_bytes
+        except Exception as e:
+            logger.error(f"VoiceForge TTS synthesis failed: {e}")
+            return None
 
     # ── Kokoro (local) ──
 
@@ -167,7 +222,9 @@ class TTSService:
 
         audio_data = None
 
-        if provider == "local":
+        if provider == "voiceforge":
+            audio_data = self._synthesize_voiceforge(text)
+        elif provider == "local":
             kokoro = self._get_kokoro()
             if kokoro and kokoro.available:
                 audio_data = kokoro.synthesize_raw(text, voice)
@@ -188,7 +245,6 @@ class TTSService:
         return audio_data
 
     def synthesize_to_base64(self, text: str) -> Optional[str]:
-        import base64
         audio = self.synthesize(text)
         if audio:
             return base64.b64encode(audio).decode("utf-8")
@@ -217,7 +273,12 @@ class TTSService:
             "cache_size_mb": round(cache_size / (1024 * 1024), 2),
         }
 
-        if provider == "local":
+        if provider == "voiceforge":
+            port = _get_voiceforge_port()
+            stats["model"] = "VoiceForge (neural TTS)"
+            stats["voiceforge_port"] = port
+            stats["voiceforge_running"] = port is not None
+        elif provider == "local":
             kokoro = self._get_kokoro()
             stats["model"] = "Kokoro-82M (GPU)" if (kokoro and kokoro.available) else "Kokoro (not loaded)"
         elif provider == "browser":
