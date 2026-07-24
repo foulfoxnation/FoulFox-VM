@@ -86,6 +86,9 @@ python3
 python3-venv
 python3-pip
 build-essential
+# The app installer extracts uploaded/bundled FoulFox App zips with unzip;
+# without it every zip install (incl. the bundled default apps) fails.
+unzip
 
 # ── Convenience ──────────────────────────────────────────────────────────────
 sudo

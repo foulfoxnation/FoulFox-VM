@@ -8,6 +8,7 @@ import { ensureDefaultVm } from "./lib/vm-registry";
 import { reconcileOrphans } from "./lib/vm-launch";
 import { createDisplayWss } from "./lib/vm-display";
 import { autostartApps, stopAllApps } from "./lib/app-runner";
+import { seedDefaultApps } from "./lib/default-apps";
 
 const rawPort = process.env["PORT"];
 
@@ -59,6 +60,11 @@ server.listen(port, host, () => {
   } catch (err) {
     logger.error({ err }, "App autostart failed");
   }
+  // Install any OS-bundled default apps (first boot only per app id); each is
+  // started after install if its manifest says autostart.
+  seedDefaultApps().catch((err) =>
+    logger.error({ err }, "Default app seeding failed"),
+  );
 });
 
 server.on("error", (err) => {
