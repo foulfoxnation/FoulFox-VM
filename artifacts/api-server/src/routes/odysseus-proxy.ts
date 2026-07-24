@@ -133,6 +133,12 @@ router.all("/odysseus{/*path}", (req: Request, res: Response) => {
         delete headers["content-encoding"];
         delete headers["transfer-encoding"];
         headers["content-length"] = String(Buffer.byteLength(body));
+        if (isHtml) {
+          // The chat UI's index.html must never be served stale: a cached
+          // shell HTML keeps referencing old module scripts, so UI updates
+          // (e.g. new sidebar sections) silently never appear in the iframe.
+          headers["cache-control"] = "no-store";
+        }
         res.writeHead(proxyRes.statusCode || 200, headers);
         res.end(body);
       });
