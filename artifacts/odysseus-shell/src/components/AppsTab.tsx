@@ -660,7 +660,7 @@ function AppCard({ app, token }: { app: InstalledApp; token?: string | null }) {
         {/* App window: mounted the entire time the app is up (even while the
             panel is collapsed or another shell tab is shown) so a voice app's
             microphone session and audio playback are never torn down. */}
-        {app.hasWindow && isUp && (
+        {app.hasWindow && phase === "running" && (
           <div className="overflow-hidden rounded-md border">
             <button
               className="flex w-full items-center gap-2 bg-muted/40 px-3 py-1.5 text-xs font-medium hover:bg-muted"
@@ -684,6 +684,10 @@ function AppCard({ app, token }: { app: InstalledApp; token?: string | null }) {
               }
             >
               <iframe
+                // Re-mount the iframe on each new healthy run: a frame that
+                // loaded a 502 ("App is not responding.") mid-startup never
+                // recovers on its own.
+                key={app.run?.startedAt ?? "run"}
                 src={appUiUrl(app.id, uiBase)}
                 title={app.window?.title || app.name}
                 className="h-full w-full border-0"

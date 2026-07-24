@@ -708,6 +708,9 @@ app.include_router(setup_backup_routes(memory_manager, preset_manager, skills_ma
 from routes.font_routes import setup_font_routes
 app.include_router(setup_font_routes())
 
+from routes.foulfox_app_routes import setup_foulfox_app_routes
+app.include_router(setup_foulfox_app_routes())
+
 
 # MCP (Model Context Protocol)
 from src.mcp_manager import McpManager
