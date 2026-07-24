@@ -12,10 +12,8 @@ firmware-misc-nonfree
 # Broadcom/Cypress wifi + Bluetooth firmware (brcmfmac / many laptop BT radios).
 # Intel/Realtek/Atheros BT firmware already ships in the bundles above.
 firmware-brcm80211
-# MediaTek WiFi (MT7921/MT7922/MT7925) — very common in modern AMD-based
-# laptops (Lenovo IdeaPad, ASUS VivoBook, HP, etc.). Without this the wifi
-# adapter is detected but shows no firmware and stays down.
-firmware-mediatek
+# MediaTek WiFi (MT7921/MT7922/MT7925) — covered by firmware-misc-nonfree
+# in Debian bookworm (firmware-mediatek was merged; no separate package exists).
 # Broadcom NetXtreme I/II Ethernet — common in workstations and older desktops.
 firmware-bnx2
 firmware-bnx2x
