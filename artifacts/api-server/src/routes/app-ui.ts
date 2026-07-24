@@ -206,6 +206,12 @@ router.all("/:id/ui{/*path}", (req: Request, res: Response) => {
 
   const fwdHeaders = { ...req.headers, host: `127.0.0.1:${port}` };
   delete fwdHeaders["accept-encoding"];
+  // Never let the upstream answer 304 for documents: the browser's cached
+  // copy may carry a stale injected shim. Drop conditional headers so we
+  // always receive a full body to rewrite. (Assets are content-hashed, so
+  // losing conditional GETs there is harmless.)
+  delete fwdHeaders["if-none-match"];
+  delete fwdHeaders["if-modified-since"];
 
   const proxyReq = http.request(
     { hostname: "127.0.0.1", port, path: targetPath, method: req.method, headers: fwdHeaders },
@@ -226,6 +232,11 @@ router.all("/:id/ui{/*path}", (req: Request, res: Response) => {
           body = isHtml ? rewriteHtml(body) : rewriteCss(body, targetPath);
           delete headers["content-encoding"];
           delete headers["transfer-encoding"];
+          if (isHtml) {
+            delete headers["etag"];
+            delete headers["last-modified"];
+            headers["cache-control"] = "no-store";
+          }
           headers["content-length"] = String(Buffer.byteLength(body));
           res.writeHead(proxyRes.statusCode || 200, headers);
           res.end(body);
