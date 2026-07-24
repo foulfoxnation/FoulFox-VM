@@ -96,6 +96,31 @@ function runtimeShim(): string {
       navigator.serviceWorker.register = function(){ return Promise.reject(new Error("sw disabled in embed")); };
     }
   }catch(e){}
+  // Opaque-sandbox storage polyfill: in dev the shell embeds app UIs WITHOUT
+  // allow-same-origin, so any localStorage/sessionStorage touch throws a
+  // SecurityError and crashes app JS at boot (blank window). Replace both with
+  // in-memory stand-ins when the real ones are inaccessible. State does not
+  // persist across reloads — fine for dev; the appliance grants real storage
+  // via its dedicated app-UI origin.
+  function memStorage(){
+    var s = {};
+    return {
+      getItem: function(k){ return Object.prototype.hasOwnProperty.call(s, k) ? s[k] : null; },
+      setItem: function(k, v){ s[k] = String(v); },
+      removeItem: function(k){ delete s[k]; },
+      clear: function(){ s = {}; },
+      key: function(i){ return Object.keys(s)[i] || null; },
+      get length(){ return Object.keys(s).length; }
+    };
+  }
+  function ensureStorage(name){
+    try{ window[name].getItem("__probe__"); }
+    catch(e){
+      try{ Object.defineProperty(window, name, { value: memStorage(), configurable: true }); }catch(e2){}
+    }
+  }
+  ensureStorage("localStorage");
+  ensureStorage("sessionStorage");
 })();</script>`;
 }
 
