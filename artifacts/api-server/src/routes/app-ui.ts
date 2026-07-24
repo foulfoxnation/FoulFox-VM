@@ -32,6 +32,18 @@ function runtimeShim(): string {
   var m = path.match(/^(.*\\/api\\/apps\\/[^/]+\\/ui)(\\/|$)/);
   var P = m ? m[1] : null;
   if(!P) return;
+  // SPA router compat: the app is served under the proxy prefix P, but
+  // client-side routers match against location.pathname and would 404 on it.
+  // 1) Pin relative URL resolution to the prefix via <base> (survives step 2).
+  // 2) Rewrite the visible path to "/" so routers match the app's root route.
+  try{
+    if(!document.querySelector("base")){
+      var b = document.createElement("base");
+      b.href = P + "/";
+      (document.head || document.documentElement).appendChild(b);
+    }
+    history.replaceState(history.state, "", "/" + location.search + location.hash);
+  }catch(e){}
   function fix(u){
     try{
       if(typeof u !== "string" || !u) return u;
