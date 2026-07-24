@@ -19,6 +19,7 @@ import {
   fetchRunLog,
   appUiUrl,
   fetchAppUiBase,
+  appIconUrl,
   type AppCapability,
   type InstalledApp,
   type InstallPhase,
@@ -498,8 +499,23 @@ function AppCard({ app, token }: { app: InstalledApp; token?: string | null }) {
     <Card data-testid={`card-app-${app.id}`}>
       <CardContent className="space-y-3 p-4">
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted">
-            <Boxes className="h-5 w-5 text-muted-foreground" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted">
+            {app.icon ? (
+              <img
+                src={appIconUrl(app.id)}
+                alt={app.name}
+                className="h-full w-full object-cover"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                  (e.currentTarget.nextElementSibling as HTMLElement | null)?.style.setProperty("display", "flex");
+                }}
+              />
+            ) : null}
+            <span
+              className={`${app.icon ? "hidden" : "flex"} h-full w-full items-center justify-center`}
+            >
+              <Boxes className="h-5 w-5 text-muted-foreground" />
+            </span>
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">

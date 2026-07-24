@@ -67,6 +67,10 @@ export interface InstallJob {
   log: string;
 }
 
+export function appIconUrl(id: string): string {
+  return apiUrl(`/api/apps/${encodeURIComponent(id)}/icon`);
+}
+
 function jsonHeaders(token?: string | null): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
   if (token) h["X-Shell-Token"] = token;

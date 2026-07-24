@@ -316,6 +316,32 @@ router.get("/apps/:id/run-log", (req: Request, res: Response) => {
   res.type("text/plain").send(runLog(id));
 });
 
+// GET /apps/:id/icon — serve the app's icon file (icon.png / icon.jpg / etc.)
+// from its repo dir. Returns 404 when no icon is configured or the file is missing.
+router.get("/apps/:id/icon", (req: Request, res: Response) => {
+  const a = getApp(pathParam(req.params.id));
+  if (!a || !a.icon) {
+    res.status(404).json({ error: "No icon." });
+    return;
+  }
+  const iconPath = path.join(appDir(a.id), "repo", a.icon);
+  if (!fs.existsSync(iconPath)) {
+    res.status(404).json({ error: "Icon file not found." });
+    return;
+  }
+  const ext = path.extname(a.icon).toLowerCase();
+  const mime =
+    ext === ".png" ? "image/png" :
+    ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" :
+    ext === ".gif" ? "image/gif" :
+    ext === ".webp" ? "image/webp" :
+    ext === ".svg" ? "image/svg+xml" :
+    "application/octet-stream";
+  res.setHeader("Content-Type", mime);
+  res.setHeader("Cache-Control", "public, max-age=60");
+  fs.createReadStream(iconPath).pipe(res);
+});
+
 // GET /apps/:id — a single app summary.
 router.get("/apps/:id", (req: Request, res: Response) => {
   const a = getApp(pathParam(req.params.id));
