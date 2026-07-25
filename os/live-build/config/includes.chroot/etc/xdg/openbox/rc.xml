@@ -134,5 +134,24 @@
       <decor>yes</decor>
       <maximized>yes</maximized>
     </application>
+    <!-- The user-facing Chromium window (separate profile launched by
+         foulfox-open-browser). Decorated + maximized + focused so new windows
+         (e.g. OAuth sign-in popups) always come to the front instead of
+         opening behind the fullscreen kiosk. -->
+    <application class="Chromium" type="normal">
+      <decor>yes</decor>
+      <maximized>yes</maximized>
+      <focus>yes</focus>
+    </application>
+    <application class="chromium" type="normal">
+      <decor>yes</decor>
+      <maximized>yes</maximized>
+      <focus>yes</focus>
+    </application>
+    <!-- Chromium dialogs/popups (OAuth windows are type "dialog" sometimes) -->
+    <application class="Chromium" type="dialog">
+      <decor>yes</decor>
+      <focus>yes</focus>
+    </application>
   </applications>
 </openbox_config>

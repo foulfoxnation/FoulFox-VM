@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
@@ -202,6 +202,11 @@ export function SetupWizard() {
   const stateQ = useQuery({
     queryKey: ["agent-suite-state"],
     queryFn: () => getJson<SuiteState>("/api/odysseus/api/agent-suite/state"),
+    // Keep probing until the API answers: on the appliance the network often
+    // comes up AFTER the shell loads, and setup must resume on its own instead
+    // of sticking on "Could not reach API" until a manual refresh.
+    refetchInterval: (q) => (q.state.data ? false : 5000),
+    retry: true,
   });
 
   const needsSetup =
@@ -212,7 +217,26 @@ export function SetupWizard() {
     queryKey: ["models"],
     queryFn: () => getJson<ModelsResp>("/api/odysseus/api/models"),
     enabled: open,
+    // Poll while no AI engine is online yet so plugging in the network / starting
+    // Ollama unblocks the "Next" gate without a manual Recheck.
+    refetchInterval: (q) => {
+      if (!open) return false;
+      const items = q.state.data?.items ?? [];
+      const online = items.some((it) => !it.offline && (it.models?.length ?? 0) > 0);
+      return online ? false : 6000;
+    },
   });
+
+  // Resume immediately when the browser regains network connectivity.
+  useEffect(() => {
+    const onOnline = () => {
+      void stateQ.refetch();
+      void modelsQ.refetch();
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const capsQ = useQuery({
     queryKey: ["vm-caps"],
     queryFn: () => getJson<Caps>("/api/vm/capabilities"),

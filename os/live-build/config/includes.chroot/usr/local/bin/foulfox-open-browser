@@ -26,11 +26,16 @@ case "$BROWSER" in
     # A SEPARATE profile dir is required: without it Chromium merges into the
     # already-running kiosk instance and inherits its --kiosk fullscreen mode
     # instead of opening a normal window.
+    # --disable-gpu-compositing: on appliance hardware without proper GPU
+    # drivers, Chromium's GPU compositing can misplace composited layers so
+    # clicks land in the wrong spot on JS-heavy sites (buttons don't respond
+    # while plain links work). Software compositing is reliable everywhere.
     # shellcheck disable=SC2086
     exec chromium \
       --user-data-dir="$HOME/.config/foulfox-user-chromium" \
       --no-first-run \
       --password-store=basic \
+      --disable-gpu-compositing \
       --new-window ${URL:+"$URL"}
     ;;
   *)

@@ -318,6 +318,23 @@ router.post("/vm/:id/input", async (req: Request, res: Response) => {
 // POST /vm/:id/start
 router.post("/vm/:id/start", (req: Request, res: Response) => {
   const vm = requireVm(req, res); if (!vm) return;
+  // Self-heal the "no media" case: if the VM has no disk/ISO yet (e.g. the user
+  // frontloaded a Windows ISO after the VM record was created), kick a
+  // provisioning pass — it re-scans the frontload staging dir, adopts the ISO,
+  // creates the disk, and updates the record — instead of dead-ending with an
+  // unactionable toast.
+  if (!vm.config.diskPath && !vm.config.isoPath) {
+    startProvisioning(vm.id).catch((err) =>
+      logger.error({ err, vm: vm.id }, "Auto-provision on start failed"),
+    );
+    res.json({
+      success: false,
+      message:
+        "No disk or ISO was attached yet — searching for a Windows ISO now (frontloaded files and download). Watch the provisioning status and press Start again when it's ready.",
+      state: "provisioning",
+    });
+    return;
+  }
   const r = startVm(vm);
   res.json({ success: r.ok, message: r.message, state: r.state });
 });
@@ -485,6 +502,20 @@ router.get("/vm/status", (_req: Request, res: Response) => {
 router.post("/vm/start", (_req: Request, res: Response) => {
   const vm = getVm(DEFAULT_VM_ID);
   if (!vm) { res.json(StartVmResponse.parse({ success: false, message: "Default VM not initialized", state: "error" })); return; }
+  // Same self-heal as /vm/:id/start: no media yet → kick a provisioning pass
+  // (re-scans frontloaded ISOs) instead of a dead-end error.
+  if (!vm.config.diskPath && !vm.config.isoPath) {
+    startProvisioning(vm.id).catch((err) =>
+      logger.error({ err, vm: vm.id }, "Auto-provision on start failed"),
+    );
+    res.json(StartVmResponse.parse({
+      success: false,
+      message:
+        "No disk or ISO was attached yet — searching for a Windows ISO now (frontloaded files and download). Watch the provisioning status and press Start again when it's ready.",
+      state: "provisioning",
+    }));
+    return;
+  }
   const r = startVm(vm);
   res.json(StartVmResponse.parse({ success: r.ok, message: r.message, state: r.state }));
 });

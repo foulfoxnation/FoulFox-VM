@@ -134,6 +134,11 @@ export function ConnectLlamaModal() {
         shellToken,
       );
       setTestResult(res);
+      // Pre-select the first discovered model so the dropdown is ready
+      // before the endpoint is even saved.
+      if (res.models?.length && !res.models.includes(selectedModel)) {
+        setSelectedModel(res.models[0]);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -151,7 +156,10 @@ export function ConnectLlamaModal() {
         shellToken,
       );
       setSaved(res);
-      setSelectedModel(res.models?.[0] ?? "");
+      // Keep the user's pre-save dropdown pick when it's still valid.
+      setSelectedModel(
+        res.models?.includes(selectedModel) ? selectedModel : (res.models?.[0] ?? ""),
+      );
       qc.invalidateQueries({ queryKey: ["models"] });
       toast({ title: "Local model connected", description: res.name });
     } catch (e) {
@@ -278,26 +286,50 @@ export function ConnectLlamaModal() {
           )}
           {testResult && !saved && !error && (
             <div
-              className={`flex items-start gap-2 rounded-md border p-3 text-xs ${
+              className={`space-y-3 rounded-md border p-3 text-xs ${
                 testResult.online
                   ? "border-green-500/40 bg-green-500/5"
                   : "border-amber-500/40 bg-amber-500/5"
               }`}
             >
-              {testResult.online ? (
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
-              ) : (
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+              <div className="flex items-start gap-2">
+                {testResult.online ? (
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
+                ) : (
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                )}
+                <span>
+                  {testResult.online
+                    ? `Reachable — found ${testResult.count} model${
+                        testResult.count === 1 ? "" : "s"
+                      }.`
+                    : `Couldn't reach that URL${
+                        testResult.ping_error ? `: ${testResult.ping_error}` : "."
+                      }`}
+                </span>
+              </div>
+              {testResult.online && (testResult.models?.length ?? 0) > 0 && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="llama-model-pre">Model to use</Label>
+                  <select
+                    id="llama-model-pre"
+                    className={selectClass}
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    data-testid="select-llama-model-pre"
+                  >
+                    {testResult.models.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Pick your model, then press Connect — it will be applied to your agents
+                    in the next step.
+                  </p>
+                </div>
               )}
-              <span>
-                {testResult.online
-                  ? `Reachable — found ${testResult.count} model${
-                      testResult.count === 1 ? "" : "s"
-                    }.`
-                  : `Couldn't reach that URL${
-                      testResult.ping_error ? `: ${testResult.ping_error}` : "."
-                    }`}
-              </span>
             </div>
           )}
 

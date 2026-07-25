@@ -46,7 +46,21 @@ const VIRTIO_WIN_URL =
 const CACHE_DIR = path.join(VM_DATA_DIR, "_image-cache");
 
 // ── Public entry point ───────────────────────────────────────────────────────────
+// Per-VM in-flight lock: /vm/create, /vm/:id/provision and the start-route
+// self-heal can all request provisioning; concurrent passes for the same VM
+// would race on the shared disk/unattend/config artifacts. Callers awaiting a
+// duplicate request simply join the in-flight pass.
+const inFlight = new Map<string, Promise<void>>();
+
 export async function startProvisioning(vmId: string): Promise<void> {
+  const existing = inFlight.get(vmId);
+  if (existing) return existing;
+  const run = doStartProvisioning(vmId).finally(() => inFlight.delete(vmId));
+  inFlight.set(vmId, run);
+  return run;
+}
+
+async function doStartProvisioning(vmId: string): Promise<void> {
   const vm = getVm(vmId);
   if (!vm) return;
 
