@@ -7,7 +7,7 @@ import { SetupWizard } from "@/components/SetupWizard";
 import { ConnectLlamaModal } from "@/components/ConnectLlamaModal";
 import { SnapshotModal } from "@/components/SnapshotModal";
 import { Terminal, type TerminalHandle } from "@/components/Terminal";
-import { AgentChatPane, type ChatTarget } from "@/components/AgentChatPane";
+import { AgentChatPane, type ChatTarget, type ChatPaneHandle } from "@/components/AgentChatPane";
 import { ShellHistoryPanel } from "@/components/ShellHistoryPanel";
 import { FileExplorer } from "@/components/FileExplorer";
 import { VmTab } from "@/components/VmTab";
@@ -35,6 +35,8 @@ import {
   Globe,
   Plug,
   Boxes,
+  Wifi,
+  PanelLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -75,6 +77,7 @@ export default function Home() {
   const { data: shellToken } = useShellToken();
   const { data: vms = [] } = useVmList();
   const terminalRef = useRef<TerminalHandle>(null);
+  const chatPaneRef = useRef<ChatPaneHandle>(null);
   const { toast } = useToast();
 
   // If the active VM tab disappears (e.g. deleted), fall back to the workspace tab.
@@ -169,6 +172,28 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
+            onClick={() => setActiveTab("devices")}
+            title="Network / WiFi setup"
+            data-testid="button-wifi-quick"
+          >
+            <Wifi className="h-4 w-4" />
+            <span className="hidden sm:inline text-xs">WiFi</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
+            onClick={() => chatPaneRef.current?.showSidebar()}
+            title="Restore Odysseus sidebar"
+            data-testid="button-restore-sidebar"
+          >
+            <PanelLeft className="h-4 w-4" />
+            <span className="hidden sm:inline text-xs">Sidebar</span>
+          </Button>
           <ConnectLlamaModal />
           <SnapshotModal />
           <DiskInstallPanel />
@@ -272,6 +297,7 @@ export default function Home() {
             }
           >
             <AgentChatPane
+              ref={chatPaneRef}
               pendingContext={pendingOdysseusContext}
               onContextConsumed={() => setPendingOdysseusContext(null)}
               shellToken={shellToken}

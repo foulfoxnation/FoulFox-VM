@@ -1,7 +1,13 @@
-import { useRef, useCallback, useEffect, useState } from "react";
+import { useRef, useCallback, useEffect, useState, forwardRef, useImperativeHandle } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, ServerOff, Monitor, MonitorDot } from "lucide-react";
 import { apiUrl } from "@/lib/api-url";
+
+/** Methods exposed to the parent shell via ref. */
+export interface ChatPaneHandle {
+  /** Force the Odysseus sidebar to become visible (restores it if hidden). */
+  showSidebar(): void;
+}
 
 /** Which machine the agent's shell + file tools should act on. */
 export type ChatTarget =
@@ -27,14 +33,26 @@ export interface AgentChatPaneProps {
 
 const ODYSSEUS_SRC = apiUrl("/api/odysseus/");
 
-export function AgentChatPane({
+export const AgentChatPane = forwardRef<ChatPaneHandle, AgentChatPaneProps>(
+function AgentChatPane({
   pendingContext,
   onContextConsumed,
   shellToken,
   target,
   showTargetBadge = false,
-}: AgentChatPaneProps) {
+}: AgentChatPaneProps, ref) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    showSidebar() {
+      try {
+        const win = iframeRef.current?.contentWindow as (Window & { _odyOpenSidebar?: (side?: string) => void }) | null;
+        win?._odyOpenSidebar?.();
+      } catch {
+        // cross-origin guard — safe to ignore; the button is a best-effort helper
+      }
+    },
+  }));
   const loadedRef = useRef(false);
   // Label of the target the agent is *confirmed* bound to (updated only on a
   // successful vm-target POST). `bindError` is set when a bind attempt fails so
@@ -186,4 +204,5 @@ export function AgentChatPane({
       />
     </div>
   );
-}
+});
+AgentChatPane.displayName = "AgentChatPane";

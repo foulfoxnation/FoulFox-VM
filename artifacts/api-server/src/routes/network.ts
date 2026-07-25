@@ -92,9 +92,12 @@ router.post("/network/wifi/connect", async (req: Request, res: Response) => {
   const password = typeof req.body?.password === "string" ? req.body.password : "";
   if (!ssid) { res.status(400).json({ error: "Missing ssid" }); return; }
 
-  const args = ["device", "wifi", "connect", ssid];
+  // Run via sudo so polkit group-membership checks can't silently fail for the
+  // foulfox system service user. The sudoers rule (foulfox-network) whitelists
+  // exactly this argv prefix without requiring a password.
+  const args = ["nmcli", "device", "wifi", "connect", ssid];
   if (password) args.push("password", password);
-  const r = await run("nmcli", args, { timeoutMs: 45000 });
+  const r = await run("sudo", args, { timeoutMs: 45000 });
   if (!r.ok) {
     res.status(400).json({ error: (r.stderr || r.stdout || r.error || "Connection failed").trim() });
     return;
@@ -110,7 +113,7 @@ router.post("/network/wifi/forget", async (req: Request, res: Response) => {
   const ssid = typeof req.body?.ssid === "string" ? req.body.ssid : "";
   if (!ssid) { res.status(400).json({ error: "Missing ssid" }); return; }
 
-  const r = await run("nmcli", ["connection", "delete", "id", ssid], { timeoutMs: 15000 });
+  const r = await run("sudo", ["nmcli", "connection", "delete", "id", ssid], { timeoutMs: 15000 });
   if (!r.ok) {
     res.status(400).json({ error: (r.stderr || r.error || "Forget failed").trim() });
     return;

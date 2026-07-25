@@ -110,8 +110,8 @@ live-config
 live-config-systemd
 
 # ── Runtimes for the FoulFox services ────────────────────────────────────────
-nodejs
-npm
+# Node.js 20 is installed via the 0005-nodejs20.hook.chroot (NodeSource repo)
+# because Debian bookworm's 'nodejs' package is v18 and FoulFox apps need >=20.
 python3
 python3-venv
 python3-pip

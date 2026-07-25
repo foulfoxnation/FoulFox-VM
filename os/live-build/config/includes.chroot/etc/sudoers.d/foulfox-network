@@ -1,0 +1,5 @@
+## FoulFox network management — allow the api-server (running as foulfox) to
+## drive nmcli for wifi connect/disconnect/forget without a password prompt.
+## Read-only nmcli calls (status, scan) don't need polkit or sudo; only the
+## state-change operations (connect, forget) go through this rule.
+foulfox ALL=(root) NOPASSWD: /usr/bin/nmcli device wifi connect *, /usr/bin/nmcli connection delete id *
