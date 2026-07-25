@@ -2,4 +2,7 @@
 ## restart the Odysseus AI agent and re-run the first-run provisioner (which
 ## is idempotent and safe to re-run after a network connection is established
 ## — it re-downloads missing driver ISOs, etc.).
-foulfox ALL=(root) NOPASSWD: /usr/bin/systemctl restart odysseus-service, /usr/bin/systemctl restart foulfox-prepare
+## NOTE: the provisioner is run DIRECTLY (not `systemctl restart foulfox-prepare`)
+## because foulfox-api Requires= that unit — restarting it stops the api-server
+## and systemd never starts it again, killing the shell mid-session.
+foulfox ALL=(root) NOPASSWD: /usr/bin/systemctl restart odysseus-service, /usr/local/bin/foulfox-first-run

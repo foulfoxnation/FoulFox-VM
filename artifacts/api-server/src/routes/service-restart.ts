@@ -12,9 +12,9 @@ import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
-function sudoSystemctl(args: string[]): Promise<{ ok: boolean; stderr: string }> {
+function sudoRun(cmd: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; stderr: string }> {
   return new Promise((resolve) => {
-    execFile("sudo", ["-n", "systemctl", ...args], { timeout: 15_000 }, (err, _stdout, stderr) => {
+    execFile("sudo", ["-n", cmd, ...args], { timeout: timeoutMs }, (err, _stdout, stderr) => {
       if (err) {
         resolve({ ok: false, stderr: stderr || err.message });
       } else {
@@ -29,22 +29,32 @@ router.post("/os/restart-services", async (_req: Request, res: Response) => {
 
   const results: Record<string, { ok: boolean; stderr: string }> = {};
 
-  // Re-run the idempotent first-run provisioner first so it can re-download
-  // missing driver ISOs now that network is available, then restart Odysseus.
-  const prepare = await sudoSystemctl(["restart", "foulfox-prepare"]);
-  results["foulfox-prepare"] = prepare;
-  if (!prepare.ok) {
-    logger.warn({ stderr: prepare.stderr }, "restart-services: foulfox-prepare restart failed (may not be on appliance)");
-  }
-
-  const odysseus = await sudoSystemctl(["restart", "odysseus-service"]);
+  // Restart the Odysseus AI service (independent unit — does not touch us).
+  const odysseus = await sudoRun("systemctl", ["restart", "odysseus-service"], 15_000);
   results["odysseus-service"] = odysseus;
   if (!odysseus.ok) {
     logger.warn({ stderr: odysseus.stderr }, "restart-services: odysseus-service restart failed (may not be on appliance)");
   }
 
+  // Re-run the idempotent first-run provisioner DIRECTLY (not via
+  // `systemctl restart foulfox-prepare`): foulfox-api Requires= that unit, so
+  // restarting it makes systemd stop the api-server too and never start it
+  // again — killing the shell the user is looking at ("127.0.0.1 refused to
+  // connect"). The script sources its own env and is safe to re-run; it can
+  // now re-download missing driver ISOs since the network is available.
+  // Run it in the background so the response returns immediately (the
+  // download can take minutes) — report it as started, not finished.
+  results["foulfox-first-run"] = { ok: true, stderr: "started in background" };
+  sudoRun("/usr/local/bin/foulfox-first-run", [], 900_000).then((r) => {
+    if (!r.ok) {
+      logger.warn({ stderr: r.stderr }, "restart-services: foulfox-first-run failed (may not be on appliance)");
+    } else {
+      logger.info("restart-services: foulfox-first-run completed");
+    }
+  });
+
   const anyOk = Object.values(results).some((r) => r.ok);
-  logger.info({ results }, "restart-services: done");
+  logger.info({ results }, "restart-services: done (provisioner running in background)");
   res.json({ ok: anyOk, results });
 });
 
