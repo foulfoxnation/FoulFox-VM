@@ -176,9 +176,23 @@ rm -f "$MNTROOT/etc/live" 2>/dev/null || true
 # Remove live-specific kernel parameters from GRUB config if present.
 # The grub-install step below regenerates grub.cfg cleanly.
 
+# ── Strip live-boot so the installed system boots normally ──────────────────
+# The live rsync copies live-boot + live-config into the target. If left in
+# place, initramfs tries to find a squashfs image on the internal disk, fails,
+# and drops to an emergency shell. Remove them and rebuild initramfs first.
+
+emit "initramfs" 80 "Removing live-boot packages from installed system…"
+chroot "$MNTROOT" apt-get remove --purge -y \
+  live-boot live-boot-initramfs-tools live-config live-config-systemd \
+  live-tools 2>/dev/null || true
+
+emit "initramfs" 82 "Rebuilding initramfs without live-boot…"
+chroot "$MNTROOT" update-initramfs -u -k all 2>&1 | tail -5 || \
+  die "update-initramfs failed."
+
 # ── Install GRUB ───────────────────────────────────────────────────────────────
 
-emit "grub" 83 "Installing GRUB EFI bootloader…"
+emit "grub" 85 "Installing GRUB EFI bootloader…"
 chroot "$MNTROOT" grub-install \
   --target=x86_64-efi \
   --efi-directory=/boot/efi \
