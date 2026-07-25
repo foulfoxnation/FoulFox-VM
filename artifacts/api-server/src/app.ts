@@ -135,6 +135,9 @@ app.use("/api/vm", localhostOnly, requireStateChangeToken);
 app.use("/api/os/update", localhostOnly, requireStateChangeToken);
 app.use("/api/os/disk-install", localhostOnly, requireStateChangeToken);
 
+// Power management: localhost only, shell token required (these are destructive).
+app.use("/api/power", localhostOnly, requireStateChangeToken);
+
 // In-shell web browser. All endpoints are localhost only. The proxy GET is
 // authorized by its own HttpOnly cookie (an iframe navigation can't send a
 // header), while the cookie-issuing /session and the Chromium /launch POST

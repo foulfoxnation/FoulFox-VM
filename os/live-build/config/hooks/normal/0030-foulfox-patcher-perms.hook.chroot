@@ -32,3 +32,10 @@ if [ -f /etc/sudoers.d/foulfox-install-to-disk ]; then
   chmod 0440 /etc/sudoers.d/foulfox-install-to-disk
   visudo -cf /etc/sudoers.d/foulfox-install-to-disk
 fi
+
+# Power management sudoers drop-in (shutdown / reboot / suspend via systemctl).
+if [ -f /etc/sudoers.d/foulfox-power ]; then
+  chown root:root /etc/sudoers.d/foulfox-power
+  chmod 0440 /etc/sudoers.d/foulfox-power
+  visudo -cf /etc/sudoers.d/foulfox-power
+fi

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SettingsModal } from "@/components/SettingsModal";
 import { DiskInstallPanel } from "@/components/DiskInstallPanel";
+import { PowerMenu } from "@/components/PowerMenu";
 import { SetupWizard } from "@/components/SetupWizard";
 import { ConnectLlamaModal } from "@/components/ConnectLlamaModal";
 import { SnapshotModal } from "@/components/SnapshotModal";
@@ -171,6 +172,7 @@ export default function Home() {
           <ConnectLlamaModal />
           <SnapshotModal />
           <DiskInstallPanel />
+          <PowerMenu />
           <SettingsModal />
         </div>
       </div>

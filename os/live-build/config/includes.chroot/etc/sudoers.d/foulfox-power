@@ -1,0 +1,3 @@
+## FoulFox power management — allow the api-server (running as foulfox) to
+## trigger shutdown, reboot, and suspend via systemctl without a password.
+foulfox ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot, /usr/bin/systemctl suspend
