@@ -50,6 +50,49 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(({ vmId }, ref
     term.open(containerRef.current);
     fitAddon.fit();
 
+    // ── Windows-style keyboard shortcuts ──────────────────────────────────
+    // Ctrl+C: copy selected text (no SIGINT sent) when there is a selection;
+    //         fall through to normal ^C (SIGINT) when nothing is selected.
+    // Ctrl+V: paste from the system clipboard.
+    // Ctrl+A: select all visible terminal content.
+    // Ctrl+Shift+C / Ctrl+Shift+V: Linux-convention aliases (always copy/paste).
+    term.attachCustomKeyEventHandler((ev: KeyboardEvent) => {
+      if (ev.type !== "keydown") return true;
+
+      const ctrl = ev.ctrlKey && !ev.altKey;
+      const ctrlShift = ev.ctrlKey && ev.shiftKey;
+
+      // Ctrl+C with an active selection → copy, swallow the event.
+      if (ctrl && !ev.shiftKey && ev.code === "KeyC" && term.hasSelection()) {
+        navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+        return false;
+      }
+
+      // Ctrl+Shift+C → always copy (Linux convention).
+      if (ctrlShift && ev.code === "KeyC") {
+        navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+        return false;
+      }
+
+      // Ctrl+V or Ctrl+Shift+V → paste from clipboard.
+      if (ctrl && ev.code === "KeyV") {
+        navigator.clipboard.readText().then((text) => term.paste(text)).catch(() => {});
+        return false;
+      }
+      if (ctrlShift && ev.code === "KeyV") {
+        navigator.clipboard.readText().then((text) => term.paste(text)).catch(() => {});
+        return false;
+      }
+
+      // Ctrl+A → select all visible content.
+      if (ctrl && !ev.shiftKey && ev.code === "KeyA") {
+        term.selectAll();
+        return false;
+      }
+
+      return true;
+    });
+
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 

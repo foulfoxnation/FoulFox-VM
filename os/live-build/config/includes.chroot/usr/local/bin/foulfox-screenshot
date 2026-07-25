@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# FoulFox OS screenshot helper — called by the Openbox keyboard bindings.
+# PrintScreen       → full screen  (foulfox-screenshot full)
+# Alt+PrintScreen   → active window (foulfox-screenshot window)
+#
+# Saves to ~/Documents/Screenshots/Screenshot_YYYY-MM-DD_HH-MM-SS.png,
+# matching Windows behaviour. Shows a brief desktop notification when done.
+
+set -euo pipefail
+
+MODE="${1:-full}"
+
+# Resolve the home dir: the foulfox system user may have HOME=/var/lib/foulfox
+# but DISPLAY is always set when Openbox calls this. Prefer the invoking user's
+# actual home from the environment (set by the X session / LightDM).
+REAL_HOME="${HOME:-/var/lib/foulfox}"
+SAVE_DIR="$REAL_HOME/Documents/Screenshots"
+mkdir -p "$SAVE_DIR"
+
+STAMP="$(date '+%Y-%m-%d_%H-%M-%S')"
+OUTFILE="$SAVE_DIR/Screenshot_${STAMP}.png"
+
+# Small delay so any right-click menu that triggered this is gone from the frame.
+sleep 0.15
+
+case "$MODE" in
+  window)
+    # -u: capture the focused window; -b: include the window border/decoration.
+    scrot -ub "$OUTFILE"
+    ;;
+  *)
+    scrot "$OUTFILE"
+    ;;
+esac
+
+# Desktop notification (best-effort — suppress errors if libnotify isn't around).
+notify-send \
+  --icon=camera \
+  --expire-time=3000 \
+  "Screenshot saved" \
+  "$(basename "$OUTFILE")" 2>/dev/null || true

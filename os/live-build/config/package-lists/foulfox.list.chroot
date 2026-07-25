@@ -120,6 +120,13 @@ build-essential
 # without it every zip install (incl. the bundled default apps) fails.
 unzip
 
+# ── Screenshots ──────────────────────────────────────────────────────────────
+# scrot: lightweight X11 screenshotter used by foulfox-screenshot (PrintScreen
+# key binding). libnotify-bin: the notify-send binary that shows the "Screenshot
+# saved" toast after capture.
+scrot
+libnotify-bin
+
 # ── Convenience ──────────────────────────────────────────────────────────────
 sudo
 ca-certificates

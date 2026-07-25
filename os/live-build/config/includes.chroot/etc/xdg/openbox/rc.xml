@@ -24,7 +24,7 @@
     <firstdesk>1</firstdesk>
   </desktops>
   <keyboard>
-    <!-- Window switching between the kiosk and any open browser/viewer. -->
+    <!-- Window switching — Alt+Tab / Alt+Shift+Tab (Windows-standard). -->
     <keybind key="A-Tab">
       <action name="NextWindow">
         <finalactions>
@@ -43,6 +43,52 @@
         </finalactions>
       </action>
     </keybind>
+
+    <!-- Close the focused window — Alt+F4 (Windows-standard). -->
+    <keybind key="A-F4">
+      <action name="Close"/>
+    </keybind>
+
+    <!-- Maximize / restore — Super+Up / Super+Down (Windows-standard). -->
+    <keybind key="W-Up">
+      <action name="Maximize"/>
+    </keybind>
+    <keybind key="W-Down">
+      <action name="Unmaximize"/>
+    </keybind>
+
+    <!-- Snap window left / right — Super+Left / Super+Right. -->
+    <keybind key="W-Left">
+      <action name="UnmaximizeFull"/>
+      <action name="MoveResizeTo">
+        <x>0</x><y>0</y><width>50%</width><height>100%</height>
+      </action>
+    </keybind>
+    <keybind key="W-Right">
+      <action name="UnmaximizeFull"/>
+      <action name="MoveResizeTo">
+        <x>50%</x><y>0</y><width>50%</width><height>100%</height>
+      </action>
+    </keybind>
+
+    <!-- Show desktop — Super+D (Windows-standard). -->
+    <keybind key="W-d">
+      <action name="ToggleShowDesktop"/>
+    </keybind>
+
+    <!-- Screenshots — PrintScreen = full screen, Alt+PrintScreen = active window.
+         Saved to ~/Documents/Screenshots/ with Windows-style filenames. -->
+    <keybind key="Print">
+      <action name="Execute">
+        <command>/usr/local/bin/foulfox-screenshot full</command>
+      </action>
+    </keybind>
+    <keybind key="A-Print">
+      <action name="Execute">
+        <command>/usr/local/bin/foulfox-screenshot window</command>
+      </action>
+    </keybind>
+
     <!-- Open a browser over the kiosk. -->
     <keybind key="W-f">
       <action name="Execute">
@@ -53,10 +99,6 @@
       <action name="Execute">
         <command>/usr/local/bin/foulfox-open-browser chromium</command>
       </action>
-    </keybind>
-    <!-- Close the focused window (returns to the kiosk underneath). -->
-    <keybind key="A-F4">
-      <action name="Close"/>
     </keybind>
   </keyboard>
   <mouse>
