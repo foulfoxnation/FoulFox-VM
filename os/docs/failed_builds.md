@@ -29,7 +29,8 @@ and what NOT to retry.
 | 6 | `dconf-gsettings-backend` not installable / `pkgProblemResolver` | `lb chroot_install-packages live` (exit 100) | `fe3f58c`, `af8ec0b` — **both FAILED** | superseded |
 | 7 | **Root cause of #6:** runner's Ubuntu live-build 3.x vs Debian image | same stage | `a45d4f1` build in privileged `debian:bookworm` container | **FIXED ✅** |
 | 8 | `firmware-mediatek` not a bookworm package (merged into firmware-misc-nonfree) | `lb chroot_install-packages install` | remove from package list | **FIXED ✅** |
-| 9 | Python venv hook: no DNS inside chroot → pip can't reach PyPI | `chroot_hooks` / `0020-foulfox-python-venv` | set `nameserver 8.8.8.8` in hook before pip | **FIXED ✅** |
+| 9 | Python venv hook: no DNS inside chroot → pip can't reach PyPI | `chroot_hooks` / `0020-foulfox-python-venv` | set `nameserver 8.8.8.8` in hook before pip | superseded by #10 |
+| 10 | `/etc/resolv.conf` is a dangling symlink → `> /etc/resolv.conf` fails ("Directory nonexistent") | `chroot_hooks` / `0020-foulfox-python-venv` | `rm -f` the symlink first, write real file, restore symlink after | **FIXED ✅** |
 
 **Build #11 (`a45d4f1`) is the first fully GREEN run** — it cleared every chroot
 stage and produced the ISO end-to-end (collect + upload + release).
@@ -174,6 +175,13 @@ stage and produced the ISO end-to-end (collect + upload + release).
 - **Do NOT:** assume network is available inside chroot hooks without setting up DNS first. Any hook that needs to reach the internet must configure `/etc/resolv.conf` explicitly.
 
 ---
+
+## 10. `/etc/resolv.conf` is a dangling symlink in the chroot
+
+- **Symptom (build #19):** `0020-foulfox-python-venv.hook.chroot: 14: cannot create /etc/resolv.conf: Directory nonexistent` → exit 1.
+- **Root cause:** The previous fix (#9) wrote `echo "nameserver 8.8.8.8" > /etc/resolv.conf` without accounting for the fact that `/etc/resolv.conf` inside the chroot is a **symlink** (e.g. `-> /run/systemd/resolve/stub-resolv.conf`). The symlink target directory (`/run/systemd/resolve/`) doesn't exist in the live-build chroot at hook time, so the shell redirect fails with "Directory nonexistent".
+- **Fix:** Before writing the nameserver, check whether `/etc/resolv.conf` is a symlink with `[ -L /etc/resolv.conf ]`. If so, save the target with `readlink`, then `rm -f /etc/resolv.conf` before writing the plain file. After pip completes, `rm -f` again and restore via `ln -s "$_resolv_target" /etc/resolv.conf`. If it was a plain file, restore with `printf`.
+- **Do NOT:** write to `/etc/resolv.conf` in a chroot without first checking for and removing a dangling symlink.
 
 ## Current known-good configuration (as of build #11)
 
