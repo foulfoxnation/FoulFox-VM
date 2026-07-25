@@ -38,6 +38,7 @@
 - [In-shell browser proxy security](foulfox-browser-proxy-security.md) — loopback CORS must NEVER allow Origin:null (sandboxed proxy iframe is null-origin); SSRF guard must pin the socket to the validated IP (custom lookup).
 - [FoulFox default apps](foulfox-default-apps.md) — OS-bundled app zips seeded once-per-id at boot (marker only on success); copy zip before install; keep unzip in package list; schemaVersion:1 required.
 - [Agent-suite endpoint assignment](agent-suite-endpoint-assignment.md) — creating a ModelEndpoint ≠ using it; must provision it to all 3 roles or AI cost stays on the paid default; switch-model UI must call provision itself.
+- [FoulFox offline boot](foulfox-offline-boot.md) — no appliance unit may wait on network-online.target; kiosk waits for API unbounded + splash; boot downloads need timeouts + atomic rename.
 - [Shell token rotation](shell-token-rotation.md) — api-server restart mints a NEW session token; frontend must use authedFetch (401→refresh→retry once), never cache tokens forever or gate buttons on !token.
 - [api-server route prefix](apiserver-route-prefix.md) — routers mount at /api; defining "/api/..." inside a router → /api/api → silent 404; UI must gate success toasts on the response.
 - [Kiosk fullscreen escape](foulfox-kiosk-escape.md) — target=_blank / bare `chromium <url>` merges into the --kiosk instance (fullscreen, no way out); route external links via /api/browser/open → foulfox-open-browser.
