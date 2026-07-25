@@ -148,10 +148,18 @@ VIRTIO_ISO="$(find_virtio_iso)"
 
 # Best-effort download of virtio-win when absent and a network is available.
 if [ -z "$VIRTIO_ISO" ]; then
-  if curl -sfI https://fedorapeople.org >/dev/null 2>&1; then
+  # Hard timeouts: without them a half-up network (DNS blackhole, captive
+  # portal) can hang this probe for minutes and stall the whole boot chain,
+  # since foulfox-api Requires this unit to finish.
+  if curl -sfI --connect-timeout 5 --max-time 10 https://fedorapeople.org >/dev/null 2>&1; then
     VIRTIO_URL="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
-    if curl -fL --retry 3 -o "$STAGING/drivers/virtio-win.iso" "$VIRTIO_URL"; then
+    # Download to a .part name and rename only on success: a timed-out partial
+    # file must never be picked up by find_virtio_iso on the next boot.
+    if curl -fL --retry 2 --connect-timeout 10 --max-time 300 -o "$STAGING/drivers/virtio-win.iso.part" "$VIRTIO_URL"; then
+      mv "$STAGING/drivers/virtio-win.iso.part" "$STAGING/drivers/virtio-win.iso"
       VIRTIO_ISO="$STAGING/drivers/virtio-win.iso"
+    else
+      rm -f "$STAGING/drivers/virtio-win.iso.part"
     fi
   fi
 fi

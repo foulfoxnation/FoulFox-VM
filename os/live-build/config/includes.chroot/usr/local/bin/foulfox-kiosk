@@ -24,13 +24,29 @@ xset s off -dpms s noblank 2>/dev/null || true
   done ) &
 
 # Wait for the api-server to serve the shell before opening the browser.
+# No time limit: launching Chromium at the shell URL before the API is up
+# strands the user on a "127.0.0.1 refused to connect" error page that never
+# retries (a slow or offline first boot can easily exceed a fixed budget).
+# After a grace period, show a local "still starting" splash so a fail-closed
+# prepare failure is visible instead of an indefinite black screen; the splash
+# is replaced by the real shell the moment the API answers.
 url="http://127.0.0.1:${PORT:-8080}/"
-i=0
-while [ "$i" -lt 60 ]; do
-  if curl -sf -o /dev/null "$url"; then break; fi
-  i=$((i + 1))
+splash_pid=""
+waited=0
+while ! curl -sf -o /dev/null "$url"; do
+  waited=$((waited + 1))
+  if [ "$waited" -eq 45 ] && [ -z "$splash_pid" ]; then
+    chromium \
+      --class=FoulFoxSplash \
+      --kiosk --no-first-run --disable-infobars --noerrdialogs \
+      --disable-session-crashed-bubble --password-store=basic \
+      "data:text/html,<html><body style='background:%23111;color:%23ddd;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'><div style='max-width:40em;text-align:center'><h1 style='color:%23f80'>FoulFox OS is still starting&%238230;</h1><p>Services are taking longer than usual. This screen will be replaced automatically once they are up.</p><p style='color:%23888;font-size:0.9em'>If it never does: press Ctrl+Alt+F2, log in, and run<br><code>journalctl -u foulfox-prepare -u foulfox-api -b</code></p></div></body></html>" \
+      2>/dev/null &
+    splash_pid=$!
+  fi
   sleep 1
 done
+[ -n "$splash_pid" ] && kill "$splash_pid" 2>/dev/null
 
 # Hands-free voice apps: no gesture requirement for audio playback. The mic
 # grant itself comes from the managed policy in

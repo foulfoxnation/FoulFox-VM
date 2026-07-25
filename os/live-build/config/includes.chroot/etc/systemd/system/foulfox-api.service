@@ -1,7 +1,10 @@
 [Unit]
 Description=FoulFox VM API server (Express; serves shell + /api + Odysseus proxy)
-After=foulfox-prepare.service odysseus-service.service network-online.target
-Wants=network-online.target
+# Do NOT wait on network-online.target: on an offline machine that wait can
+# stall ~2 minutes, the kiosk's startup budget expires, and Chromium opens to
+# "127.0.0.1 refused to connect" with no API (WiFi, USB, VMs all dead).
+# The API server is fully local and needs no network to start.
+After=foulfox-prepare.service odysseus-service.service
 Requires=foulfox-prepare.service
 
 [Service]
