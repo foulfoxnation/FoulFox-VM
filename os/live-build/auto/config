@@ -40,5 +40,6 @@ lb config noauto \
   --apt-recommends true \
   --firmware-chroot false \
   --firmware-binary false \
+  --bootloaders "syslinux,grub-efi" \
   --bootappend-live "boot=live components username=foulfox user-fullname=FoulFox hostname=foulfox persistence persistence-label=foulfox-persist" \
   "${@}"

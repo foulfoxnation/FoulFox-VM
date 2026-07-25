@@ -80,6 +80,17 @@ chromium
 # window over the kiosk via foulfox-open-browser (shell button / W-f shortcut).
 firefox-esr
 
+# ── UEFI + Secure Boot boot support ─────────────────────────────────────────
+# grub-efi-amd64: GRUB EFI binary — gives the iso-hybrid an EFI System
+# Partition so modern UEFI laptops (HP, Dell, Lenovo, …) recognise the USB as
+# bootable without needing Legacy/CSM mode or disabling Secure Boot.
+# grub-efi-amd64-signed + shim-signed: the Microsoft-trusted shim chain that
+# lets the image boot on machines with Secure Boot ON (the default on most
+# consumer laptops shipped with Windows).
+grub-efi-amd64
+grub-efi-amd64-signed
+shim-signed
+
 # ── Live system (live-build boot + config) ───────────────────────────────────
 # By default live-build installs these in a SEPARATE, later apt transaction
 # ("lb_chroot_live-packages"). That incremental install re-resolves the live
