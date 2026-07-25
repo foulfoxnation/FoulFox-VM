@@ -31,6 +31,7 @@ and what NOT to retry.
 | 8 | `firmware-mediatek` not a bookworm package (merged into firmware-misc-nonfree) | `lb chroot_install-packages install` | remove from package list | **FIXED ✅** |
 | 9 | Python venv hook: no DNS inside chroot → pip can't reach PyPI | `chroot_hooks` / `0020-foulfox-python-venv` | set `nameserver 8.8.8.8` in hook before pip | superseded by #10 |
 | 10 | `/etc/resolv.conf` is a dangling symlink → `> /etc/resolv.conf` fails ("Directory nonexistent") | `chroot_hooks` / `0020-foulfox-python-venv` | `rm -f` the symlink first, write real file, restore symlink after | **FIXED ✅** |
+| 11 | ISO has no UEFI boot entry → modern UEFI laptops skip USB and boot to OS | boot (not a build break — image boots only on Legacy/CSM) | add `grub-efi-amd64` + `shim-signed` packages + `--bootloaders syslinux,grub-efi` | **FIXED ✅** |
 
 **Build #11 (`a45d4f1`) is the first fully GREEN run** — it cleared every chroot
 stage and produced the ISO end-to-end (collect + upload + release).
@@ -182,6 +183,13 @@ stage and produced the ISO end-to-end (collect + upload + release).
 - **Root cause:** The previous fix (#9) wrote `echo "nameserver 8.8.8.8" > /etc/resolv.conf` without accounting for the fact that `/etc/resolv.conf` inside the chroot is a **symlink** (e.g. `-> /run/systemd/resolve/stub-resolv.conf`). The symlink target directory (`/run/systemd/resolve/`) doesn't exist in the live-build chroot at hook time, so the shell redirect fails with "Directory nonexistent".
 - **Fix:** Before writing the nameserver, check whether `/etc/resolv.conf` is a symlink with `[ -L /etc/resolv.conf ]`. If so, save the target with `readlink`, then `rm -f /etc/resolv.conf` before writing the plain file. After pip completes, `rm -f` again and restore via `ln -s "$_resolv_target" /etc/resolv.conf`. If it was a plain file, restore with `printf`.
 - **Do NOT:** write to `/etc/resolv.conf` in a chroot without first checking for and removing a dangling symlink.
+
+## 11. ISO had no UEFI boot entry — modern laptops skipped USB entirely
+
+- **Symptom:** USB flashed with Balena Etcher (correctly written) — HP shows logo then boots straight to Windows. No USB in boot menu. No Secure Boot error. USB simply not recognised as bootable.
+- **Root cause:** The `iso-hybrid` image only had syslinux (BIOS/legacy) boot support. No EFI System Partition was embedded, so UEFI firmware (default on all modern HP/Dell/Lenovo machines shipped with Windows) has nothing to hand off to and silently skips the USB. This is a silent runtime failure, not a build break — the CI was green the whole time.
+- **Fix:** Added three packages to `foulfox.list.chroot`: `grub-efi-amd64` (the UEFI GRUB binary), `grub-efi-amd64-signed` (signed for Secure Boot), `shim-signed` (Microsoft-trusted shim chain so the image boots with Secure Boot ON). Added `--bootloaders "syslinux,grub-efi"` to `auto/config` so live-build embeds both a syslinux BIOS block and a proper EFI System Partition. The resulting iso-hybrid now appears in the UEFI boot menu on HP 1494 and similar machines without needing Legacy/CSM mode or disabling Secure Boot.
+- **Do NOT:** assume a green CI build means the image is bootable on UEFI hardware. Always verify boot on real hardware or a UEFI-mode VM after any bootloader change.
 
 ## Current known-good configuration (as of build #11)
 
