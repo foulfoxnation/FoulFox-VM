@@ -28,6 +28,8 @@ and what NOT to retry.
 | 5 | Firmware auto-detection 404 (`Contents-amd64.gz`) | `lb bootstrap`/chroot | `031cbb7` firmware flags false + explicit list | FIXED |
 | 6 | `dconf-gsettings-backend` not installable / `pkgProblemResolver` | `lb chroot_install-packages live` (exit 100) | `fe3f58c`, `af8ec0b` — **both FAILED** | superseded |
 | 7 | **Root cause of #6:** runner's Ubuntu live-build 3.x vs Debian image | same stage | `a45d4f1` build in privileged `debian:bookworm` container | **FIXED ✅** |
+| 8 | `firmware-mediatek` not a bookworm package (merged into firmware-misc-nonfree) | `lb chroot_install-packages install` | remove from package list | **FIXED ✅** |
+| 9 | Python venv hook: no DNS inside chroot → pip can't reach PyPI | `chroot_hooks` / `0020-foulfox-python-venv` | set `nameserver 8.8.8.8` in hook before pip | **FIXED ✅** |
 
 **Build #11 (`a45d4f1`) is the first fully GREEN run** — it cleared every chroot
 stage and produced the ISO end-to-end (collect + upload + release).
@@ -156,6 +158,20 @@ stage and produced the ISO end-to-end (collect + upload + release).
 - **Rule:** if a live-build run fails resolving an already-satisfied Debian
   chroot, FIRST check `lb --version` in the log. If it's Ubuntu's `3.0~aNN`,
   move the build into a Debian container before touching the package list.
+
+## 8. `firmware-mediatek` not found in Debian bookworm
+
+- **Symptom (build #15, #16):** `E: Unable to locate package firmware-mediatek` during `lb chroot_install-packages install` → exit 123.
+- **Root cause:** `firmware-mediatek` was merged into `firmware-misc-nonfree` in Debian bookworm. It no longer exists as a standalone package but was still listed explicitly in `config/package-lists/foulfox.list.chroot`.
+- **Fix:** removed the `firmware-mediatek` line; it is already covered by `firmware-misc-nonfree` which is also in the list. MediaTek WiFi firmware (MT7921/MT7922/MT7925) ships in `firmware-misc-nonfree`.
+- **Do NOT:** re-add `firmware-mediatek` as a separate package. Check `packages.debian.org/bookworm/<pkg>` before adding any firmware package by name.
+
+## 9. Python venv hook — no DNS inside chroot (`pip install` fails)
+
+- **Symptom (build #17):** `0020-foulfox-python-venv.hook.chroot` fails with repeated `Temporary failure in name resolution` when pip tries to reach PyPI → `ERROR: Could not find a version that satisfies the requirement fastapi` → exit 1.
+- **Root cause:** live-build chroot hooks run inside the chroot environment where `/etc/resolv.conf` is empty (the Debian base system's stub resolver is not wired up inside the chroot). The Docker container hosting the build has full internet access but the chroot's DNS config is missing.
+- **Fix:** write `nameserver 8.8.8.8` to `/etc/resolv.conf` at the top of the hook before running pip, then restore the original file after the install completes. Also added `--no-cache-dir` to pip calls to save disk space.
+- **Do NOT:** assume network is available inside chroot hooks without setting up DNS first. Any hook that needs to reach the internet must configure `/etc/resolv.conf` explicitly.
 
 ---
 
