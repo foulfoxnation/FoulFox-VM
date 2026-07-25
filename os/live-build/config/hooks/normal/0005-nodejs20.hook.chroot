@@ -5,6 +5,21 @@ set -e
 
 echo "[foulfox] Installing Node.js 20 from NodeSource…"
 
+# live-build chroot hooks run inside the chroot where /etc/resolv.conf is
+# often a dangling symlink (e.g. -> /run/systemd/resolve/stub-resolv.conf)
+# whose target directory doesn't exist yet. Remove the symlink/file first,
+# write a real file with a working nameserver, then restore after the install.
+# (Same fix as 0020-foulfox-python-venv.hook.chroot — see failed_builds.md #10.)
+_resolv_was_symlink=0
+_resolv_target=""
+if [ -L /etc/resolv.conf ]; then
+  _resolv_was_symlink=1
+  _resolv_target=$(readlink /etc/resolv.conf)
+fi
+_orig_resolv=$(cat /etc/resolv.conf 2>/dev/null || true)
+rm -f /etc/resolv.conf
+echo "nameserver 8.8.8.8" > /etc/resolv.conf
+
 # Remove the Debian-provided nodejs/npm if present (from the package list
 # or pulled in as a dependency). NodeSource will install its own binaries.
 apt-get remove -y --purge nodejs npm 2>/dev/null || true
@@ -14,5 +29,13 @@ apt-get autoremove -y 2>/dev/null || true
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 
 apt-get install -y nodejs
+
+# Restore resolv.conf (re-create symlink or plain file as it was).
+rm -f /etc/resolv.conf
+if [ "$_resolv_was_symlink" = "1" ]; then
+  ln -s "$_resolv_target" /etc/resolv.conf
+else
+  printf '%s\n' "$_orig_resolv" > /etc/resolv.conf
+fi
 
 echo "[foulfox] Node.js $(node --version) / npm $(npm --version) installed."

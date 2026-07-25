@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef } from "react";
 import {
   useListDirectory,
   getListDirectoryQueryKey,
@@ -39,7 +39,12 @@ import {
   Loader2,
   Box,
   CornerDownRight,
+  FolderPlus,
+  Download,
+  Check,
+  X,
 } from "lucide-react";
+import { apiUrl } from "@/lib/api-url";
 
 type Category = (typeof FrontloadInputCategory)[keyof typeof FrontloadInputCategory];
 
@@ -71,6 +76,43 @@ export function FileExplorer() {
   const { data: shellToken } = useShellToken();
   const tokenReady = !!shellToken;
   const authRequest = shellToken ? { headers: { "X-Shell-Token": shellToken } } : undefined;
+
+  // New-folder inline creation
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const newFolderInputRef = useRef<HTMLInputElement>(null);
+
+  const handleCreateFolder = async () => {
+    const name = newFolderName.trim();
+    if (!name || creatingFolder) return;
+    setCreatingFolder(true);
+    try {
+      const targetPath = `${currentPath}/${name}`.replace(/\/+/g, "/");
+      const res = await fetch(apiUrl("/api/shell/exec"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(shellToken ? { "X-Shell-Token": shellToken } : {}),
+        },
+        body: JSON.stringify({ command: `mkdir -p ${JSON.stringify(targetPath)}` }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      toast({ title: `Created folder "${name}"`, duration: 2000 });
+      setShowNewFolder(false);
+      setNewFolderName("");
+      queryClient.invalidateQueries({ queryKey: getListDirectoryQueryKey(path ? { path } : undefined) });
+    } catch (err) {
+      toast({
+        title: "Could not create folder",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+        duration: 3000,
+      });
+    } finally {
+      setCreatingFolder(false);
+    }
+  };
 
   const listing = useListDirectory(path ? { path } : undefined, {
     query: {
@@ -179,6 +221,18 @@ export function FileExplorer() {
                 onClick={() => navigate("/")}
               />
               <SidebarButton
+                active={path === "~/Documents"}
+                icon={<Folder className="h-4 w-4 text-sky-400" />}
+                label="Documents"
+                onClick={() => navigate("~/Documents")}
+              />
+              <SidebarButton
+                active={path === "~/Downloads"}
+                icon={<Download className="h-4 w-4 text-emerald-400" />}
+                label="Downloads"
+                onClick={() => navigate("~/Downloads")}
+              />
+              <SidebarButton
                 active={stagingPath != null && currentPath === stagingPath}
                 icon={<Box className="h-4 w-4" />}
                 label="Frontload staging"
@@ -266,7 +320,59 @@ export function FileExplorer() {
               Go
             </Button>
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            title="New folder"
+            data-testid="button-new-folder"
+            onClick={() => {
+              setShowNewFolder(true);
+              setNewFolderName("");
+              setTimeout(() => newFolderInputRef.current?.focus(), 50);
+            }}
+          >
+            <FolderPlus className="h-4 w-4" />
+          </Button>
         </div>
+
+        {/* Inline new-folder row */}
+        {showNewFolder && (
+          <div className="flex items-center gap-2 border-b bg-muted/20 px-3 py-1.5">
+            <Folder className="h-4 w-4 text-sky-400 shrink-0" />
+            <Input
+              ref={newFolderInputRef}
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void handleCreateFolder();
+                if (e.key === "Escape") { setShowNewFolder(false); setNewFolderName(""); }
+              }}
+              placeholder="New folder name…"
+              className="h-7 flex-1 text-xs"
+              data-testid="input-new-folder-name"
+            />
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7 text-green-500 hover:text-green-400"
+              disabled={!newFolderName.trim() || creatingFolder}
+              onClick={() => void handleCreateFolder()}
+              data-testid="button-confirm-new-folder"
+            >
+              {creatingFolder ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7 text-muted-foreground"
+              onClick={() => { setShowNewFolder(false); setNewFolderName(""); }}
+              data-testid="button-cancel-new-folder"
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
 
         {/* Listing */}
         <div className="flex-1 overflow-hidden">

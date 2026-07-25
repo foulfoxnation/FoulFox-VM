@@ -26,6 +26,19 @@ SPICE_PORT="${VM_SPICE_PORT:-5930}"
 
 mkdir -p "$STAGING/drivers" "$STAGING/isos" "$STAGING/files" "$VM_DIR" "$FOULFOX_HOME/logs"
 
+# ── User home folders ─────────────────────────────────────────────────────────
+# Documents (with Screenshots sub-folder used by the PrintScreen keybinding)
+# and Downloads. Created here so they exist on first boot regardless of whether
+# the persistence partition is present; the chown below covers them.
+FOULFOX_USER_HOME=$(getent passwd foulfox 2>/dev/null | cut -d: -f6 || echo "/var/lib/foulfox")
+mkdir -p \
+  "$FOULFOX_USER_HOME/Documents/Screenshots" \
+  "$FOULFOX_USER_HOME/Downloads"
+chown foulfox:foulfox \
+  "$FOULFOX_USER_HOME/Documents" \
+  "$FOULFOX_USER_HOME/Documents/Screenshots" \
+  "$FOULFOX_USER_HOME/Downloads" 2>/dev/null || true
+
 # Updater state the patcher mutates AS ROOT (downloaded bundles, extracted
 # releases, shared venvs, and the status/rollback/boot-recovery markers) stays
 # root-owned so the unprivileged 'foulfox' service user — which runs the

@@ -32,6 +32,7 @@ and what NOT to retry.
 | 9 | Python venv hook: no DNS inside chroot → pip can't reach PyPI | `chroot_hooks` / `0020-foulfox-python-venv` | set `nameserver 8.8.8.8` in hook before pip | superseded by #10 |
 | 10 | `/etc/resolv.conf` is a dangling symlink → `> /etc/resolv.conf` fails ("Directory nonexistent") | `chroot_hooks` / `0020-foulfox-python-venv` | `rm -f` the symlink first, write real file, restore symlink after | **FIXED ✅** |
 | 11 | ISO has no UEFI boot entry → modern UEFI laptops skip USB and boot to OS | boot (not a build break — image boots only on Legacy/CSM) | add `grub-efi-amd64` + `shim-signed` packages + `--bootloaders syslinux,grub-efi` | **FIXED ✅** |
+| 12 | `0005-nodejs20.hook.chroot` — DNS failure inside chroot during NodeSource `apt-get install nodejs` | `chroot_hooks` / `0005-nodejs20` | same resolv.conf fix as #10 applied to the Node hook | **FIXED ✅** |
 
 **Build #11 (`a45d4f1`) is the first fully GREEN run** — it cleared every chroot
 stage and produced the ISO end-to-end (collect + upload + release).
@@ -190,6 +191,24 @@ stage and produced the ISO end-to-end (collect + upload + release).
 - **Root cause:** The `iso-hybrid` image only had syslinux (BIOS/legacy) boot support. No EFI System Partition was embedded, so UEFI firmware (default on all modern HP/Dell/Lenovo machines shipped with Windows) has nothing to hand off to and silently skips the USB. This is a silent runtime failure, not a build break — the CI was green the whole time.
 - **Fix:** Added three packages to `foulfox.list.chroot`: `grub-efi-amd64` (the UEFI GRUB binary), `grub-efi-amd64-signed` (signed for Secure Boot), `shim-signed` (Microsoft-trusted shim chain so the image boots with Secure Boot ON). Added `--bootloaders "syslinux,grub-efi"` to `auto/config` so live-build embeds both a syslinux BIOS block and a proper EFI System Partition. The resulting iso-hybrid now appears in the UEFI boot menu on HP 1494 and similar machines without needing Legacy/CSM mode or disabling Secure Boot.
 - **Do NOT:** assume a green CI build means the image is bootable on UEFI hardware. Always verify boot on real hardware or a UEFI-mode VM after any bootloader change.
+
+## 12. `0005-nodejs20.hook.chroot` — DNS failure inside chroot (NodeSource apt-get)
+
+- **Symptom (build ~#34):** `0005-nodejs20.hook.chroot` fails with
+  `Temporary failure resolving 'deb.nodesource.com'` (or `deb.debian.org`) when
+  NodeSource's `setup_20.x` script or the subsequent `apt-get install nodejs`
+  tries to reach the internet from inside the chroot → `exit 1`.
+- **Root cause:** Identical to #9/#10 above. `/etc/resolv.conf` inside the
+  chroot is a dangling symlink (→ `/run/systemd/resolve/stub-resolv.conf`) whose
+  target directory does not exist at hook time, so DNS is broken for any network
+  call made by the hook.
+- **Fix:** Applied the same resolv.conf guard used in `0020-foulfox-python-venv`
+  (#10) to `0005-nodejs20.hook.chroot`: save whether the path is a symlink,
+  `rm -f /etc/resolv.conf`, write `nameserver 8.8.8.8`, run all `apt-get` /
+  `curl` / NodeSource steps, then restore the original symlink or file.
+- **Do NOT:** assume the NodeSource `curl | bash` inherits any DNS from the
+  build container — the chroot is network-isolated except through the fix above.
+  Apply this same guard to **any future hook that makes network calls**.
 
 ## Current known-good configuration (as of build #11)
 
