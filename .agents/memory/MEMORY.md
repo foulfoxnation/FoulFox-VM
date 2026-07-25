@@ -23,6 +23,7 @@
 - [noVNC + Vite CJS TLA pitfall](novnc-vite-cjs-tla.md) — pin @novnc/novnc to 1.4.0 ESM core/; 1.5+ CJS lib/ has a top-level await that crashes esbuild dep prebundle.
 - [api-server dev no-watch](apiserver-dev-no-watch.md) — dev = build+start, no watcher; restart the API Server workflow after backend edits or endpoints serve a stale build.
 - [FoulFox bootable-OS target](foulfox-bootable-os.md) — product aims to boot from USB on bare metal (KVM-native host); mutable VM state must live under ODYSSEUS_DATA_DIR (persistent partition), not tmpfs $HOME.
+- [FoulFox disk install](foulfox-disk-install.md) — install-to-disk: rsync live→target + grub-install EFI; sgdisk(gdisk) for GPT; script streams JSON progress; sudo-gated; helper IS the safety boundary (validates target in script, not sudoers).
 - [VM guest CDP exposure](vm-guest-cdp-exposure.md) — QEMU hostfwd targets the guest NIC IP, not loopback; bridge loopback-only guest services (Chrome CDP) via in-guest netsh portproxy; +Windows unattend gotchas.
 - ["Cloud Ollama" meaning](cloud-ollama-meaning.md) — = user's OWN deployed Ollama+bearer-proxy (/v1 URL + OLLAMA_PROXY_KEY), NOT public paid ollama.com; local Ollama is the free default.
 - [Self-healing setup audit](setup-heal-audit.md) — AI-online gate must derive from live models probe (not save-success); redact secrets in BOTH Odysseus + api-server spool; repair scope = server-side check_key whitelist.
