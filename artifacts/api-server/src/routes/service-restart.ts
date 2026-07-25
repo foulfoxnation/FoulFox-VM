@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { execFile } from "child_process";
+import { existsSync } from "fs";
 import { logger } from "../lib/logger";
 
 // ── Service restart API ────────────────────────────────────────────────────────
@@ -44,14 +45,22 @@ router.post("/os/restart-services", async (_req: Request, res: Response) => {
   // now re-download missing driver ISOs since the network is available.
   // Run it in the background so the response returns immediately (the
   // download can take minutes) — report it as started, not finished.
-  results["foulfox-first-run"] = { ok: true, stderr: "started in background" };
-  sudoRun("/usr/local/bin/foulfox-first-run", [], 900_000).then((r) => {
-    if (!r.ok) {
-      logger.warn({ stderr: r.stderr }, "restart-services: foulfox-first-run failed (may not be on appliance)");
-    } else {
-      logger.info("restart-services: foulfox-first-run completed");
-    }
-  });
+  // Only claim success when the script actually exists (i.e. we are on the
+  // appliance); in the dev workspace this keeps the UI toast honest.
+  const FIRST_RUN = "/usr/local/bin/foulfox-first-run";
+  if (existsSync(FIRST_RUN)) {
+    results["foulfox-first-run"] = { ok: true, stderr: "started in background" };
+    sudoRun(FIRST_RUN, [], 900_000).then((r) => {
+      if (!r.ok) {
+        logger.warn({ stderr: r.stderr }, "restart-services: foulfox-first-run failed");
+      } else {
+        logger.info("restart-services: foulfox-first-run completed");
+      }
+    });
+  } else {
+    results["foulfox-first-run"] = { ok: false, stderr: "provisioner not present (not on appliance)" };
+    logger.info("restart-services: foulfox-first-run not present, skipping (dev environment)");
+  }
 
   const anyOk = Object.values(results).some((r) => r.ok);
   logger.info({ results }, "restart-services: done (provisioner running in background)");
