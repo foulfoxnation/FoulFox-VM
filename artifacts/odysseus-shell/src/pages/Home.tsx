@@ -12,7 +12,7 @@ import { ShellHistoryPanel } from "@/components/ShellHistoryPanel";
 import { FileExplorer } from "@/components/FileExplorer";
 import { VmTab } from "@/components/VmTab";
 import { OsPicker } from "@/components/OsPicker";
-import { DownloadTab } from "@/components/DownloadTab";
+import { GetFoulFoxOsModal } from "@/components/GetFoulFoxOsModal";
 import { BrowserTab } from "@/components/BrowserTab";
 import { DevicesTab } from "@/components/DevicesTab";
 import { AppsTab } from "@/components/AppsTab";
@@ -31,7 +31,6 @@ import {
   Plus,
   Monitor,
   Apple,
-  Disc3,
   Globe,
   Plug,
   Boxes,
@@ -234,6 +233,7 @@ export default function Home() {
             <PanelLeft className="h-4 w-4" />
             <span className="hidden sm:inline text-xs">Sidebar</span>
           </Button>
+          <GetFoulFoxOsModal />
           <ConnectLlamaModal />
           <SnapshotModal />
           <DiskInstallPanel />
@@ -260,14 +260,6 @@ export default function Home() {
             >
               <FolderOpen className="mr-2 h-4 w-4" />
               File Explorer
-            </TabsTrigger>
-            <TabsTrigger
-              value="download"
-              className={TAB_TRIGGER}
-              data-testid="tab-download"
-            >
-              <Disc3 className="mr-2 h-4 w-4" />
-              Get FoulFox OS
             </TabsTrigger>
             <TabsTrigger
               value="browser"
@@ -410,9 +402,6 @@ export default function Home() {
 
             <Body show={activeTab === "files"}>
               <FileExplorer />
-            </Body>
-            <Body show={activeTab === "download"}>
-              <DownloadTab />
             </Body>
             <Body show={activeTab === "browser"}>
               <BrowserTab />
