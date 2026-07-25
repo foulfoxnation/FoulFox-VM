@@ -310,12 +310,25 @@ router.post("/browser/launch", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const child = spawn(
-      "chromium",
-      ["--new-window", "--start-fullscreen", "--no-first-run", "--disable-translate", safe.url.toString()],
-      { detached: true, stdio: "ignore" },
-    );
-    child.unref();
+    // Use the decorated overlay-browser launcher (separate profile). Spawning
+    // bare chromium here merges into the running --kiosk instance and opens
+    // the page fullscreen with no header, navigation, or way back.
+    const { existsSync } = await import("fs");
+    if (existsSync(OPEN_BROWSER_LAUNCHER)) {
+      const child = spawn(OPEN_BROWSER_LAUNCHER, ["chromium", safe.url.toString()], {
+        detached: true,
+        stdio: "ignore",
+        env: { ...process.env, DISPLAY: process.env["DISPLAY"] ?? ":0" },
+      });
+      child.unref();
+    } else {
+      const child = spawn(
+        "chromium",
+        ["--new-window", "--no-first-run", "--disable-translate", safe.url.toString()],
+        { detached: true, stdio: "ignore" },
+      );
+      child.unref();
+    }
     res.json({ ok: true, message: "Opened in Chromium" });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
@@ -336,6 +349,22 @@ router.post("/browser/open", async (req: Request, res: Response) => {
     res.status(400).json({ error: 'Expected {"browser": "firefox" | "chromium"}.' });
     return;
   }
+  // Optional URL: external links from the kiosk shell open here so they get a
+  // normal, decorated window instead of inheriting the kiosk's fullscreen.
+  let openUrl: string | null = null;
+  if (typeof req.body?.url === "string" && req.body.url) {
+    try {
+      const u = new URL(req.body.url);
+      if (u.protocol !== "http:" && u.protocol !== "https:") {
+        res.status(400).json({ error: "Only http(s) URLs can be opened." });
+        return;
+      }
+      openUrl = u.toString();
+    } catch {
+      res.status(400).json({ error: "Invalid URL." });
+      return;
+    }
+  }
   const { existsSync } = await import("fs");
   if (!existsSync(OPEN_BROWSER_LAUNCHER)) {
     res.status(503).json(unavailable("Browser launching is only available on the booted FoulFox OS appliance (no launcher on this machine)."));
@@ -351,7 +380,7 @@ router.post("/browser/open", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const child = spawn(OPEN_BROWSER_LAUNCHER, [browser], {
+    const child = spawn(OPEN_BROWSER_LAUNCHER, openUrl ? [browser, openUrl] : [browser], {
       detached: true,
       stdio: "ignore",
       env: { ...process.env, DISPLAY: process.env["DISPLAY"] ?? ":0" },

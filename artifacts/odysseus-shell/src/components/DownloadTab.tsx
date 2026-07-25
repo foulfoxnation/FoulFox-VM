@@ -8,6 +8,7 @@ import {
   useRollbackAppUpdate,
 } from "@/hooks/use-vms";
 import type { OsBuildStatus } from "@/lib/vm-api";
+import { externalLinkClick } from "@/lib/open-external";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -119,6 +120,7 @@ export function DownloadTab() {
                       className="underline underline-offset-2 hover:text-foreground"
                       target="_blank"
                       rel="noreferrer"
+                      onClick={externalLinkClick(sha256Url)}
                       data-testid="link-iso-checksum"
                     >
                       checksum
@@ -182,6 +184,7 @@ export function DownloadTab() {
                   href={ETCHER_URL}
                   target="_blank"
                   rel="noreferrer"
+                  onClick={externalLinkClick(ETCHER_URL)}
                   data-testid="link-etcher"
                 >
                   Get balenaEtcher <ExternalLink className="ml-2 h-3.5 w-3.5" />
@@ -603,6 +606,7 @@ function BuildIsoCard({
               href={linkUrl}
               target="_blank"
               rel="noreferrer"
+              onClick={externalLinkClick(linkUrl)}
               data-testid="link-actions"
             >
               <Github className="mr-2 h-4 w-4" /> {linkLabel}
@@ -674,6 +678,7 @@ function SetupNotice() {
           href="https://github.com"
           target="_blank"
           rel="noreferrer"
+          onClick={externalLinkClick("https://github.com")}
           data-testid="link-github"
         >
           <Github className="mr-2 h-4 w-4" /> Open GitHub

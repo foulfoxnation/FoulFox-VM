@@ -26,6 +26,7 @@ import {
   type RunPhase,
 } from "@/lib/apps-api";
 import { useShellToken } from "@/hooks/use-shell-token";
+import { externalLinkClick } from "@/lib/open-external";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -659,6 +660,7 @@ function AppCard({ app, token }: { app: InstalledApp; token?: string | null }) {
           href={app.repoUrl}
           target="_blank"
           rel="noreferrer"
+          onClick={externalLinkClick(app.repoUrl)}
           className="inline-flex items-center gap-1 break-all text-xs text-muted-foreground hover:text-foreground"
         >
           <ExternalLink className="h-3 w-3 shrink-0" /> {app.repoUrl}

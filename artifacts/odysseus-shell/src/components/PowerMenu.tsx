@@ -50,10 +50,20 @@ export function PowerMenu() {
   async function execute(action: Action) {
     setPending(null);
     try {
-      await fetch(apiUrl(`/api/power/${action}`), {
+      const r = await fetch(apiUrl(`/api/power/${action}`), {
         method: "POST",
         headers: shellToken ? { "X-Shell-Token": shellToken } : {},
       });
+      const data = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!r.ok || data.ok === false) {
+        toast({
+          title: `Could not ${ACTION_META[action].label.toLowerCase()}`,
+          description: data.error || `The system refused the request (${r.status}).`,
+          variant: "destructive",
+          duration: 6000,
+        });
+        return;
+      }
       if (action === "sleep") {
         toast({ title: "Going to sleep…", duration: 3000 });
       } else {

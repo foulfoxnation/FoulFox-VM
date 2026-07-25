@@ -14,7 +14,7 @@ const router: IRouter = Router();
 
 function sudoSystemctl(args: string[]): Promise<{ ok: boolean; stderr: string }> {
   return new Promise((resolve) => {
-    execFile("sudo", ["systemctl", ...args], { timeout: 15_000 }, (err, _stdout, stderr) => {
+    execFile("sudo", ["-n", "systemctl", ...args], { timeout: 15_000 }, (err, _stdout, stderr) => {
       if (err) {
         resolve({ ok: false, stderr: stderr || err.message });
       } else {
@@ -24,7 +24,7 @@ function sudoSystemctl(args: string[]): Promise<{ ok: boolean; stderr: string }>
   });
 }
 
-router.post("/api/os/restart-services", async (_req: Request, res: Response) => {
+router.post("/os/restart-services", async (_req: Request, res: Response) => {
   logger.info("restart-services: requested");
 
   const results: Record<string, { ok: boolean; stderr: string }> = {};

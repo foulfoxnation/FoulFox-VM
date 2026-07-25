@@ -42,6 +42,7 @@ done
 # Firefox window closes the whole X display), it restarts automatically.
 while true; do
   chromium \
+    --class=FoulFoxKiosk \
     --kiosk \
     --no-first-run \
     --disable-infobars \

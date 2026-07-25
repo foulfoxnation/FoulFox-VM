@@ -138,14 +138,21 @@
          foulfox-open-browser). Decorated + maximized + focused so new windows
          (e.g. OAuth sign-in popups) always come to the front instead of
          opening behind the fullscreen kiosk. -->
+    <!-- <fullscreen>no</fullscreen>: the kiosk instance now runs with its own
+         WM class (FoulFoxKiosk, set in foulfox-kiosk), so any window that maps
+         with the plain Chromium class is a user-facing browser window and must
+         never start fullscreen/undecorated (there would be no way out). Users
+         can still toggle fullscreen later (F11 / video fullscreen). -->
     <application class="Chromium" type="normal">
       <decor>yes</decor>
       <maximized>yes</maximized>
+      <fullscreen>no</fullscreen>
       <focus>yes</focus>
     </application>
     <application class="chromium" type="normal">
       <decor>yes</decor>
       <maximized>yes</maximized>
+      <fullscreen>no</fullscreen>
       <focus>yes</focus>
     </application>
     <!-- Chromium dialogs/popups (OAuth windows are type "dialog" sometimes) -->
