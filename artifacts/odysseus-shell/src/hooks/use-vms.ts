@@ -1,5 +1,4 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useShellToken } from "./use-shell-token";
 import {
   listVms,
   fetchCapabilities,
@@ -98,37 +97,33 @@ export function useTriggerOsBuild() {
 
 export function useCreateVm() {
   const qc = useQueryClient();
-  const { data: token } = useShellToken();
   return useMutation({
-    mutationFn: (input: CreateVmInput) => createVm(input, token),
+    mutationFn: (input: CreateVmInput) => createVm(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: VM_LIST_KEY }),
   });
 }
 
 export function useVmLifecycle() {
   const qc = useQueryClient();
-  const { data: token } = useShellToken();
   return useMutation({
     mutationFn: ({ id, action }: { id: string; action: VmLifecycleAction }) =>
-      vmLifecycle(id, action, token),
+      vmLifecycle(id, action),
     onSuccess: () => qc.invalidateQueries({ queryKey: VM_LIST_KEY }),
   });
 }
 
 export function useDeleteVm() {
   const qc = useQueryClient();
-  const { data: token } = useShellToken();
   return useMutation({
-    mutationFn: (id: string) => deleteVm(id, token),
+    mutationFn: (id: string) => deleteVm(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: VM_LIST_KEY }),
   });
 }
 
 export function useRetryProvision() {
   const qc = useQueryClient();
-  const { data: token } = useShellToken();
   return useMutation({
-    mutationFn: (id: string) => retryProvision(id, token),
+    mutationFn: (id: string) => retryProvision(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: VM_LIST_KEY }),
   });
 }
@@ -164,18 +159,16 @@ function onUpdateActionSettled(qc: ReturnType<typeof useQueryClient>) {
 
 export function useApplyAppUpdate() {
   const qc = useQueryClient();
-  const { data: token } = useShellToken();
   return useMutation({
-    mutationFn: () => applyAppUpdate(token),
+    mutationFn: () => applyAppUpdate(),
     onSettled: () => onUpdateActionSettled(qc),
   });
 }
 
 export function useRollbackAppUpdate() {
   const qc = useQueryClient();
-  const { data: token } = useShellToken();
   return useMutation({
-    mutationFn: () => rollbackAppUpdate(token),
+    mutationFn: () => rollbackAppUpdate(),
     onSettled: () => onUpdateActionSettled(qc),
   });
 }

@@ -2,12 +2,9 @@
 // bluetooth). Plain JSON over apiUrl, mirroring vm-api.ts. Read-only GETs need
 // no token; state-changing POSTs send the shell session token (X-Shell-Token).
 import { apiUrl } from "./api-url";
+import { authedFetch } from "./shell-token";
 
-function jsonHeaders(token?: string | null): Record<string, string> {
-  const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) h["X-Shell-Token"] = token;
-  return h;
-}
+
 
 async function parseError(res: Response): Promise<string> {
   try {
@@ -29,10 +26,10 @@ async function getCapable<T>(path: string): Promise<Capable<T>> {
   return { available: false, reason: await parseError(res) };
 }
 
-async function postJson<T>(path: string, body: unknown, token?: string | null): Promise<T> {
-  const res = await fetch(apiUrl(path), {
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await authedFetch(path, {
     method: "POST",
-    headers: jsonHeaders(token),
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body ?? {}),
   });
   if (!res.ok) throw new Error(await parseError(res));
@@ -57,25 +54,24 @@ export async function fetchBrowserCapabilities(): Promise<BrowserCapabilities> {
 
 // Issue the HttpOnly, path-scoped cookie that authorizes the proxy iframe. Must
 // run (with the shell token) before the first proxy load.
-export async function initBrowserSession(token?: string | null): Promise<void> {
-  await postJson("/api/browser/session", {}, token);
+export async function initBrowserSession(): Promise<void> {
+  await postJson("/api/browser/session", {});
 }
 
 export function browserProxySrc(url: string): string {
   return apiUrl(`/api/browser/proxy?url=${encodeURIComponent(url)}`);
 }
 
-export async function launchNativeBrowser(url: string, token?: string | null): Promise<{ ok: boolean; message?: string }> {
-  return postJson("/api/browser/launch", { url }, token);
+export async function launchNativeBrowser(url: string): Promise<{ ok: boolean; message?: string }> {
+  return postJson("/api/browser/launch", { url });
 }
 
 // Open a standalone, movable browser window (Firefox or Chromium) over the
 // kiosk on the appliance. Fails honestly in dev (no launcher / no display).
 export async function openStandaloneBrowser(
   browser: "firefox" | "chromium",
-  token?: string | null,
 ): Promise<{ ok: boolean; message?: string }> {
-  return postJson("/api/browser/open", { browser }, token);
+  return postJson("/api/browser/open", { browser });
 }
 
 // ── Network ──────────────────────────────────────────────────────────────────
@@ -89,11 +85,11 @@ export function fetchNetworkStatus(): Promise<Capable<{ devices: NetDevice[]; wi
 export function scanWifi(): Promise<Capable<{ networks: WifiNetwork[] }>> {
   return getCapable("/api/network/wifi/scan");
 }
-export function connectWifi(ssid: string, password: string, token?: string | null): Promise<{ ok: boolean; message: string }> {
-  return postJson("/api/network/wifi/connect", { ssid, password }, token);
+export function connectWifi(ssid: string, password: string): Promise<{ ok: boolean; message: string }> {
+  return postJson("/api/network/wifi/connect", { ssid, password });
 }
-export function forgetWifi(ssid: string, token?: string | null): Promise<{ ok: boolean; message: string }> {
-  return postJson("/api/network/wifi/forget", { ssid }, token);
+export function forgetWifi(ssid: string): Promise<{ ok: boolean; message: string }> {
+  return postJson("/api/network/wifi/forget", { ssid });
 }
 
 // ── USB ──────────────────────────────────────────────────────────────────────
@@ -103,14 +99,14 @@ export function listUsb(): Promise<Capable<{ devices: UsbDevice[] }>> {
   return getCapable("/api/usb/list");
 }
 export function attachUsb(
-  vmId: string, bus: string, device: string, token?: string | null,
+  vmId: string, bus: string, device: string,
 ): Promise<{ ok: boolean; id: string; message: string }> {
-  return postJson("/api/usb/attach", { vmId, bus, device }, token);
+  return postJson("/api/usb/attach", { vmId, bus, device });
 }
 export function detachUsb(
-  vmId: string, bus: string, device: string, token?: string | null,
+  vmId: string, bus: string, device: string,
 ): Promise<{ ok: boolean; message: string }> {
-  return postJson("/api/usb/detach", { vmId, bus, device }, token);
+  return postJson("/api/usb/detach", { vmId, bus, device });
 }
 
 // ── Bluetooth ──────────────────────────────────────────────────────────────────
@@ -122,12 +118,12 @@ export function fetchBluetoothStatus(): Promise<Capable<{
 }>> {
   return getCapable("/api/bluetooth/status");
 }
-export function setBluetoothPower(on: boolean, token?: string | null): Promise<{ ok: boolean; powered: boolean }> {
-  return postJson("/api/bluetooth/power", { on }, token);
+export function setBluetoothPower(on: boolean): Promise<{ ok: boolean; powered: boolean }> {
+  return postJson("/api/bluetooth/power", { on });
 }
-export function scanBluetooth(seconds: number, token?: string | null): Promise<{ ok: boolean; devices: BtDevice[] }> {
-  return postJson("/api/bluetooth/scan", { seconds }, token);
+export function scanBluetooth(seconds: number): Promise<{ ok: boolean; devices: BtDevice[] }> {
+  return postJson("/api/bluetooth/scan", { seconds });
 }
-export function bluetoothDeviceAction(action: BtAction, mac: string, token?: string | null): Promise<{ ok: boolean; message: string }> {
-  return postJson(`/api/bluetooth/${action}`, { mac }, token);
+export function bluetoothDeviceAction(action: BtAction, mac: string): Promise<{ ok: boolean; message: string }> {
+  return postJson(`/api/bluetooth/${action}`, { mac });
 }

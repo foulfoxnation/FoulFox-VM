@@ -93,8 +93,8 @@ export function AppsTab() {
   const [drivePath, setDrivePath] = useState<string | null>(null);
   const [driveOpen, setDriveOpen] = useState(false);
   const { data: drives = [], isLoading: drivesLoading, refetch: refetchDrives } =
-    useDrives(driveOpen, token);
-  const { data: dirListing, isLoading: dirLoading } = useDirectory(drivePath, token);
+    useDrives(driveOpen);
+  const { data: dirListing, isLoading: dirLoading } = useDirectory(drivePath);
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;

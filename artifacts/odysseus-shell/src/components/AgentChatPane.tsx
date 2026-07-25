@@ -2,6 +2,7 @@ import { useRef, useCallback, useEffect, useState, forwardRef, useImperativeHand
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, ServerOff, Monitor, MonitorDot } from "lucide-react";
 import { apiUrl } from "@/lib/api-url";
+import { authedFetch } from "@/lib/shell-token";
 
 /** Methods exposed to the parent shell via ref. */
 export interface ChatPaneHandle {
@@ -108,12 +109,10 @@ function AgentChatPane({
   useEffect(() => {
     if (!isAlive) return;
     const vm = targetKind === "vm" ? targetVmId : "host";
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (shellToken) headers["X-Shell-Token"] = shellToken;
     let cancelled = false;
-    fetch(apiUrl("/api/odysseus/api/vm-target"), {
+    authedFetch("/api/odysseus/api/vm-target", {
       method: "POST",
-      headers,
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ vm }),
     })
       .then((r) => (r.ok ? r.json() : null))
@@ -147,11 +146,9 @@ function AgentChatPane({
       "```\n" + pendingContext.slice(-4000) + "\n```\n\n" +
       "Please identify any errors, explain what happened, and suggest next steps.";
     try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (shellToken) headers["X-Shell-Token"] = shellToken;
-      await fetch(apiUrl("/api/odysseus/api/chat"), {
+      await authedFetch("/api/odysseus/api/chat", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),
       });
       if (iframeRef.current) iframeRef.current.src = ODYSSEUS_SRC;

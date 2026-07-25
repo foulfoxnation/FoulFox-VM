@@ -1,5 +1,4 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useShellToken } from "./use-shell-token";
 import {
   listApps,
   startAppInstall,
@@ -35,7 +34,6 @@ export function useApps() {
 }
 
 export function useInstallApp() {
-  const { data: token } = useShellToken();
   return useMutation({
     mutationFn: ({
       repoUrl,
@@ -43,12 +41,11 @@ export function useInstallApp() {
     }: {
       repoUrl: string;
       capabilities: AppCapability[];
-    }) => startAppInstall(repoUrl, capabilities, token),
+    }) => startAppInstall(repoUrl, capabilities),
   });
 }
 
 export function useInstallZip() {
-  const { data: token } = useShellToken();
   return useMutation({
     mutationFn: ({
       file,
@@ -56,12 +53,11 @@ export function useInstallZip() {
     }: {
       file: File;
       capabilities: AppCapability[];
-    }) => startAppZipUpload(file, capabilities, token),
+    }) => startAppZipUpload(file, capabilities),
   });
 }
 
 export function useInstallFromPath() {
-  const { data: token } = useShellToken();
   return useMutation({
     mutationFn: ({
       path,
@@ -69,25 +65,25 @@ export function useInstallFromPath() {
     }: {
       path: string;
       capabilities: AppCapability[];
-    }) => startAppFileInstall(path, capabilities, token),
+    }) => startAppFileInstall(path, capabilities),
   });
 }
 
 // Flash drives, refreshed while the picker is open so plugging one in shows up.
-export function useDrives(enabled: boolean, token?: string | null) {
+export function useDrives(enabled: boolean) {
   return useQuery<DriveInfo[]>({
     queryKey: ["drives"],
-    queryFn: () => listDrives(token),
-    enabled: enabled && !!token,
+    queryFn: () => listDrives(),
+    enabled,
     refetchInterval: enabled ? 3000 : false,
   });
 }
 
-export function useDirectory(path: string | null, token?: string | null) {
+export function useDirectory(path: string | null) {
   return useQuery<DirListing>({
     queryKey: ["dir", path],
-    queryFn: () => listDirectory(path as string, token),
-    enabled: !!path && !!token,
+    queryFn: () => listDirectory(path as string),
+    enabled: !!path,
   });
 }
 
@@ -104,28 +100,25 @@ export function useInstallJob(jobId: string | null) {
 }
 
 export function useStartApp() {
-  const { data: token } = useShellToken();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => startAppRun(id, token),
+    mutationFn: (id: string) => startAppRun(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: APPS_KEY }),
   });
 }
 
 export function useStopApp() {
-  const { data: token } = useShellToken();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => stopAppRun(id, token),
+    mutationFn: (id: string) => stopAppRun(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: APPS_KEY }),
   });
 }
 
 export function useUninstallApp() {
-  const { data: token } = useShellToken();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => uninstallApp(id, token),
+    mutationFn: (id: string) => uninstallApp(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: APPS_KEY }),
   });
 }

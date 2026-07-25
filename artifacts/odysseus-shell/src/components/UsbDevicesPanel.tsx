@@ -10,14 +10,12 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useShellToken } from "@/hooks/use-shell-token";
 import { useVmList } from "@/hooks/use-vms";
 import { useToast } from "@/hooks/use-toast";
 import { Usb, Loader2, RefreshCw, Plug, Unplug } from "lucide-react";
 import { listUsb, attachUsb, detachUsb, type UsbDevice } from "@/lib/peripherals-api";
 
 export function UsbDevicesPanel() {
-  const { data: token } = useShellToken();
   const { toast } = useToast();
   const { data: vms } = useVmList();
   const [vmId, setVmId] = useState<string>("");
@@ -33,12 +31,12 @@ export function UsbDevicesPanel() {
   }, [runningVms, vmId]);
 
   const attachMut = useMutation({
-    mutationFn: (d: UsbDevice) => attachUsb(vmId, d.bus, d.device, token),
+    mutationFn: (d: UsbDevice) => attachUsb(vmId, d.bus, d.device),
     onSuccess: (r) => toast({ title: r.message || "Device attached", duration: 2500 }),
     onError: (e) => toast({ title: "Attach failed", description: (e as Error).message, variant: "destructive", duration: 4000 }),
   });
   const detachMut = useMutation({
-    mutationFn: (d: UsbDevice) => detachUsb(vmId, d.bus, d.device, token),
+    mutationFn: (d: UsbDevice) => detachUsb(vmId, d.bus, d.device),
     onSuccess: (r) => toast({ title: r.message || "Device detached", duration: 2500 }),
     onError: (e) => toast({ title: "Detach failed", description: (e as Error).message, variant: "destructive", duration: 4000 }),
   });
@@ -104,10 +102,10 @@ export function UsbDevicesPanel() {
                 </div>
                 {!d.isHub && (
                   <div className="flex items-center gap-1.5">
-                    <Button size="sm" variant="secondary" className="h-7 gap-1" disabled={!vmId || !token || attachMut.isPending} onClick={() => setConfirmDev(d)} data-testid={`button-usb-attach-${d.vendorId}-${d.productId}`}>
+                    <Button size="sm" variant="secondary" className="h-7 gap-1" disabled={!vmId || attachMut.isPending} onClick={() => setConfirmDev(d)} data-testid={`button-usb-attach-${d.vendorId}-${d.productId}`}>
                       <Plug className="h-3.5 w-3.5" /> Attach
                     </Button>
-                    <Button size="sm" variant="ghost" className="h-7 gap-1" disabled={!vmId || !token || detachMut.isPending} onClick={() => detachMut.mutate(d)} data-testid={`button-usb-detach-${d.vendorId}-${d.productId}`}>
+                    <Button size="sm" variant="ghost" className="h-7 gap-1" disabled={!vmId || detachMut.isPending} onClick={() => detachMut.mutate(d)} data-testid={`button-usb-detach-${d.vendorId}-${d.productId}`}>
                       <Unplug className="h-3.5 w-3.5" /> Detach
                     </Button>
                   </div>
@@ -128,7 +126,7 @@ export function UsbDevicesPanel() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction disabled={!token} onClick={() => { if (confirmDev) attachMut.mutate(confirmDev); setConfirmDev(null); }}>Attach</AlertDialogAction>
+            <AlertDialogAction onClick={() => { if (confirmDev) attachMut.mutate(confirmDev); setConfirmDev(null); }}>Attach</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

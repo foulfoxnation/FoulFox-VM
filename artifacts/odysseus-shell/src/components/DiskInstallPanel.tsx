@@ -13,6 +13,7 @@ import { HardDrive, Loader2, AlertTriangle, CheckCircle2, ChevronRight } from "l
 import { useShellToken } from "@/hooks/use-shell-token";
 import { useToast } from "@/hooks/use-toast";
 import { apiUrl } from "@/lib/api-url";
+import { authedFetch } from "@/lib/shell-token";
 
 interface DiskCandidate {
   path: string;
@@ -87,9 +88,9 @@ export function DiskInstallPanel() {
   const startInstall = async () => {
     if (!selected || !shellToken) return;
     try {
-      const resp = await fetch(apiUrl("/api/os/disk-install/start"), {
+      const resp = await authedFetch("/api/os/disk-install/start", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Shell-Token": shellToken },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ targetDisk: selected }),
       });
       const data = await resp.json();

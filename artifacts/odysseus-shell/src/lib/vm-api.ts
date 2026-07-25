@@ -2,6 +2,7 @@
 // backend's hand-rolled multi-VM routes), so we use raw fetch via apiUrl/apiWsUrl
 // rather than the generated api-client (which only covers the legacy default VM).
 import { apiUrl, apiWsUrl } from "./api-url";
+import { authedFetch } from "./shell-token";
 
 export const DEFAULT_VM_ID = "default";
 
@@ -257,19 +258,19 @@ export async function fetchUpdateStatus(): Promise<UpdateStatus> {
   return res.json();
 }
 
-export async function applyAppUpdate(token?: string | null): Promise<UpdateActionResult> {
-  const res = await fetch(apiUrl("/api/os/update/apply"), {
+export async function applyAppUpdate(): Promise<UpdateActionResult> {
+  const res = await authedFetch("/api/os/update/apply", {
     method: "POST",
-    headers: jsonHeaders(token),
+    headers: jsonHeaders(),
   });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
 }
 
-export async function rollbackAppUpdate(token?: string | null): Promise<UpdateActionResult> {
-  const res = await fetch(apiUrl("/api/os/update/rollback"), {
+export async function rollbackAppUpdate(): Promise<UpdateActionResult> {
+  const res = await authedFetch("/api/os/update/rollback", {
     method: "POST",
-    headers: jsonHeaders(token),
+    headers: jsonHeaders(),
   });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
@@ -284,10 +285,10 @@ export interface CreateVmInput {
   diskGb?: number;
 }
 
-export async function createVm(input: CreateVmInput, token?: string | null): Promise<VmSummary> {
-  const res = await fetch(apiUrl("/api/vm/create"), {
+export async function createVm(input: CreateVmInput): Promise<VmSummary> {
+  const res = await authedFetch("/api/vm/create", {
     method: "POST",
-    headers: jsonHeaders(token),
+    headers: jsonHeaders(),
     body: JSON.stringify(input),
   });
   if (!res.ok) throw new Error(await parseError(res));
@@ -298,28 +299,27 @@ export async function createVm(input: CreateVmInput, token?: string | null): Pro
 export async function vmLifecycle(
   id: string,
   action: VmLifecycleAction,
-  token?: string | null,
 ): Promise<{ success: boolean; message: string; state: string }> {
-  const res = await fetch(apiUrl(`/api/vm/${encodeURIComponent(id)}/${action}`), {
+  const res = await authedFetch(`/api/vm/${encodeURIComponent(id)}/${action}`, {
     method: "POST",
-    headers: jsonHeaders(token),
+    headers: jsonHeaders(),
   });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
 }
 
-export async function deleteVm(id: string, token?: string | null): Promise<void> {
-  const res = await fetch(apiUrl(`/api/vm/${encodeURIComponent(id)}`), {
+export async function deleteVm(id: string): Promise<void> {
+  const res = await authedFetch(`/api/vm/${encodeURIComponent(id)}`, {
     method: "DELETE",
-    headers: jsonHeaders(token),
+    headers: jsonHeaders(),
   });
   if (!res.ok) throw new Error(await parseError(res));
 }
 
-export async function retryProvision(id: string, token?: string | null): Promise<void> {
-  const res = await fetch(apiUrl(`/api/vm/${encodeURIComponent(id)}/provision`), {
+export async function retryProvision(id: string): Promise<void> {
+  const res = await authedFetch(`/api/vm/${encodeURIComponent(id)}/provision`, {
     method: "POST",
-    headers: jsonHeaders(token),
+    headers: jsonHeaders(),
   });
   if (!res.ok) throw new Error(await parseError(res));
 }

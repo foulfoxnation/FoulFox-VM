@@ -67,7 +67,7 @@ export function BrowserTab() {
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
-    initBrowserSession(token)
+    initBrowserSession()
       .then(() => { if (!cancelled) setSessionReady(true); })
       .catch(() => { /* proxy will 401 and show its error page */ });
     return () => { cancelled = true; };
@@ -99,7 +99,7 @@ export function BrowserTab() {
   // Open a standalone, movable browser window (Firefox/Chromium) over the
   // kiosk on the appliance. In dev this fails honestly with a clear message.
   const openBrowserMut = useMutation({
-    mutationFn: (browser: "firefox" | "chromium") => openStandaloneBrowser(browser, token),
+    mutationFn: (browser: "firefox" | "chromium") => openStandaloneBrowser(browser),
     onSuccess: (r) => toast({ title: r.message || "Opening browser…", duration: 2500 }),
     onError: (e) =>
       toast({
@@ -111,7 +111,7 @@ export function BrowserTab() {
   });
 
   const launchMut = useMutation({
-    mutationFn: () => launchNativeBrowser(current || normalizeUrl(address), token),
+    mutationFn: () => launchNativeBrowser(current || normalizeUrl(address)),
     onSuccess: (r) => toast({ title: r.message || "Opened in Chromium", duration: 2500 }),
     onError: (e) => toast({ title: "Couldn't open full browser", description: (e as Error).message, variant: "destructive", duration: 4000 }),
   });

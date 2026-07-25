@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { useShellToken } from "@/hooks/use-shell-token";
 import { useToast } from "@/hooks/use-toast";
 import { Wifi, WifiOff, Cable, Loader2, Lock, Check, RefreshCw } from "lucide-react";
 import {
@@ -20,7 +19,6 @@ function isSecured(security: string): boolean {
 }
 
 export function NetworkPanel() {
-  const { data: token } = useShellToken();
   const { toast } = useToast();
   const qc = useQueryClient();
   const [connectTarget, setConnectTarget] = useState<WifiNetwork | null>(null);
@@ -30,7 +28,7 @@ export function NetworkPanel() {
   const scan = useQuery({ queryKey: ["wifi-scan"], queryFn: scanWifi, enabled: false });
 
   const connectMut = useMutation({
-    mutationFn: (v: { ssid: string; password: string }) => connectWifi(v.ssid, v.password, token),
+    mutationFn: (v: { ssid: string; password: string }) => connectWifi(v.ssid, v.password),
     onSuccess: (r) => {
       toast({ title: r.message, duration: 2500 });
       setConnectTarget(null); setPassword("");
@@ -40,7 +38,7 @@ export function NetworkPanel() {
     onError: (e) => toast({ title: "Couldn't connect", description: (e as Error).message, variant: "destructive", duration: 4000 }),
   });
   const forgetMut = useMutation({
-    mutationFn: (ssid: string) => forgetWifi(ssid, token),
+    mutationFn: (ssid: string) => forgetWifi(ssid),
     onSuccess: (r) => { toast({ title: r.message, duration: 2500 }); qc.invalidateQueries({ queryKey: ["network-status"] }); scan.refetch(); },
     onError: (e) => toast({ title: "Couldn't forget network", description: (e as Error).message, variant: "destructive", duration: 4000 }),
   });
@@ -114,9 +112,9 @@ export function NetworkPanel() {
                 </div>
                 <div className="flex items-center gap-2">
                   {n.inUse ? (
-                    <Button size="sm" variant="ghost" className="h-7" onClick={() => forgetMut.mutate(n.ssid)} disabled={!token || forgetMut.isPending}>Forget</Button>
+                    <Button size="sm" variant="ghost" className="h-7" onClick={() => forgetMut.mutate(n.ssid)} disabled={forgetMut.isPending}>Forget</Button>
                   ) : (
-                    <Button size="sm" variant="secondary" className="h-7" onClick={() => startConnect(n)} disabled={!token || connectMut.isPending} data-testid={`button-wifi-connect-${n.ssid}`}>Connect</Button>
+                    <Button size="sm" variant="secondary" className="h-7" onClick={() => startConnect(n)} disabled={connectMut.isPending} data-testid={`button-wifi-connect-${n.ssid}`}>Connect</Button>
                   )}
                 </div>
               </div>
@@ -132,7 +130,7 @@ export function NetworkPanel() {
             <Input type="password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Network password" data-testid="input-wifi-password" />
             <DialogFooter className="mt-4">
               <Button type="button" variant="ghost" onClick={() => setConnectTarget(null)}>Cancel</Button>
-              <Button type="submit" disabled={!token || connectMut.isPending}>{connectMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Connect"}</Button>
+              <Button type="submit" disabled={connectMut.isPending}>{connectMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Connect"}</Button>
             </DialogFooter>
           </form>
         </DialogContent>

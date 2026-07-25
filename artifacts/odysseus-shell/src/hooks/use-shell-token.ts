@@ -1,18 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
-import { apiUrl } from "@/lib/api-url";
+import { refreshShellToken } from "@/lib/shell-token";
 
-async function fetchShellToken(): Promise<string> {
-  const res = await fetch(apiUrl("/api/shell/session-token"));
-  if (!res.ok) throw new Error(`Failed to fetch shell token: ${res.status}`);
-  const data = await res.json();
-  return data.token as string;
-}
-
+// Thin React Query wrapper over the shell-token manager. Refetches
+// periodically so a token rotated by an api-server restart ("Retry Setup",
+// live update) heals without a page refresh; authedFetch() additionally
+// retries any 401 with a fresh token immediately.
 export function useShellToken() {
   return useQuery({
     queryKey: ["shell-session-token"],
-    queryFn: fetchShellToken,
-    staleTime: Infinity,
+    queryFn: async () => {
+      const token = await refreshShellToken();
+      if (!token) throw new Error("Failed to fetch shell token");
+      return token;
+    },
+    staleTime: 15_000,
+    refetchInterval: 30_000,
     retry: 5,
     retryDelay: 1000,
   });

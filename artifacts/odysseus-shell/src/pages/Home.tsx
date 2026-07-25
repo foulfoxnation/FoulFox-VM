@@ -18,6 +18,7 @@ import { AppsTab } from "@/components/AppsTab";
 import foxLogo from "@assets/FoxQuest_Logo_1781378611335.png";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { useShellToken } from "@/hooks/use-shell-token";
+import { authedFetch, refreshShellToken } from "@/lib/shell-token";
 import { useVmList } from "@/hooks/use-vms";
 import { DEFAULT_VM_ID, type OsKind } from "@/lib/vm-api";
 import {
@@ -74,7 +75,7 @@ export default function Home() {
   const handleRestartServices = async () => {
     setRestartingServices(true);
     try {
-      const res = await fetch("/api/os/restart-services", { method: "POST" });
+      const res = await authedFetch("/api/os/restart-services", { method: "POST" });
       const data = await res.json() as { ok: boolean; results?: Record<string, { ok: boolean }> };
       if (data.ok) {
         toast({
@@ -82,6 +83,10 @@ export default function Home() {
           description: "FoulFox OS services are restarting — the AI agent should come online in a few seconds.",
           duration: 5000,
         });
+        // The restarted api-server mints a NEW session token; grab it as soon
+        // as the server is back so the next action doesn't hit a stale-token 401.
+        setTimeout(() => void refreshShellToken(), 4000);
+        setTimeout(() => void refreshShellToken(), 10000);
       } else {
         toast({
           title: "Restart may not have taken effect",

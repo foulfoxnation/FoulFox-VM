@@ -45,6 +45,7 @@ import {
   X,
 } from "lucide-react";
 import { apiUrl } from "@/lib/api-url";
+import { authedFetch } from "@/lib/shell-token";
 
 type Category = (typeof FrontloadInputCategory)[keyof typeof FrontloadInputCategory];
 
@@ -75,7 +76,9 @@ export function FileExplorer() {
 
   const { data: shellToken } = useShellToken();
   const tokenReady = !!shellToken;
-  const authRequest = shellToken ? { headers: { "X-Shell-Token": shellToken } } : undefined;
+  // No per-request X-Shell-Token here: the generated client sends the token via
+  // setDefaultHeaders, which the shell-token manager keeps fresh across
+  // api-server restarts. A pinned per-request header would go stale instead.
 
   // New-folder inline creation
   const [showNewFolder, setShowNewFolder] = useState(false);
@@ -89,12 +92,9 @@ export function FileExplorer() {
     setCreatingFolder(true);
     try {
       const targetPath = `${currentPath}/${name}`.replace(/\/+/g, "/");
-      const res = await fetch(apiUrl("/api/shell/exec"), {
+      const res = await authedFetch("/api/shell/exec", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(shellToken ? { "X-Shell-Token": shellToken } : {}),
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ command: `mkdir -p ${JSON.stringify(targetPath)}` }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -119,17 +119,14 @@ export function FileExplorer() {
       enabled: tokenReady,
       queryKey: getListDirectoryQueryKey(path ? { path } : undefined),
     },
-    request: authRequest,
   });
   const drives = useListDrives({
     query: { enabled: tokenReady, queryKey: getListDrivesQueryKey() },
-    request: authRequest,
   });
   const staging = useGetStaging({
     query: { enabled: tokenReady, queryKey: getGetStagingQueryKey() },
-    request: authRequest,
   });
-  const frontload = useFrontloadFiles({ request: authRequest });
+  const frontload = useFrontloadFiles({});
 
   const currentPath = listing.data?.path ?? path ?? "~";
   const parent = listing.data?.parent ?? null;

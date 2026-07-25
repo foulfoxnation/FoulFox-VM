@@ -18,8 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useShellToken } from "@/hooks/use-shell-token";
-import { apiUrl } from "@/lib/api-url";
+import { authedFetch } from "@/lib/shell-token";
 import { useToast } from "@/hooks/use-toast";
 
 type Action = "shutdown" | "restart" | "sleep";
@@ -44,16 +43,12 @@ const ACTION_META: Record<Action, { label: string; description: string; confirm:
 
 export function PowerMenu() {
   const [pending, setPending] = useState<Action | null>(null);
-  const { data: shellToken } = useShellToken();
   const { toast } = useToast();
 
   async function execute(action: Action) {
     setPending(null);
     try {
-      const r = await fetch(apiUrl(`/api/power/${action}`), {
-        method: "POST",
-        headers: shellToken ? { "X-Shell-Token": shellToken } : {},
-      });
+      const r = await authedFetch(`/api/power/${action}`, { method: "POST" });
       const data = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!r.ok || data.ok === false) {
         toast({

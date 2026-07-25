@@ -25,7 +25,7 @@ import {
   PlugZap,
 } from "lucide-react";
 import { apiUrl } from "@/lib/api-url";
-import { useShellToken } from "@/hooks/use-shell-token";
+import { authedFetch } from "@/lib/shell-token";
 import { useToast } from "@/hooks/use-toast";
 
 // Self-serve "bring your own model" flow: connect a self-hosted llama (Ollama /
@@ -67,12 +67,12 @@ async function getJson<T>(path: string): Promise<T> {
   return r.json();
 }
 
-async function postJson<T>(path: string, body: unknown, token?: string): Promise<T> {
-  const headers: Record<string, string> = { "content-type": "application/json" };
-  if (token) headers["x-shell-token"] = token;
-  const r = await fetch(apiUrl(path), {
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  // authedFetch attaches the shell token and retries once with a fresh one if
+  // the api-server restarted and rotated it.
+  const r = await authedFetch(path, {
     method: "POST",
-    headers,
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
   const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
@@ -86,7 +86,6 @@ async function postJson<T>(path: string, body: unknown, token?: string): Promise
 export function ConnectLlamaModal() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const { data: shellToken } = useShellToken();
   const [open, setOpen] = useState(false);
 
   const [name, setName] = useState("");
@@ -128,11 +127,10 @@ export function ConnectLlamaModal() {
     setTestResult(null);
     setError(null);
     try {
-      const res = await postJson<TestResp>(
-        "/api/local-model/test",
-        { base_url: url.trim(), api_key: secret.trim() },
-        shellToken,
-      );
+      const res = await postJson<TestResp>("/api/local-model/test", {
+        base_url: url.trim(),
+        api_key: secret.trim(),
+      });
       setTestResult(res);
       // Pre-select the first discovered model so the dropdown is ready
       // before the endpoint is even saved.
@@ -150,11 +148,11 @@ export function ConnectLlamaModal() {
     setSaving(true);
     setError(null);
     try {
-      const res = await postJson<CreateResp>(
-        "/api/local-model/endpoints",
-        { name: name.trim(), base_url: url.trim(), api_key: secret.trim() },
-        shellToken,
-      );
+      const res = await postJson<CreateResp>("/api/local-model/endpoints", {
+        name: name.trim(),
+        base_url: url.trim(),
+        api_key: secret.trim(),
+      });
       setSaved(res);
       // Keep the user's pre-save dropdown pick when it's still valid.
       setSelectedModel(
@@ -340,7 +338,7 @@ export function ConnectLlamaModal() {
                 variant="outline"
                 size="sm"
                 onClick={handleTest}
-                disabled={!url.trim() || testing || saving || !shellToken}
+                disabled={!url.trim() || testing || saving}
                 data-testid="button-test-llama"
               >
                 {testing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -349,7 +347,7 @@ export function ConnectLlamaModal() {
               <Button
                 size="sm"
                 onClick={handleConnect}
-                disabled={!url.trim() || saving || !shellToken}
+                disabled={!url.trim() || saving}
                 data-testid="button-save-llama"
               >
                 {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

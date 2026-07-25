@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { apiUrl } from "@/lib/api-url";
 import { useShellToken } from "@/hooks/use-shell-token";
+import { authedFetch } from "@/lib/shell-token";
 import { useToast } from "@/hooks/use-toast";
 
 // First-run onboarding for the FoulFox 3-agent suite. Renders only when a suite
@@ -296,13 +297,11 @@ export function SetupWizard() {
   const aiReady = aiOnline;
 
   const postWithToken = async (path: string, body: Record<string, unknown>) => {
-    const token = shellTokenQ.data;
-    return fetch(apiUrl(path), {
+    // authedFetch attaches the shell token and retries once with a fresh one
+    // if the api-server restarted and rotated it mid-setup.
+    return authedFetch(path, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(token ? { "X-Shell-Token": token } : {}),
-      },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
   };
@@ -520,13 +519,9 @@ export function SetupWizard() {
 
   const applySizing = useMutation({
     mutationFn: async (body: VmSizing) => {
-      const token = shellTokenQ.data;
-      const res = await fetch(apiUrl("/api/setup/storage/vm-sizing"), {
+      const res = await authedFetch("/api/setup/storage/vm-sizing", {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(token ? { "X-Shell-Token": token } : {}),
-        },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
       if (!res.ok) {
@@ -541,13 +536,9 @@ export function SetupWizard() {
   // hint; the device-side helper still derives the real boot disk itself.
   const dryRun = useMutation({
     mutationFn: async (device: string | null): Promise<DryRunResp> => {
-      const token = shellTokenQ.data;
-      const res = await fetch(apiUrl("/api/setup/storage/partition/dry-run"), {
+      const res = await authedFetch("/api/setup/storage/partition/dry-run", {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(token ? { "X-Shell-Token": token } : {}),
-        },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify(device ? { device } : {}),
       });
       const j = (await res.json().catch(() => null)) as DryRunResp | null;
@@ -570,13 +561,9 @@ export function SetupWizard() {
   // only after the user types the erase phrase in the UI.
   const applyPartition = useMutation({
     mutationFn: async (input: { device: string | null; fingerprint?: string }): Promise<ApplyResp> => {
-      const token = shellTokenQ.data;
-      const res = await fetch(apiUrl("/api/setup/storage/partition/apply"), {
+      const res = await authedFetch("/api/setup/storage/partition/apply", {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(token ? { "X-Shell-Token": token } : {}),
-        },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({
           ...(input.device ? { device: input.device } : {}),
           ...(input.fingerprint ? { fingerprint: input.fingerprint } : {}),

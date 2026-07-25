@@ -1,6 +1,7 @@
 // Client for the FoulFox App fetch/install API (/api/apps/*).
 
 import { apiUrl } from "./api-url";
+import { authedFetch } from "./shell-token";
 
 export type AppStatus = "installing" | "installed" | "error";
 export type AppCapability = "agent.task" | "vm.computer_use";
@@ -71,10 +72,8 @@ export function appIconUrl(id: string): string {
   return apiUrl(`/api/apps/${encodeURIComponent(id)}/icon`);
 }
 
-function jsonHeaders(token?: string | null): Record<string, string> {
-  const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) h["X-Shell-Token"] = token;
-  return h;
+function jsonHeaders(): Record<string, string> {
+  return { "Content-Type": "application/json" };
 }
 
 async function parseError(res: Response): Promise<string> {
@@ -96,11 +95,10 @@ export async function listApps(): Promise<InstalledApp[]> {
 export async function startAppInstall(
   repoUrl: string,
   capabilities: AppCapability[],
-  token?: string | null,
 ): Promise<{ jobId: string; status: string }> {
-  const res = await fetch(apiUrl("/api/apps/install"), {
+  const res = await authedFetch("/api/apps/install", {
     method: "POST",
-    headers: jsonHeaders(token),
+    headers: jsonHeaders(),
     body: JSON.stringify({ repoUrl, capabilities }),
   });
   if (!res.ok) throw new Error(await parseError(res));
@@ -112,17 +110,14 @@ export async function startAppInstall(
 export async function startAppZipUpload(
   file: File,
   capabilities: AppCapability[],
-  token?: string | null,
 ): Promise<{ jobId: string; status: string }> {
   const params = new URLSearchParams({
     name: file.name,
     capabilities: capabilities.join(","),
   });
-  const headers: Record<string, string> = { "Content-Type": "application/zip" };
-  if (token) headers["X-Shell-Token"] = token;
-  const res = await fetch(apiUrl(`/api/apps/install-zip?${params}`), {
+  const res = await authedFetch(`/api/apps/install-zip?${params}`, {
     method: "POST",
-    headers,
+    headers: { "Content-Type": "application/zip" },
     body: file,
   });
   if (!res.ok) throw new Error(await parseError(res));
@@ -133,11 +128,10 @@ export async function startAppZipUpload(
 export async function startAppFileInstall(
   path: string,
   capabilities: AppCapability[],
-  token?: string | null,
 ): Promise<{ jobId: string; status: string }> {
-  const res = await fetch(apiUrl("/api/apps/install-file"), {
+  const res = await authedFetch("/api/apps/install-file", {
     method: "POST",
-    headers: jsonHeaders(token),
+    headers: jsonHeaders(),
     body: JSON.stringify({ path, capabilities }),
   });
   if (!res.ok) throw new Error(await parseError(res));
@@ -168,16 +162,16 @@ export interface DirListing {
   entries: DirEntry[];
 }
 
-export async function listDrives(token?: string | null): Promise<DriveInfo[]> {
-  const res = await fetch(apiUrl("/api/files/drives"), { headers: jsonHeaders(token) });
+export async function listDrives(): Promise<DriveInfo[]> {
+  const res = await authedFetch("/api/files/drives", { headers: jsonHeaders() });
   if (!res.ok) throw new Error(await parseError(res));
   const j = await res.json();
   return Array.isArray(j) ? j : [];
 }
 
-export async function listDirectory(path: string, token?: string | null): Promise<DirListing> {
-  const res = await fetch(apiUrl(`/api/files/list?path=${encodeURIComponent(path)}`), {
-    headers: jsonHeaders(token),
+export async function listDirectory(path: string): Promise<DirListing> {
+  const res = await authedFetch(`/api/files/list?path=${encodeURIComponent(path)}`, {
+    headers: jsonHeaders(),
   });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
@@ -189,10 +183,10 @@ export async function fetchInstallJob(jobId: string): Promise<InstallJob> {
   return res.json();
 }
 
-export async function uninstallApp(id: string, token?: string | null): Promise<{ ok: boolean }> {
-  const res = await fetch(apiUrl(`/api/apps/${encodeURIComponent(id)}`), {
+export async function uninstallApp(id: string): Promise<{ ok: boolean }> {
+  const res = await authedFetch(`/api/apps/${encodeURIComponent(id)}`, {
     method: "DELETE",
-    headers: jsonHeaders(token),
+    headers: jsonHeaders(),
   });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
@@ -200,11 +194,10 @@ export async function uninstallApp(id: string, token?: string | null): Promise<{
 
 export async function startAppRun(
   id: string,
-  token?: string | null,
 ): Promise<{ ok: boolean; run: RunSummary }> {
-  const res = await fetch(apiUrl(`/api/apps/${encodeURIComponent(id)}/start`), {
+  const res = await authedFetch(`/api/apps/${encodeURIComponent(id)}/start`, {
     method: "POST",
-    headers: jsonHeaders(token),
+    headers: jsonHeaders(),
   });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
@@ -212,11 +205,10 @@ export async function startAppRun(
 
 export async function stopAppRun(
   id: string,
-  token?: string | null,
 ): Promise<{ ok: boolean; run: RunSummary }> {
-  const res = await fetch(apiUrl(`/api/apps/${encodeURIComponent(id)}/stop`), {
+  const res = await authedFetch(`/api/apps/${encodeURIComponent(id)}/stop`, {
     method: "POST",
-    headers: jsonHeaders(token),
+    headers: jsonHeaders(),
   });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();

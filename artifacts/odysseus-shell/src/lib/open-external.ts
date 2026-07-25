@@ -1,4 +1,4 @@
-import { apiUrl } from "@/lib/api-url";
+import { authedFetch } from "@/lib/shell-token";
 
 // Open an external link safely from inside the kiosk.
 //
@@ -9,18 +9,14 @@ import { apiUrl } from "@/lib/api-url";
 // (or if the launcher is unavailable) we fall back to a normal new tab.
 export async function openExternal(url: string): Promise<void> {
   try {
-    // /api/browser/open requires the shell session token; fetch it fresh so
-    // this helper works from plain event handlers outside React Query.
-    const tokenRes = await fetch(apiUrl("/api/shell/session-token"));
-    const token = tokenRes.ok ? ((await tokenRes.json()).token as string) : "";
-    if (token) {
-      const r = await fetch(apiUrl("/api/browser/open"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Shell-Token": token },
-        body: JSON.stringify({ browser: "chromium", url }),
-      });
-      if (r.ok) return;
-    }
+    // /api/browser/open requires the shell session token; authedFetch attaches
+    // it and retries once with a fresh one if the server rotated it.
+    const r = await authedFetch("/api/browser/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ browser: "chromium", url }),
+    });
+    if (r.ok) return;
   } catch {
     // fall through to the browser fallback
   }
