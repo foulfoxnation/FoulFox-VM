@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect, useState, forwardRef, useImperativeHandle } from "react";
+import { useRef, useCallback, useEffect, useState, forwardRef, useImperativeHandle, type ForwardedRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, ServerOff, Monitor, MonitorDot } from "lucide-react";
 import { apiUrl } from "@/lib/api-url";
@@ -33,14 +33,14 @@ export interface AgentChatPaneProps {
 
 const ODYSSEUS_SRC = apiUrl("/api/odysseus/");
 
-export const AgentChatPane = forwardRef<ChatPaneHandle, AgentChatPaneProps>(
+export const AgentChatPane = forwardRef(
 function AgentChatPane({
   pendingContext,
   onContextConsumed,
   shellToken,
   target,
   showTargetBadge = false,
-}: AgentChatPaneProps, ref) {
+}: AgentChatPaneProps, ref: ForwardedRef<ChatPaneHandle>) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useImperativeHandle(ref, () => ({
