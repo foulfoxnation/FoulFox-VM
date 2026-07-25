@@ -1,7 +1,9 @@
 [Unit]
 Description=Odysseus AI agent (FastAPI, loopback :7000)
-After=foulfox-prepare.service network-online.target
-Wants=network-online.target
+# Do NOT wait on network-online.target: Odysseus is a local agent; waiting
+# ~90-120s for a network that may never come (no WiFi configured) delays
+# startup and makes the shell show "FoulFox OS Offline" until it times out.
+After=foulfox-prepare.service
 Requires=foulfox-prepare.service
 
 [Service]
@@ -9,6 +11,11 @@ Type=simple
 User=foulfox
 Group=foulfox
 EnvironmentFile=/etc/foulfox/foulfox.env
+# foulfox.env sets PORT=8080 for the api-server. Override it here so uvicorn
+# binds to its own loopback port (7000) instead of conflicting with the
+# api-server. Without this Odysseus crashes on startup and loops forever,
+# making the shell show "FoulFox OS Offline".
+Environment=PORT=7000
 # Run from the active app release (a symlink the patcher flips for live updates);
 # defaults to the baked /opt/foulfox/app. See foulfox-first-run + foulfox-patcher.
 WorkingDirectory=/var/lib/foulfox/app-current/artifacts/odysseus-service
