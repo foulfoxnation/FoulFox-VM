@@ -193,13 +193,36 @@ chroot "$MNTROOT" update-initramfs -u -k all 2>&1 | tail -5 || \
 # ── Install GRUB ───────────────────────────────────────────────────────────────
 
 emit "grub" 85 "Installing GRUB EFI bootloader…"
+# Mount efivarfs so grub-install can write the UEFI NVRAM boot entry.
+# Without this the chroot can't reach firmware variables and the entry is
+# never registered — the machine shows a blinking cursor after reboot.
+if [ -d /sys/firmware/efi/efivars ]; then
+  mount --bind /sys/firmware/efi/efivars "$MNTROOT/sys/firmware/efi/efivars" 2>/dev/null || true
+fi
+
+# Primary install: named entry in NVRAM (FoulFox).
 chroot "$MNTROOT" grub-install \
   --target=x86_64-efi \
   --efi-directory=/boot/efi \
   --bootloader-id=FoulFox \
   --recheck \
   --no-floppy \
-  2>&1 | tail -5 || die "grub-install failed. Is grub-efi-amd64 installed?"
+  2>&1 | tail -5 || true
+
+# Fallback install: EFI/BOOT/BOOTX64.EFI — the universal path that every
+# UEFI machine checks automatically, even when NVRAM entries are stale or
+# missing (e.g. after wiping Windows). This is what makes it boot.
+chroot "$MNTROOT" grub-install \
+  --target=x86_64-efi \
+  --efi-directory=/boot/efi \
+  --bootloader-id=FoulFox \
+  --removable \
+  --recheck \
+  --no-floppy \
+  2>&1 | tail -5 || die "grub-install (removable fallback) failed. Is grub-efi-amd64 installed?"
+
+# Unmount efivarfs after we're done.
+umount -lf "$MNTROOT/sys/firmware/efi/efivars" 2>/dev/null || true
 
 emit "grub" 90 "Generating GRUB configuration…"
 # Remove live-boot params from the kernel cmdline before generating grub.cfg.
