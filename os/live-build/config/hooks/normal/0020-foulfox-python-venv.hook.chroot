@@ -6,9 +6,20 @@ set -e
 
 SVC=/opt/foulfox/app/artifacts/odysseus-service
 if [ -d "$SVC" ] && [ -f "$SVC/requirements.txt" ]; then
+  # live-build chroot hooks run inside the chroot where /etc/resolv.conf is
+  # often empty (the Docker container has network but the chroot's stub
+  # resolver isn't wired up). Temporarily set a real nameserver so pip can
+  # reach PyPI, then restore the original file.
+  _orig_resolv=$(cat /etc/resolv.conf 2>/dev/null || true)
+  echo "nameserver 8.8.8.8" > /etc/resolv.conf
+
   python3 -m venv "$SVC/.venv"
-  "$SVC/.venv/bin/pip" install --upgrade pip
-  "$SVC/.venv/bin/pip" install -r "$SVC/requirements.txt"
+  "$SVC/.venv/bin/pip" install --upgrade pip --no-cache-dir
+  "$SVC/.venv/bin/pip" install -r "$SVC/requirements.txt" --no-cache-dir
+
+  # Restore resolv.conf
+  printf '%s\n' "$_orig_resolv" > /etc/resolv.conf
+
   # Stamp the sentinel start.sh checks so the first boot never tries to reinstall
   # (which would fail offline). Keep this filename in sync with start.sh.
   touch "$SVC/.venv/.foulfox-deps-installed"
