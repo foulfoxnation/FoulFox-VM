@@ -46,10 +46,33 @@ function AgentChatPane({
   useImperativeHandle(ref, () => ({
     showSidebar() {
       try {
-        const win = iframeRef.current?.contentWindow as (Window & { _odyOpenSidebar?: (side?: string) => void }) | null;
-        win?._odyOpenSidebar?.();
+        const iframe = iframeRef.current;
+        if (!iframe) return;
+        const win = iframe.contentWindow as (Window & {
+          _odyOpenSidebar?: (side?: string) => void;
+        }) | null;
+        if (!win) return;
+
+        // Method 1: use the function Odysseus exposes on its window.
+        if (typeof win._odyOpenSidebar === "function") {
+          win._odyOpenSidebar();
+          return;
+        }
+
+        // Method 2: directly click the hamburger toggle inside the iframe DOM.
+        const doc = iframe.contentDocument;
+        if (doc) {
+          const sidebar = doc.getElementById("sidebar");
+          if (sidebar?.classList.contains("hidden")) {
+            const btn = doc.getElementById("hamburger-btn");
+            btn?.click();
+            return;
+          }
+          // Sidebar exists and is already visible — nothing to do.
+          if (sidebar) return;
+        }
       } catch {
-        // cross-origin guard — safe to ignore; the button is a best-effort helper
+        // cross-origin guard — safe to ignore
       }
     },
   }));
