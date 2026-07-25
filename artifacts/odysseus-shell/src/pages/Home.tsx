@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SettingsModal } from "@/components/SettingsModal";
+import { DiskInstallPanel } from "@/components/DiskInstallPanel";
 import { SetupWizard } from "@/components/SetupWizard";
 import { ConnectLlamaModal } from "@/components/ConnectLlamaModal";
 import { SnapshotModal } from "@/components/SnapshotModal";
@@ -169,6 +170,7 @@ export default function Home() {
         <div className="flex items-center gap-3 shrink-0">
           <ConnectLlamaModal />
           <SnapshotModal />
+          <DiskInstallPanel />
           <SettingsModal />
         </div>
       </div>

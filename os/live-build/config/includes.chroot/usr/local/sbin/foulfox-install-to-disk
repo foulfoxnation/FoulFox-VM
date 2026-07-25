@@ -1,0 +1,205 @@
+#!/bin/bash
+# FoulFox OS — install live system to an internal disk.
+# Wipes the target disk, creates a fresh GPT with an EFI + root partition,
+# rsyncs the live OS into the root, and installs GRUB so the machine boots
+# FoulFox without the USB stick.
+#
+# Usage (runs as root, called by the api-server via sudo):
+#   foulfox-install-to-disk <device> --confirm
+#
+# Progress is reported on stdout as single-line JSON objects:
+#   {"step":"partition","pct":10,"msg":"Creating partitions…"}
+#   {"step":"done","pct":100,"msg":"Installation complete."}
+#   {"step":"error","pct":0,"msg":"<human-readable error>"}
+
+set -euo pipefail
+
+TARGET="${1:-}"
+CONFIRM="${2:-}"
+
+emit() {
+  local step="$1" pct="$2" msg="$3"
+  printf '{"step":"%s","pct":%d,"msg":"%s"}\n' "$step" "$pct" "$msg"
+}
+
+die() {
+  emit "error" 0 "$*"
+  exit 1
+}
+
+# ── Sanity checks ──────────────────────────────────────────────────────────────
+
+[ "$(id -u)" = "0" ] || die "Must run as root."
+[ -n "$TARGET" ] || die "Usage: foulfox-install-to-disk <device> --confirm"
+[ "$CONFIRM" = "--confirm" ] || die "Pass --confirm to acknowledge data loss on $TARGET."
+[ -b "$TARGET" ] || die "Not a block device: $TARGET"
+
+# Refuse to install onto virtual/RAM/loop devices.
+TYPE="$(lsblk -no TYPE "$TARGET" 2>/dev/null || true)"
+case "$TYPE" in
+  loop|ram|rom) die "Refusing to install onto virtual device: $TARGET ($TYPE)" ;;
+esac
+
+# Refuse if the target IS the boot device (avoid wiping the USB we booted from).
+BOOT_DEV=""
+BOOT_DEV="$(findmnt -no SOURCE / 2>/dev/null || true)"
+# Resolve the parent block device for partitions (e.g. /dev/sda1 -> /dev/sda).
+BOOT_DISK=""
+if [ -n "$BOOT_DEV" ]; then
+  BOOT_DISK="$(lsblk -no PKNAME "$BOOT_DEV" 2>/dev/null || true)"
+  BOOT_DISK="${BOOT_DISK:+/dev/$BOOT_DISK}"
+fi
+if [ "$TARGET" = "$BOOT_DISK" ] || [ "$TARGET" = "$BOOT_DEV" ]; then
+  die "Refusing: $TARGET is the current boot device ($BOOT_DEV). Choose an internal disk."
+fi
+
+# Refuse if any partition on the target is currently mounted (besides the live root).
+MOUNTED="$(lsblk -no MOUNTPOINT "${TARGET}" 2>/dev/null | grep -v '^$' | grep -v '^/run/live' || true)"
+if [ -n "$MOUNTED" ]; then
+  die "Refusing: $TARGET has mounted partitions: $(echo "$MOUNTED" | tr '\n' ' '). Unmount first."
+fi
+
+# ── Partition ──────────────────────────────────────────────────────────────────
+
+emit "partition" 5 "Wiping $TARGET and creating GPT partition table…"
+# Wipe all signatures first so parted doesn't complain.
+wipefs -a "$TARGET" >/dev/null 2>&1 || true
+sgdisk --zap-all "$TARGET" >/dev/null 2>&1 || \
+  parted -s "$TARGET" mklabel gpt >/dev/null 2>&1
+
+emit "partition" 8 "Creating EFI System Partition (512 MB)…"
+# Partition 1: EFI System Partition (512 MB, FAT32)
+# Partition 2: Root (rest of disk, ext4)
+sgdisk \
+  --new=1:0:+512M --typecode=1:ef00 --change-name=1:"EFI System" \
+  --new=2:0:0     --typecode=2:8300 --change-name=2:"FoulFox OS" \
+  "$TARGET" >/dev/null 2>&1 || {
+    # Fallback to parted if sgdisk is absent.
+    parted -s "$TARGET" \
+      mklabel gpt \
+      mkpart ESP fat32 1MiB 513MiB \
+      set 1 esp on \
+      mkpart root ext4 513MiB 100% >/dev/null 2>&1
+  }
+
+# Re-read partition table.
+partprobe "$TARGET" 2>/dev/null || true
+sleep 2
+
+# Derive partition device names (/dev/sda1, /dev/nvme0n1p1, etc.).
+if echo "$TARGET" | grep -q 'nvme\|mmcblk\|loop'; then
+  EFI_PART="${TARGET}p1"
+  ROOT_PART="${TARGET}p2"
+else
+  EFI_PART="${TARGET}1"
+  ROOT_PART="${TARGET}2"
+fi
+
+# ── Format ─────────────────────────────────────────────────────────────────────
+
+emit "format" 12 "Formatting EFI partition (FAT32)…"
+mkfs.fat -F 32 -n "FOULFOX_EFI" "$EFI_PART" >/dev/null 2>&1
+
+emit "format" 15 "Formatting root partition (ext4)…"
+mkfs.ext4 -F -L "foulfox-root" "$ROOT_PART" >/dev/null 2>&1
+
+# ── Mount ──────────────────────────────────────────────────────────────────────
+
+MNTROOT="/mnt/foulfox-install"
+mkdir -p "$MNTROOT"
+
+emit "mount" 18 "Mounting target partitions…"
+mount "$ROOT_PART" "$MNTROOT"
+mkdir -p "$MNTROOT/boot/efi"
+mount "$EFI_PART" "$MNTROOT/boot/efi"
+
+# ── Copy live system ────────────────────────────────────────────────────────────
+
+emit "copy" 20 "Copying OS to $TARGET — this takes a few minutes…"
+# Exclude volatile/virtual filesystems and the live-boot overlay dirs.
+rsync -axHAX \
+  --exclude=/proc \
+  --exclude=/sys \
+  --exclude=/dev \
+  --exclude=/run \
+  --exclude=/tmp \
+  --exclude=/mnt \
+  --exclude=/media \
+  --exclude=/live \
+  --exclude=/cdrom \
+  --exclude=/lost+found \
+  --info=progress2 \
+  / "$MNTROOT/" 2>&1 | while IFS= read -r line; do
+    # Parse rsync progress and emit JSON for the api-server to stream.
+    pct="$(printf '%s' "$line" | grep -oP '\d+(?=%)' | tail -1 || true)"
+    if [ -n "$pct" ] && [ "$pct" -le 100 ] 2>/dev/null; then
+      scaled=$(( 20 + (pct * 55 / 100) ))
+      emit "copy" "$scaled" "Copying OS… ${pct}%"
+    fi
+  done
+
+emit "copy" 75 "File copy complete."
+
+# ── Bind-mount virtual filesystems for chroot ────────────────────────────────
+
+for d in proc sys dev dev/pts run; do
+  mkdir -p "$MNTROOT/$d"
+  mount --bind "/$d" "$MNTROOT/$d" 2>/dev/null || true
+done
+
+cleanup() {
+  for d in dev/pts dev proc sys run; do
+    umount -lf "$MNTROOT/$d" 2>/dev/null || true
+  done
+  umount -lf "$MNTROOT/boot/efi" 2>/dev/null || true
+  umount -lf "$MNTROOT" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# ── Generate fstab ─────────────────────────────────────────────────────────────
+
+emit "fstab" 78 "Writing /etc/fstab…"
+ROOT_UUID="$(blkid -s UUID -o value "$ROOT_PART")"
+EFI_UUID="$(blkid -s UUID -o value "$EFI_PART")"
+cat > "$MNTROOT/etc/fstab" <<FSTAB
+# FoulFox OS — generated by foulfox-install-to-disk
+UUID=$ROOT_UUID  /          ext4  defaults,errors=remount-ro  0  1
+UUID=$EFI_UUID   /boot/efi  vfat  umask=0077                  0  2
+tmpfs            /tmp       tmpfs defaults,nosuid,nodev        0  0
+FSTAB
+
+# ── Remove live-boot specific files ────────────────────────────────────────────
+
+emit "cleanup" 80 "Removing live-boot configuration…"
+# Disable persistence boot parameter (not needed when installed to disk).
+rm -f "$MNTROOT/etc/live" 2>/dev/null || true
+# Remove live-specific kernel parameters from GRUB config if present.
+# The grub-install step below regenerates grub.cfg cleanly.
+
+# ── Install GRUB ───────────────────────────────────────────────────────────────
+
+emit "grub" 83 "Installing GRUB EFI bootloader…"
+chroot "$MNTROOT" grub-install \
+  --target=x86_64-efi \
+  --efi-directory=/boot/efi \
+  --bootloader-id=FoulFox \
+  --recheck \
+  --no-floppy \
+  2>&1 | tail -5 || die "grub-install failed. Is grub-efi-amd64 installed?"
+
+emit "grub" 90 "Generating GRUB configuration…"
+# Remove live-boot params from the kernel cmdline before generating grub.cfg.
+chroot "$MNTROOT" sed -i \
+  's/GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"/' \
+  /etc/default/grub 2>/dev/null || true
+chroot "$MNTROOT" update-grub 2>&1 | tail -5 || \
+  chroot "$MNTROOT" grub-mkconfig -o /boot/grub/grub.cfg 2>&1 | tail -5 || \
+  die "grub-mkconfig failed."
+
+# ── Finish ──────────────────────────────────────────────────────────────────────
+
+emit "sync" 97 "Syncing filesystem…"
+sync
+
+# cleanup() unmounts everything via the EXIT trap.
+emit "done" 100 "FoulFox OS installed to $TARGET. Remove the USB stick and reboot."

@@ -21,3 +21,14 @@ if [ -f /etc/sudoers.d/foulfox-storage-setup ]; then
   chmod 0440 /etc/sudoers.d/foulfox-storage-setup
   visudo -cf /etc/sudoers.d/foulfox-storage-setup
 fi
+
+# Same treatment for the disk-install helper (install live OS to internal disk)
+# and its sudoers drop-in. Runs as root so it can partition, format, rsync,
+# and grub-install the target drive.
+chmod 0755 /usr/local/sbin/foulfox-install-to-disk
+
+if [ -f /etc/sudoers.d/foulfox-install-to-disk ]; then
+  chown root:root /etc/sudoers.d/foulfox-install-to-disk
+  chmod 0440 /etc/sudoers.d/foulfox-install-to-disk
+  visudo -cf /etc/sudoers.d/foulfox-install-to-disk
+fi

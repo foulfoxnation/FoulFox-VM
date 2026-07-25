@@ -210,14 +210,12 @@ async function provisionWindows(vmId: string): Promise<void> {
         isoPath = cachedIso;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        logger.warn({ err, vm: vmId }, "Windows auto-download failed; falling back to frontload");
-        emit(vmId, {
-          status: "failed",
-          progress: 0,
-          error: msg,
-          message: `Automatic ${label} download is unavailable right now (${msg}). Copy a Windows ISO via File Explorer → USB Frontload → ISOs, set it in this VM's settings, then retry provisioning.`,
-        });
-        return;
+        logger.warn({ err, vm: vmId }, "Windows auto-download failed; continuing without installer ISO");
+        // Don't surface a hard failure: the disk and unattend CD are still built
+        // below so the user can add a Windows ISO later without re-provisioning.
+        // A "failed" toast here would alarm the user before they've even had a
+        // chance to frontload an ISO, so we fall through and emit "ready" with
+        // a clear action message instead.
       }
     }
   }

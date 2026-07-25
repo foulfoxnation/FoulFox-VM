@@ -133,6 +133,7 @@ app.use("/api/vm", localhostOnly, requireStateChangeToken);
 // foulfox-patcher via sudo). /api/os/app-update-info is intentionally NOT here —
 // it is a public read-only probe like /api/os/release-info.
 app.use("/api/os/update", localhostOnly, requireStateChangeToken);
+app.use("/api/os/disk-install", localhostOnly, requireStateChangeToken);
 
 // In-shell web browser. All endpoints are localhost only. The proxy GET is
 // authorized by its own HttpOnly cookie (an iframe navigation can't send a

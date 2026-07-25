@@ -1,0 +1,10 @@
+# Let the appliance service user install FoulFox OS to an internal disk.
+# The api-server runs as 'foulfox' and shells out to
+# `sudo -n foulfox-install-to-disk <device> --confirm` so the shell UI can
+# wipe + partition + rsync the live system to the target drive. Root is
+# required for partprobe, mkfs, rsync (to preserve ownership/permissions),
+# chroot, and grub-install. The helper validates all inputs itself (not the
+# boot device, not virtual, not already mounted) as the sole safety boundary.
+# Installed 0440 by the 0030-foulfox-patcher-perms build hook.
+Cmnd_Alias FOULFOX_INSTALL = /usr/local/sbin/foulfox-install-to-disk
+foulfox ALL=(root) NOPASSWD: FOULFOX_INSTALL

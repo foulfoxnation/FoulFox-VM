@@ -2,6 +2,10 @@
 # FoulFox OS kiosk X session (launched by LightDM autologin as user foulfox).
 # Starts the window manager, the Windows-VM viewer watcher, and a fullscreen
 # Chromium pointed at the locally-served FoulFox VM shell.
+#
+# Both openbox and chromium are wrapped in restart loops so a crash (e.g. a
+# GPU fault, OOM kill, or a misbehaving overlay browser window taking out X)
+# returns to the kiosk instead of leaving the user with a black screen.
 
 # shellcheck disable=SC1091
 [ -f /etc/foulfox/foulfox.env ] && . /etc/foulfox/foulfox.env
@@ -13,8 +17,11 @@ xset s off -dpms s noblank 2>/dev/null || true
 # Attach the fullscreen Windows-VM viewer whenever the guest is up (background).
 /usr/local/bin/foulfox-open-vm-viewer &
 
-# Window manager (handles window switching between the shell + the VM viewer).
-openbox &
+# Window manager — restart automatically if it crashes so windows stay manageable.
+( while true; do
+    openbox 2>/dev/null || true
+    sleep 2
+  done ) &
 
 # Wait for the api-server to serve the shell before opening the browser.
 url="http://127.0.0.1:${PORT:-8080}/"
@@ -29,14 +36,21 @@ done
 # grant itself comes from the managed policy in
 # /etc/chromium/policies/managed/foulfox-media.json (AudioCaptureAllowedUrls),
 # which auto-allows getUserMedia for the local shell origin without a prompt.
-exec chromium \
-  --kiosk \
-  --no-first-run \
-  --disable-infobars \
-  --disable-translate \
-  --noerrdialogs \
-  --disable-session-crashed-bubble \
-  --check-for-update-interval=31536000 \
-  --password-store=basic \
-  --autoplay-policy=no-user-gesture-required \
-  "$url"
+#
+# Chromium is NOT exec'd so that this script (the LightDM session process)
+# stays alive as the watchdog. If chromium crashes or is killed (e.g. a rogue
+# Firefox window closes the whole X display), it restarts automatically.
+while true; do
+  chromium \
+    --kiosk \
+    --no-first-run \
+    --disable-infobars \
+    --disable-translate \
+    --noerrdialogs \
+    --disable-session-crashed-bubble \
+    --check-for-update-interval=31536000 \
+    --password-store=basic \
+    --autoplay-policy=no-user-gesture-required \
+    "$url" 2>/dev/null || true
+  sleep 3
+done

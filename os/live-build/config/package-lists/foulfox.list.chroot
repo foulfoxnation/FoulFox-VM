@@ -52,6 +52,9 @@ dosfstools
 # (partx/findmnt/flock come from util-linux and mkfs.ext4 from e2fsprogs, both
 # Priority: required, so they are always present in the base.)
 parted
+# gdisk provides sgdisk — GPT manipulation used by foulfox-install-to-disk to
+# create the EFI + root partition table when installing to an internal disk.
+gdisk
 rsync
 
 # ── Virtualization stack (Windows guest) ─────────────────────────────────────
