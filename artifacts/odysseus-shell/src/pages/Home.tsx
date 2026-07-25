@@ -37,6 +37,7 @@ import {
   Boxes,
   Wifi,
   PanelLeft,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -73,12 +74,39 @@ export default function Home() {
   const [chatWidthPct, setChatWidthPct] = useState(38);
   const contentRef = useRef<HTMLDivElement>(null);
 
+  const [restartingServices, setRestartingServices] = useState(false);
+
   const { data: health } = useHealthCheck();
   const { data: shellToken } = useShellToken();
   const { data: vms = [] } = useVmList();
   const terminalRef = useRef<TerminalHandle>(null);
   const chatPaneRef = useRef<ChatPaneHandle>(null);
   const { toast } = useToast();
+
+  const handleRestartServices = async () => {
+    setRestartingServices(true);
+    try {
+      const res = await fetch("/api/os/restart-services", { method: "POST" });
+      const data = await res.json() as { ok: boolean; results?: Record<string, { ok: boolean }> };
+      if (data.ok) {
+        toast({
+          title: "Services restarting",
+          description: "FoulFox OS services are restarting — the AI agent should come online in a few seconds.",
+          duration: 5000,
+        });
+      } else {
+        toast({
+          title: "Restart may not have taken effect",
+          description: "This only works on the physical machine. The AI agent is managed by the dev workflow here.",
+          duration: 4000,
+        });
+      }
+    } catch {
+      toast({ title: "Could not reach the API server", variant: "destructive", duration: 3000 });
+    } finally {
+      setRestartingServices(false);
+    }
+  };
 
   // If the active VM tab disappears (e.g. deleted), fall back to the workspace tab.
   useEffect(() => {
@@ -182,6 +210,18 @@ export default function Home() {
           >
             <Wifi className="h-4 w-4" />
             <span className="hidden sm:inline text-xs">WiFi</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
+            onClick={handleRestartServices}
+            disabled={restartingServices}
+            title="Restart FoulFox OS services (use after connecting WiFi)"
+            data-testid="button-restart-services"
+          >
+            <RefreshCw className={`h-4 w-4 ${restartingServices ? "animate-spin" : ""}`} />
+            <span className="hidden sm:inline text-xs">Retry Setup</span>
           </Button>
           <Button
             variant="ghost"

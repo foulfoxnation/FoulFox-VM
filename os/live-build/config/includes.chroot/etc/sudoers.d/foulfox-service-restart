@@ -1,0 +1,5 @@
+## FoulFox service restart — allow the api-server (running as foulfox) to
+## restart the Odysseus AI agent and re-run the first-run provisioner (which
+## is idempotent and safe to re-run after a network connection is established
+## — it re-downloads missing driver ISOs, etc.).
+foulfox ALL=(root) NOPASSWD: /usr/bin/systemctl restart odysseus-service, /usr/bin/systemctl restart foulfox-prepare
