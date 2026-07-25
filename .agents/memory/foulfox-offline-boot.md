@@ -10,4 +10,5 @@ On an offline machine, `network-online.target` waits ~90–120s. foulfox-api.ser
 **How to apply:**
 - NO appliance unit may wait on network-online.target — the whole stack is local-first (prepare/odysseus already documented this; api was the stray violator).
 - foulfox-kiosk waits for the API with no time limit and shows a data:-URL "still starting" splash (class FoulFoxSplash) after 45s so fail-closed prepare failures are visible, not a black screen.
+- NEVER `systemctl restart foulfox-prepare` from the api-server: foulfox-api Requires= that unit, so systemd stop-propagates and never restarts the API — "Retry Setup" was killing the shell the user was looking at. Run the idempotent /usr/local/bin/foulfox-first-run script directly via sudo instead (keeps the Requires= fail-closed boot invariant intact).
 - Any best-effort boot-time download (virtio-win) needs --connect-timeout/--max-time and an atomic .part→rename so partial files aren't picked up next boot; foulfox-api Requires prepare, so anything that hangs prepare hangs the whole OS.
