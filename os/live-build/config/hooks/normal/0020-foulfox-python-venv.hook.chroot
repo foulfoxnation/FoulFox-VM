@@ -7,18 +7,30 @@ set -e
 SVC=/opt/foulfox/app/artifacts/odysseus-service
 if [ -d "$SVC" ] && [ -f "$SVC/requirements.txt" ]; then
   # live-build chroot hooks run inside the chroot where /etc/resolv.conf is
-  # often empty (the Docker container has network but the chroot's stub
-  # resolver isn't wired up). Temporarily set a real nameserver so pip can
-  # reach PyPI, then restore the original file.
+  # often a dangling symlink (e.g. -> /run/systemd/resolve/stub-resolv.conf)
+  # whose target directory doesn't exist yet. Remove the symlink/file first,
+  # write a real file with a working nameserver, then restore after the install.
+  _resolv_was_symlink=0
+  _resolv_target=""
+  if [ -L /etc/resolv.conf ]; then
+    _resolv_was_symlink=1
+    _resolv_target=$(readlink /etc/resolv.conf)
+  fi
   _orig_resolv=$(cat /etc/resolv.conf 2>/dev/null || true)
+  rm -f /etc/resolv.conf
   echo "nameserver 8.8.8.8" > /etc/resolv.conf
 
   python3 -m venv "$SVC/.venv"
   "$SVC/.venv/bin/pip" install --upgrade pip --no-cache-dir
   "$SVC/.venv/bin/pip" install -r "$SVC/requirements.txt" --no-cache-dir
 
-  # Restore resolv.conf
-  printf '%s\n' "$_orig_resolv" > /etc/resolv.conf
+  # Restore resolv.conf (re-create symlink or plain file as it was)
+  rm -f /etc/resolv.conf
+  if [ "$_resolv_was_symlink" = "1" ]; then
+    ln -s "$_resolv_target" /etc/resolv.conf
+  else
+    printf '%s\n' "$_orig_resolv" > /etc/resolv.conf
+  fi
 
   # Stamp the sentinel start.sh checks so the first boot never tries to reinstall
   # (which would fail offline). Keep this filename in sync with start.sh.
