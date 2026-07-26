@@ -33,6 +33,7 @@ and what NOT to retry.
 | 10 | `/etc/resolv.conf` is a dangling symlink → `> /etc/resolv.conf` fails ("Directory nonexistent") | `chroot_hooks` / `0020-foulfox-python-venv` | `rm -f` the symlink first, write real file, restore symlink after | **FIXED ✅** |
 | 11 | ISO has no UEFI boot entry → modern UEFI laptops skip USB and boot to OS | boot (not a build break — image boots only on Legacy/CSM) | add `grub-efi-amd64` + `shim-signed` packages + `--bootloaders syslinux,grub-efi` | **FIXED ✅** |
 | 12 | `0005-nodejs20.hook.chroot` — DNS failure inside chroot during NodeSource `apt-get install nodejs` | `chroot_hooks` / `0005-nodejs20` | same resolv.conf fix as #10 applied to the Node hook | **FIXED ✅** |
+| 13 | Ollama runtime `.tgz` asset gone (v0.32+ ships `.tar.zst`) → curl 404 | `chroot_hooks` / `0040-foulfox-ollama` | download `.tar.zst`, `tar --zstd`, add `zstd` package | **FIXED ✅** |
 
 **Build #11 (`a45d4f1`) is the first fully GREEN run** — it cleared every chroot
 stage and produced the ISO end-to-end (collect + upload + release).
@@ -242,3 +243,20 @@ When a future build fails:
    → fix commit → do-NOT-retry notes**.
 3. If it's a tooling/runner-environment cause (not a package), say so loudly —
    those are the ones that waste the most cycles.
+
+## 13. Ollama runtime download 404 (`ollama-linux-amd64.tgz` no longer exists)
+
+- **Symptom (runs #43, #44):** `0040-foulfox-ollama.hook.chroot` dies almost
+  immediately with `curl: (22) The requested URL returned error: 404` while
+  "Downloading Ollama runtime...". Everything before it (venv, patcher perms)
+  is green.
+- **Root cause:** Ollama v0.32.x stopped publishing the `.tgz` release asset.
+  `https://ollama.com/download/ollama-linux-amd64.tgz` redirects to the
+  latest GitHub release asset by name — the asset is now
+  `ollama-linux-amd64.tar.zst`, so the old name 404s.
+- **Fix:** hook downloads `ollama-linux-amd64.tar.zst` and extracts with
+  `tar --zstd`; `zstd` added to the chroot package list.
+- **Do NOT:** pin the old `.tgz` name or assume ollama.com/download URLs are
+  stable across Ollama versions; if this hook 404s again, list the latest
+  release assets (`gh api repos/ollama/ollama/releases/latest`) and match the
+  current asset naming.

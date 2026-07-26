@@ -13,7 +13,10 @@
 set -e
 
 MODEL="llama3.1:8b-instruct-q4_K_M"
-OLLAMA_TGZ_URL="https://ollama.com/download/ollama-linux-amd64.tgz"
+# Ollama v0.32+ ships release assets as .tar.zst (the old .tgz 404s). The
+# ollama.com/download redirect follows the latest release, so use the zst name
+# and extract with zstd (added to the chroot package list for this).
+OLLAMA_TAR_URL="https://ollama.com/download/ollama-linux-amd64.tar.zst"
 BAKED_MODELS=/opt/foulfox/ollama-models
 
 # ── resolv.conf fixup (same dance as the venv hook: the chroot's symlink often
@@ -39,9 +42,9 @@ restore_resolv() {
 
 # ── 1. Install the Ollama runtime (binary + bundled CUDA runners) ────────────
 echo "[0040-foulfox-ollama] Downloading Ollama runtime..."
-curl -fL --retry 3 --connect-timeout 15 -o /tmp/ollama.tgz "$OLLAMA_TGZ_URL"
-tar -C /usr/local -xzf /tmp/ollama.tgz
-rm -f /tmp/ollama.tgz
+curl -fL --retry 3 --connect-timeout 15 -o /tmp/ollama.tar.zst "$OLLAMA_TAR_URL"
+tar -C /usr/local --zstd -xf /tmp/ollama.tar.zst
+rm -f /tmp/ollama.tar.zst
 /usr/local/bin/ollama --version
 
 # ── 2. Pull the default model into the baked models dir ─────────────────────

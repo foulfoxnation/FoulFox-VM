@@ -128,6 +128,9 @@ build-essential
 # The app installer extracts uploaded/bundled FoulFox App zips with unzip;
 # without it every zip install (incl. the bundled default apps) fails.
 unzip
+# zstd: the Ollama runtime tarball (0040 hook) is a .tar.zst since Ollama
+# v0.32 — without zstd the bake step cannot extract it.
+zstd
 
 # ── Screenshots ──────────────────────────────────────────────────────────────
 # scrot: lightweight X11 screenshotter used by foulfox-screenshot (PrintScreen
