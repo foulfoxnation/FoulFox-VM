@@ -19,6 +19,7 @@ import foxLogo from "@assets/FoxQuest_Logo_1781378611335.png";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { useShellToken } from "@/hooks/use-shell-token";
 import { authedFetch, refreshShellToken } from "@/lib/shell-token";
+import { apiUrl } from "@/lib/api-url";
 import { useVmList } from "@/hooks/use-vms";
 import { DEFAULT_VM_ID, type OsKind } from "@/lib/vm-api";
 import {
@@ -79,14 +80,36 @@ export default function Home() {
       const data = await res.json() as { ok: boolean; results?: Record<string, { ok: boolean }> };
       if (data.ok) {
         toast({
-          title: "Services restarting",
-          description: "FoulFox OS services are restarting — the AI agent should come online in a few seconds.",
+          title: "Restarting FoulFox OS services…",
+          description: "Local AI + agent restarting; provisioner re-running. Watching for the agent to come online.",
           duration: 5000,
         });
         // The restarted api-server mints a NEW session token; grab it as soon
         // as the server is back so the next action doesn't hit a stale-token 401.
         setTimeout(() => void refreshShellToken(), 4000);
         setTimeout(() => void refreshShellToken(), 10000);
+        // Watch the agent until it actually answers (up to 90s) so "Retry
+        // Setup" reports a real outcome instead of silently doing nothing.
+        const deadline = Date.now() + 90_000;
+        let online = false;
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 3000));
+          try {
+            const s = await fetch(apiUrl("/api/odysseus/lifecycle/status"));
+            const j = await s.json() as { alive?: boolean };
+            if (j.alive) { online = true; break; }
+          } catch { /* api-server may be mid-restart; keep polling */ }
+        }
+        if (online) {
+          toast({ title: "FoulFox OS is online", description: "The agent is up — the chat is ready.", duration: 5000 });
+        } else {
+          toast({
+            title: "Agent still offline",
+            description: "The agent didn't come up after the restart. Open 'Show details' on the offline screen to see its crash log.",
+            variant: "destructive",
+            duration: 10000,
+          });
+        }
       } else {
         toast({
           title: "Restart may not have taken effect",

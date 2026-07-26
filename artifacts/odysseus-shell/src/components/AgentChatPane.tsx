@@ -84,6 +84,57 @@ function AgentChatPane({
   const [boundLabel, setBoundLabel] = useState<string | null>(null);
   const [bindError, setBindError] = useState(false);
 
+  // ── Offline pane: Retry Setup + on-screen diagnostics ──────────────────────
+  const [retrying, setRetrying] = useState(false);
+  const [retryNote, setRetryNote] = useState<string | null>(null);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<{ appliance: boolean; sections: Array<{ title: string; text: string }> } | null>(null);
+
+  const handleShowDiagnostics = useCallback(async () => {
+    setDiagLoading(true);
+    try {
+      const res = await authedFetch("/api/os/diagnostics");
+      setDiagnostics(await res.json());
+    } catch {
+      setDiagnostics({ appliance: true, sections: [{ title: "Diagnostics", text: "Could not reach the API server for diagnostics." }] });
+    } finally {
+      setDiagLoading(false);
+    }
+  }, []);
+
+  const handleOfflineRetry = useCallback(async () => {
+    setRetrying(true);
+    setRetryNote("Restarting local AI + agent, re-running setup…");
+    try {
+      const res = await authedFetch("/api/os/restart-services", { method: "POST" });
+      const data = await res.json() as { ok: boolean };
+      if (!data.ok) {
+        setRetryNote("Restart only works on the FoulFox OS machine (dev workspace manages the agent itself).");
+        return;
+      }
+      // Watch the agent until it answers (up to 90s); on failure, auto-load
+      // the crash log so the reason is on screen without any terminal work.
+      const deadline = Date.now() + 90_000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 3000));
+        try {
+          const s = await fetch(apiUrl("/api/odysseus/lifecycle/status"));
+          const j = await s.json() as { alive?: boolean };
+          if (j.alive) {
+            setRetryNote("FoulFox OS is online.");
+            return; // status query refetch flips the pane to the chat
+          }
+        } catch { /* api-server may be mid-restart; keep polling */ }
+      }
+      setRetryNote("The agent still isn't answering after the restart — details below show why it stopped.");
+      await handleShowDiagnostics();
+    } catch {
+      setRetryNote("Could not reach the API server to restart services.");
+    } finally {
+      setRetrying(false);
+    }
+  }, [handleShowDiagnostics]);
+
   const { data: status, isLoading } = useQuery({
     queryKey: ["odysseus-lifecycle-status"],
     queryFn: async () => {
@@ -182,13 +233,48 @@ function AgentChatPane({
 
   if (!isAlive) {
     return (
-      <div className="flex h-full w-full flex-col items-center justify-center bg-muted/20 text-muted-foreground" data-testid="agent-chat-offline">
+      <div className="flex h-full w-full flex-col items-center justify-center overflow-auto bg-muted/20 p-6 text-muted-foreground" data-testid="agent-chat-offline">
         <ServerOff className="mb-4 h-12 w-12" />
         <h2 className="text-xl font-semibold text-foreground">FoulFox OS Offline</h2>
         <p className="mt-2 max-w-md text-center">
-          The FoulFox OS agent is currently disconnected or the server is unreachable.
-          Wait for it to come online or check the VM status.
+          The FoulFox OS agent is not answering. Use Retry Setup to restart the
+          local AI and the agent, or Show details to see why it stopped.
         </p>
+        <div className="mt-4 flex gap-2">
+          <button
+            className="rounded-md border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            disabled={retrying}
+            onClick={() => void handleOfflineRetry()}
+            data-testid="button-offline-retry-setup"
+          >
+            {retrying ? "Restarting…" : "Retry Setup"}
+          </button>
+          <button
+            className="rounded-md border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            disabled={diagLoading}
+            onClick={() => void handleShowDiagnostics()}
+            data-testid="button-offline-diagnostics"
+          >
+            {diagLoading ? "Loading…" : diagnostics ? "Refresh details" : "Show details"}
+          </button>
+        </div>
+        {retryNote && <p className="mt-3 text-sm">{retryNote}</p>}
+        {diagnostics && (
+          <div className="mt-4 w-full max-w-3xl space-y-3 text-left" data-testid="offline-diagnostics">
+            {diagnostics.appliance === false ? (
+              <p className="text-sm">Diagnostics are only available on the FoulFox OS machine (in the dev workspace the agent is managed by the workflow).</p>
+            ) : (
+              diagnostics.sections.map((s) => (
+                <div key={s.title}>
+                  <h3 className="mb-1 text-sm font-semibold text-foreground">{s.title}</h3>
+                  <pre className="max-h-64 overflow-auto rounded-md border bg-background p-3 text-xs leading-relaxed">
+                    {s.text || "(no output)"}
+                  </pre>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
     );
   }

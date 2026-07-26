@@ -5,4 +5,11 @@
 ## NOTE: the provisioner is run DIRECTLY (not `systemctl restart foulfox-prepare`)
 ## because foulfox-api Requires= that unit — restarting it stops the api-server
 ## and systemd never starts it again, killing the shell mid-session.
-foulfox ALL=(root) NOPASSWD: /usr/bin/systemctl restart odysseus-service, /usr/local/bin/foulfox-first-run
+## The journalctl/status lines power the shell's on-screen diagnostics view
+## (GET /api/os/diagnostics). They are pinned to EXACT argument lists — keep
+## them byte-identical with api-server/src/routes/service-restart.ts.
+foulfox ALL=(root) NOPASSWD: /usr/bin/systemctl restart odysseus-service, /usr/bin/systemctl restart ollama, /usr/local/bin/foulfox-first-run
+foulfox ALL=(root) NOPASSWD: /usr/bin/systemctl status odysseus-service foulfox-prepare ollama --no-pager -l
+foulfox ALL=(root) NOPASSWD: /usr/bin/journalctl -u odysseus-service -n 120 --no-pager -o cat
+foulfox ALL=(root) NOPASSWD: /usr/bin/journalctl -u foulfox-prepare -n 60 --no-pager -o cat
+foulfox ALL=(root) NOPASSWD: /usr/bin/journalctl -u ollama -n 40 --no-pager -o cat
