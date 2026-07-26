@@ -18,8 +18,6 @@ import { AppsTab } from "@/components/AppsTab";
 import foxLogo from "@assets/FoxQuest_Logo_1781378611335.png";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { useShellToken } from "@/hooks/use-shell-token";
-import { authedFetch, refreshShellToken } from "@/lib/shell-token";
-import { apiUrl } from "@/lib/api-url";
 import { useVmList } from "@/hooks/use-vms";
 import { DEFAULT_VM_ID, type OsKind } from "@/lib/vm-api";
 import {
@@ -33,10 +31,8 @@ import {
   Boxes,
   Wifi,
   PanelLeft,
-  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/hooks/use-toast";
 
 const TAB_TRIGGER =
   "relative h-12 flex items-center rounded-none border-b-2 border-b-transparent bg-transparent px-4 pb-3 pt-2 font-medium text-muted-foreground shadow-none transition-none data-[state=active]:border-b-primary data-[state=active]:text-foreground data-[state=active]:shadow-none";
@@ -65,64 +61,10 @@ export default function Home() {
   const [chatWidthPct, setChatWidthPct] = useState(38);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  const [restartingServices, setRestartingServices] = useState(false);
-
   const { data: health } = useHealthCheck();
   const { data: shellToken } = useShellToken();
   const { data: vms = [] } = useVmList();
   const chatPaneRef = useRef<ChatPaneHandle>(null);
-  const { toast } = useToast();
-
-  const handleRestartServices = async () => {
-    setRestartingServices(true);
-    try {
-      const res = await authedFetch("/api/os/restart-services", { method: "POST" });
-      const data = await res.json() as { ok: boolean; results?: Record<string, { ok: boolean }> };
-      if (data.ok) {
-        toast({
-          title: "Restarting FoulFox OS services…",
-          description: "Local AI + agent restarting; provisioner re-running. Watching for the agent to come online.",
-          duration: 5000,
-        });
-        // The restarted api-server mints a NEW session token; grab it as soon
-        // as the server is back so the next action doesn't hit a stale-token 401.
-        setTimeout(() => void refreshShellToken(), 4000);
-        setTimeout(() => void refreshShellToken(), 10000);
-        // Watch the agent until it actually answers (up to 90s) so "Retry
-        // Setup" reports a real outcome instead of silently doing nothing.
-        const deadline = Date.now() + 90_000;
-        let online = false;
-        while (Date.now() < deadline) {
-          await new Promise((r) => setTimeout(r, 3000));
-          try {
-            const s = await fetch(apiUrl("/api/odysseus/lifecycle/status"));
-            const j = await s.json() as { alive?: boolean };
-            if (j.alive) { online = true; break; }
-          } catch { /* api-server may be mid-restart; keep polling */ }
-        }
-        if (online) {
-          toast({ title: "FoulFox OS is online", description: "The agent is up — the chat is ready.", duration: 5000 });
-        } else {
-          toast({
-            title: "Agent still offline",
-            description: "The agent didn't come up after the restart. Open 'Show details' on the offline screen to see its crash log.",
-            variant: "destructive",
-            duration: 10000,
-          });
-        }
-      } else {
-        toast({
-          title: "Restart may not have taken effect",
-          description: "This only works on the physical machine. The AI agent is managed by the dev workflow here.",
-          duration: 4000,
-        });
-      }
-    } catch {
-      toast({ title: "Could not reach the API server", variant: "destructive", duration: 3000 });
-    } finally {
-      setRestartingServices(false);
-    }
-  };
 
   // If the active VM tab disappears (e.g. deleted), fall back to the workspace tab.
   useEffect(() => {
@@ -207,18 +149,6 @@ export default function Home() {
           >
             <Wifi className="h-4 w-4" />
             <span className="hidden sm:inline text-xs">WiFi</span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
-            onClick={handleRestartServices}
-            disabled={restartingServices}
-            title="Restart FoulFox OS services (use after connecting WiFi)"
-            data-testid="button-restart-services"
-          >
-            <RefreshCw className={`h-4 w-4 ${restartingServices ? "animate-spin" : ""}`} />
-            <span className="hidden sm:inline text-xs">Retry Setup</span>
           </Button>
           <Button
             variant="ghost"

@@ -12,10 +12,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Settings, Loader2 } from "lucide-react";
+import { Settings, Loader2, RefreshCw } from "lucide-react";
 import { useGetVmConfig, useUpdateVmConfig, getGetVmConfigQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { authedFetch, refreshShellToken } from "@/lib/shell-token";
+import { apiUrl } from "@/lib/api-url";
 
 const configSchema = z.object({
   isoPath: z.string().optional(),
@@ -31,6 +33,7 @@ const configSchema = z.object({
 
 export function SettingsModal() {
   const [open, setOpen] = useState(false);
+  const [restartingServices, setRestartingServices] = useState(false);
   const { data: config, isLoading } = useGetVmConfig({ query: { enabled: open, queryKey: getGetVmConfigQueryKey() } });
   const updateConfig = useUpdateVmConfig();
   const queryClient = useQueryClient();
@@ -66,6 +69,61 @@ export function SettingsModal() {
       });
     }
   }, [config, form]);
+
+  // "Retry Setup" — restart the FoulFox OS services (local AI + agent) and
+  // re-run first-boot provisioning, then watch for the agent to come back.
+  // Lives here in Settings (not the main toolbar) so it can't be pressed by
+  // accident after a successful startup.
+  const handleRestartServices = async () => {
+    setRestartingServices(true);
+    try {
+      const res = await authedFetch("/api/os/restart-services", { method: "POST" });
+      const data = await res.json() as { ok: boolean; results?: Record<string, { ok: boolean }> };
+      if (data.ok) {
+        toast({
+          title: "Restarting FoulFox OS services…",
+          description: "Local AI + agent restarting; provisioner re-running. Watching for the agent to come online.",
+          duration: 5000,
+        });
+        // The restarted api-server mints a NEW session token; grab it as soon
+        // as the server is back so the next action doesn't hit a stale-token 401.
+        setTimeout(() => void refreshShellToken(), 4000);
+        setTimeout(() => void refreshShellToken(), 10000);
+        // Watch the agent until it actually answers (up to 90s) so "Retry
+        // Setup" reports a real outcome instead of silently doing nothing.
+        const deadline = Date.now() + 90_000;
+        let online = false;
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 3000));
+          try {
+            const s = await fetch(apiUrl("/api/odysseus/lifecycle/status"));
+            const j = await s.json() as { alive?: boolean };
+            if (j.alive) { online = true; break; }
+          } catch { /* api-server may be mid-restart; keep polling */ }
+        }
+        if (online) {
+          toast({ title: "FoulFox OS is online", description: "The agent is up — the chat is ready.", duration: 5000 });
+        } else {
+          toast({
+            title: "Agent still offline",
+            description: "The agent didn't come up after the restart. Open 'Show details' on the offline screen to see its crash log.",
+            variant: "destructive",
+            duration: 10000,
+          });
+        }
+      } else {
+        toast({
+          title: "Restart may not have taken effect",
+          description: "This only works on the physical machine. The AI agent is managed by the dev workflow here.",
+          duration: 4000,
+        });
+      }
+    } catch {
+      toast({ title: "Could not reach the API server", variant: "destructive", duration: 3000 });
+    } finally {
+      setRestartingServices(false);
+    }
+  };
 
   const onSubmit = (values: z.infer<typeof configSchema>) => {
     updateConfig.mutate(
@@ -160,6 +218,25 @@ export function SettingsModal() {
               <Button type="submit" disabled={updateConfig.isPending} data-testid="button-save-settings">
                 {updateConfig.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Save Changes
+              </Button>
+            </div>
+
+            <div className="border-t pt-4 space-y-2">
+              <Label>System</Label>
+              <p className="text-xs text-muted-foreground">
+                Retry Setup restarts the FoulFox OS services (local AI + agent) and
+                re-runs first-boot provisioning. Only needed if the agent failed to
+                start — e.g. after connecting WiFi.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleRestartServices}
+                disabled={restartingServices}
+                data-testid="button-restart-services"
+              >
+                <RefreshCw className={`mr-2 h-4 w-4 ${restartingServices ? "animate-spin" : ""}`} />
+                {restartingServices ? "Restarting…" : "Retry Setup"}
               </Button>
             </div>
           </form>

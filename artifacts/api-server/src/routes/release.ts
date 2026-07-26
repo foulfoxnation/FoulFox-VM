@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { logger } from "../lib/logger";
+import { netQuietRemaining, netQuietMessage } from "../lib/net-quiet";
 
 // ── FoulFox OS release info ────────────────────────────────────────────────────
 // Exposes where the bootable appliance .iso can be downloaded from, so the shell's
@@ -234,7 +235,9 @@ router.get("/os/release-info", async (_req, res) => {
   let status: "ready" | "building" | "unconfigured";
   let available = false;
   if (isoUrl) {
-    available = await isoExists(isoUrl);
+    // Post-boot quiet period: don't touch the internet yet. Report "building"
+    // (a harmless interim state the UI already renders) instead of probing.
+    available = netQuietRemaining() > 0 ? false : await isoExists(isoUrl);
     status = available ? "ready" : "building";
   } else {
     status = "unconfigured";
@@ -275,6 +278,21 @@ router.get("/os/build-status", async (_req, res) => {
     return;
   }
 
+  // Post-boot quiet period: no GitHub call yet — report the pause instead.
+  const quiet = netQuietRemaining();
+  if (quiet > 0) {
+    res.json({
+      configured: true,
+      canTrigger: Boolean(githubToken()),
+      repo,
+      workflowUrl: `https://github.com/${repo}/actions/workflows/${WORKFLOW_FILE}`,
+      running: false,
+      latestRun: null,
+      error: netQuietMessage(quiet),
+    } satisfies BuildStatusResponse);
+    return;
+  }
+
   const { run, error } = await fetchLatestRun(repo);
   const running = run ? run.state === "queued" || run.state === "in_progress" : false;
   const payload: BuildStatusResponse = {
@@ -294,6 +312,11 @@ router.get("/os/build-status", async (_req, res) => {
 // Needs a server-side token with the `workflow` scope. Returns quickly; the run
 // shows up via /os/build-status a few seconds later.
 router.post("/os/build", async (_req, res) => {
+  const quietBuild = netQuietRemaining();
+  if (quietBuild > 0) {
+    res.status(503).json({ started: false, error: netQuietMessage(quietBuild) });
+    return;
+  }
   const repo = resolveRepo();
   if (!repo) {
     res.status(400).json({

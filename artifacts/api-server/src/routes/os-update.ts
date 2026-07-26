@@ -4,6 +4,7 @@ import { promisify } from "util";
 import fs from "fs";
 import path from "path";
 import { logger } from "../lib/logger";
+import { netQuietRemaining, netQuietMessage } from "../lib/net-quiet";
 
 // ── FoulFox OS live app-update API ──────────────────────────────────────────────
 // Thin HTTP surface over the device-side updater (/usr/local/sbin/foulfox-patcher).
@@ -148,7 +149,9 @@ router.get("/os/app-update-info", async (_req: Request, res: Response) => {
     return;
   }
 
-  const manifest = await fetchManifest(url);
+  // Post-boot quiet period: skip the manifest fetch — report "building" (a
+  // harmless interim state the panel already renders) until the window ends.
+  const manifest = netQuietRemaining() > 0 ? null : await fetchManifest(url);
   const latestVersion = manifest?.version?.trim() || null;
 
   // ready: an update is downloadable and differs from what we run.
@@ -224,7 +227,13 @@ async function runPatcher(action: "apply" | "rollback", res: Response): Promise<
 }
 
 // POST /os/update/apply — pull + atomically apply the latest app bundle.
+// Blocked during the post-boot quiet period (it downloads the bundle).
 router.post("/os/update/apply", (_req: Request, res: Response) => {
+  const quiet = netQuietRemaining();
+  if (quiet > 0) {
+    res.status(503).json({ started: false, error: netQuietMessage(quiet) });
+    return;
+  }
   void runPatcher("apply", res);
 });
 

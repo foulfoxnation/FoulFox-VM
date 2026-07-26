@@ -170,19 +170,43 @@ WIN_ISO="$(find_windows_iso)"
 VIRTIO_ISO="$(find_virtio_iso)"
 
 # Best-effort download of virtio-win when absent and a network is available.
+# Post-boot internet quiet period: NO internet activity for the first
+# NET_QUIET seconds after power-on (WiFi is often still settling on real
+# hardware, and boot-time probes turn into slow timeouts). During the window
+# the download is DEFERRED to a detached background job instead of skipped,
+# so the drivers still arrive a few minutes later without blocking the boot
+# chain (foulfox-api Requires this unit to finish).
+NET_QUIET="${FOULFOX_NET_QUIET_SECONDS:-180}"
+UPTIME_S="$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 999999)"
 if [ -z "$VIRTIO_ISO" ]; then
-  # Hard timeouts: without them a half-up network (DNS blackhole, captive
-  # portal) can hang this probe for minutes and stall the whole boot chain,
-  # since foulfox-api Requires this unit to finish.
-  if curl -sfI --connect-timeout 5 --max-time 10 https://fedorapeople.org >/dev/null 2>&1; then
-    VIRTIO_URL="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
-    # Download to a .part name and rename only on success: a timed-out partial
-    # file must never be picked up by find_virtio_iso on the next boot.
-    if curl -fL --retry 2 --connect-timeout 10 --max-time 300 -o "$STAGING/drivers/virtio-win.iso.part" "$VIRTIO_URL"; then
-      mv "$STAGING/drivers/virtio-win.iso.part" "$STAGING/drivers/virtio-win.iso"
-      VIRTIO_ISO="$STAGING/drivers/virtio-win.iso"
-    else
-      rm -f "$STAGING/drivers/virtio-win.iso.part"
+  VIRTIO_URL="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
+  if [ "$UPTIME_S" -lt "$NET_QUIET" ] 2>/dev/null; then
+    WAIT=$((NET_QUIET - UPTIME_S))
+    echo "[foulfox-first-run] Internet quiet period: deferring virtio-win download by ${WAIT}s."
+    # Detached: survives this oneshot exiting; same .part-then-rename safety as
+    # the inline path, so a partial file is never picked up on a later boot.
+    setsid bash -c "
+      sleep $WAIT
+      curl -sfI --connect-timeout 5 --max-time 10 https://fedorapeople.org >/dev/null 2>&1 || exit 0
+      if curl -fL --retry 2 --connect-timeout 10 --max-time 300 -o '$STAGING/drivers/virtio-win.iso.part' '$VIRTIO_URL'; then
+        mv '$STAGING/drivers/virtio-win.iso.part' '$STAGING/drivers/virtio-win.iso'
+        chown foulfox:foulfox '$STAGING/drivers/virtio-win.iso' 2>/dev/null || true
+      else
+        rm -f '$STAGING/drivers/virtio-win.iso.part'
+      fi
+    " >>"$FOULFOX_HOME/logs/virtio-download.log" 2>&1 < /dev/null &
+  else
+    # Hard timeouts: without them a half-up network (DNS blackhole, captive
+    # portal) can hang this probe for minutes and stall the whole boot chain.
+    if curl -sfI --connect-timeout 5 --max-time 10 https://fedorapeople.org >/dev/null 2>&1; then
+      # Download to a .part name and rename only on success: a timed-out partial
+      # file must never be picked up by find_virtio_iso on the next boot.
+      if curl -fL --retry 2 --connect-timeout 10 --max-time 300 -o "$STAGING/drivers/virtio-win.iso.part" "$VIRTIO_URL"; then
+        mv "$STAGING/drivers/virtio-win.iso.part" "$STAGING/drivers/virtio-win.iso"
+        VIRTIO_ISO="$STAGING/drivers/virtio-win.iso"
+      else
+        rm -f "$STAGING/drivers/virtio-win.iso.part"
+      fi
     fi
   fi
 fi

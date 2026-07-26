@@ -135,6 +135,13 @@ app.use("/api/vm", localhostOnly, requireStateChangeToken);
 app.use("/api/os/update", localhostOnly, requireStateChangeToken);
 app.use("/api/os/disk-install", localhostOnly, requireStateChangeToken);
 
+// Service restart ("Retry Setup") + boot diagnostics: localhost only. The
+// restart POST drives systemctl/first-run via sudo, so it needs the shell
+// token; the diagnostics GET (journal tails) passes with localhostOnly via
+// requireStateChangeToken's read-only exemption.
+app.use("/api/os/restart-services", localhostOnly, requireStateChangeToken);
+app.use("/api/os/diagnostics", localhostOnly, requireStateChangeToken);
+
 // Power management: localhost only, shell token required (these are destructive).
 app.use("/api/power", localhostOnly, requireStateChangeToken);
 
