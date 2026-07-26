@@ -18,8 +18,16 @@ export function VmControls() {
 
   const handleMutation = (mutation: VoidMutation, actionName: string) => {
     mutation.mutate(undefined, {
-      onSuccess: () => {
-        toast({ title: `VM ${actionName} initiated` });
+      onSuccess: (data) => {
+        // The API returns HTTP 200 with { success, message } — honor the body
+        // instead of showing a false "initiated" toast when success is false
+        // (e.g. "no ISO yet, downloading now" or a QEMU launch failure).
+        const r = data as { success?: boolean; message?: string } | undefined;
+        if (r && r.success === false) {
+          toast({ title: `VM ${actionName}`, description: r.message, variant: "destructive" });
+        } else {
+          toast({ title: `VM ${actionName} initiated`, description: r?.message });
+        }
         queryClient.invalidateQueries({ queryKey: getGetVmStatusQueryKey() });
       },
       onError: (err: Error) => {

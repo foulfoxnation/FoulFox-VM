@@ -143,19 +143,45 @@ export function startVm(vm: VmRecord): StartResult {
   const bin = qemuSystemBinary(vm.osKind);
   const args = buildQemuArgs(vm, accel);
   rt.state = "starting";
+  rt.lastError = null;
 
   try {
     rt.process = spawn(bin, args, { detached: false, stdio: "pipe" });
+    const launchedAt = Date.now();
+
+    // Keep the tail of QEMU's stderr so an instant exit (bad device, port in
+    // use, RAM allocation failure…) surfaces an actionable reason in the UI
+    // instead of a silent stopped→stopped cycle. Reading the pipe also prevents
+    // a full pipe buffer from blocking QEMU.
+    let stderrTail = "";
+    rt.process.stderr?.on("data", (d: Buffer) => {
+      stderrTail = (stderrTail + d.toString()).slice(-4000);
+    });
+    rt.process.stdout?.resume(); // drain the stdio monitor so it can't block
 
     rt.process.on("error", (err: NodeJS.ErrnoException) => {
       logger.error({ err, vm: vm.id }, "QEMU process error");
       rt.state = "error";
+      rt.lastError = `Failed to run QEMU: ${err.message}`;
       rt.process = null;
       rt.startTime = null;
     });
     rt.process.on("exit", (code) => {
-      logger.info({ code, vm: vm.id }, "QEMU process exited");
-      rt.state = "stopped";
+      const ranMs = Date.now() - launchedAt;
+      logger.info({ code, ranMs, vm: vm.id }, "QEMU process exited");
+      // A non-zero exit, or any exit within seconds of launch, is a failed
+      // boot — mark it as an error with the stderr tail so the user sees why.
+      // A deliberate stop (state "stopping") is never an error.
+      if (rt.state !== "stopping" && (code !== 0 || ranMs < 10000)) {
+        rt.state = "error";
+        const detail = stderrTail.trim().split("\n").slice(-6).join("\n");
+        rt.lastError =
+          `QEMU exited ${code === 0 ? "immediately" : `with code ${code}`}` +
+          (detail ? `: ${detail}` : " (no error output)");
+        logger.error({ code, detail, vm: vm.id }, "VM failed to launch");
+      } else {
+        rt.state = "stopped";
+      }
       rt.process = null;
       rt.startTime = null;
     });
@@ -174,6 +200,7 @@ export function startVm(vm: VmRecord): StartResult {
     return { ok: true, message: accelNote, state: rt.state };
   } catch (err) {
     rt.state = "error";
+    rt.lastError = `Failed to start VM: ${err instanceof Error ? err.message : String(err)}`;
     logger.error({ err, vm: vm.id }, "Failed to spawn QEMU");
     return {
       ok: false,

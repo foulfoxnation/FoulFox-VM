@@ -39,3 +39,6 @@ authoring tool in its package list (`xorriso` covers both code paths). Without
 it, even the "working" Linux auto-download fails at the seed step on hardware.
 None is present in the Replit dev container, so ISO authoring only works on the
 flashed appliance — dev verification stops at catalog/resolve/typecheck.
+
+- Launch failures: startVm captures a QEMU stderr tail; nonzero exit or exit <10s after spawn (and not deliberately stopping) => state "error" + lastError. Exposed via multi-VM status routes only — default GET /vm/status is zod-parsed (GetVmStatusResponse strips unknown keys), so new status fields need the api-spec/zod schema updated or they silently vanish.
+- Start-with-no-media self-heals AND auto-starts (provisionThenStart in routes/vm.ts); do not reintroduce the "press Start again" dead end.

@@ -51,6 +51,8 @@ export interface VmSummary {
   ports: VmPorts;
   provisioning: ProvisioningState;
   displayToken: string;
+  // Why the last launch attempt failed (QEMU stderr tail), null when healthy.
+  lastError: string | null;
 }
 
 // How the agent authenticates to the guest over SSH. "key" = per-VM keypair was

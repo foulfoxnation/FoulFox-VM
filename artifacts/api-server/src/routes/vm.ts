@@ -65,7 +65,24 @@ function statusPayload(vm: VmRecord) {
     ports: vm.ports,
     provisioning: vm.provisioning,
     displayToken: vm.displayToken,
+    lastError: rt.lastError,
   };
+}
+
+// Shared self-heal for the start routes: no media yet → run a provisioning
+// pass (frontload scan + Microsoft download) and AUTO-START the VM as soon as
+// media is attached. The user already pressed Start — making them watch a
+// progress bar and press Start again was a dead end in practice.
+function provisionThenStart(vmId: string): void {
+  startProvisioning(vmId)
+    .then(() => {
+      const fresh = getVm(vmId);
+      if (!fresh) return;
+      if (!fresh.config.diskPath && !fresh.config.isoPath) return; // still no media
+      const r = startVm(fresh);
+      logger.info({ vm: vmId, ok: r.ok, state: r.state, message: r.message }, "Auto-start after provisioning");
+    })
+    .catch((err) => logger.error({ err, vm: vmId }, "Auto-provision on start failed"));
 }
 
 function requireVm(req: Request, res: Response): VmRecord | null {
@@ -324,13 +341,11 @@ router.post("/vm/:id/start", (req: Request, res: Response) => {
   // creates the disk, and updates the record — instead of dead-ending with an
   // unactionable toast.
   if (!vm.config.diskPath && !vm.config.isoPath) {
-    startProvisioning(vm.id).catch((err) =>
-      logger.error({ err, vm: vm.id }, "Auto-provision on start failed"),
-    );
+    provisionThenStart(vm.id);
     res.json({
       success: false,
       message:
-        "No disk or ISO was attached yet — searching for a Windows ISO now (frontloaded files and download). Watch the provisioning status and press Start again when it's ready.",
+        "No disk or ISO attached yet — fetching a Windows ISO now (frontloaded files, then Microsoft download). The VM will start automatically as soon as it's ready.",
       state: "provisioning",
     });
     return;
@@ -505,13 +520,11 @@ router.post("/vm/start", (_req: Request, res: Response) => {
   // Same self-heal as /vm/:id/start: no media yet → kick a provisioning pass
   // (re-scans frontloaded ISOs) instead of a dead-end error.
   if (!vm.config.diskPath && !vm.config.isoPath) {
-    startProvisioning(vm.id).catch((err) =>
-      logger.error({ err, vm: vm.id }, "Auto-provision on start failed"),
-    );
+    provisionThenStart(vm.id);
     res.json(StartVmResponse.parse({
       success: false,
       message:
-        "No disk or ISO was attached yet — searching for a Windows ISO now (frontloaded files and download). Watch the provisioning status and press Start again when it's ready.",
+        "No disk or ISO attached yet — fetching a Windows ISO now (frontloaded files, then Microsoft download). The VM will start automatically as soon as it's ready.",
       state: "provisioning",
     }));
     return;

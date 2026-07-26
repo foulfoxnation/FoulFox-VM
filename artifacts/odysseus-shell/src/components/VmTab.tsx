@@ -334,6 +334,22 @@ export function VmTab({
         </div>
       </div>
 
+      {/* Launch failure banner — QEMU refused to boot; show the captured reason */}
+      {vm.state === "error" && vm.lastError && (
+        <div
+          className="flex items-start gap-3 border-b bg-red-500/5 px-4 py-2"
+          data-testid={`vm-lasterror-${vm.id}`}
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium text-red-500">The VM failed to launch</p>
+            <p className="mt-0.5 whitespace-pre-wrap break-words font-mono text-[11px] text-muted-foreground">
+              {vm.lastError}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Provisioning banner */}
       {(provBusy || provFailed) && (
         <div

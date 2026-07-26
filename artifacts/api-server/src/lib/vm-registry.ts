@@ -67,6 +67,9 @@ export interface VmRuntimeState {
   process: ChildProcess | null;
   state: VmState;
   startTime: number | null;
+  // Why the last launch attempt failed (QEMU stderr tail / spawn error), so the
+  // UI can show an actionable reason instead of a silent stopped→stopped cycle.
+  lastError: string | null;
 }
 
 interface RegistryFile {
@@ -192,7 +195,7 @@ const runtimes = new Map<string, VmRuntimeState>();
 export function getRuntime(id: string): VmRuntimeState {
   let r = runtimes.get(id);
   if (!r) {
-    r = { process: null, state: "stopped", startTime: null };
+    r = { process: null, state: "stopped", startTime: null, lastError: null };
     runtimes.set(id, r);
   }
   return r;
