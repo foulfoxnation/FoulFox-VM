@@ -28,3 +28,5 @@ SNI derived from the original hostname. Re-validate AND re-pin on every redirect
 DNS-rebinding window where the name can flip to a loopback/RFC1918 address between check and
 connect.
 **How to apply:** any server-side fetch of a user-supplied URL, not just this proxy.
+
+**Opaque-origin click deadness:** the proxy iframe has no allow-same-origin, so localStorage/sessionStorage access THROWS — JS-heavy SPAs crash at boot and buttons never respond ("browser doesn't recognize clicks"). Fix lives in the NAV_SHIM (runs before page scripts): conditionally stub in-memory storage when native access throws, try/catch-wrap history.pushState/replaceState, and post `ff-page-inert` to the shell after repeated dead clicks so it offers the full browser. Do NOT "fix" this with allow-same-origin — that breaks the security boundary. Some sites (cross-origin API calls, real cookies, OAuth popups) will still only work in the full browser.

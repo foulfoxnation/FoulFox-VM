@@ -120,11 +120,67 @@ async function assertSafeUrl(raw: string): Promise<{ url: URL; addresses: string
 // the proxy). The script posts to the parent and never navigates itself, so it
 // works inside a same-origin-less sandbox and never handles a token.
 const NAV_SHIM = `<script>(function(){
+  // ── Opaque-origin survival stubs ──────────────────────────────────────────
+  // The proxy iframe runs sandboxed WITHOUT allow-same-origin, so the page has
+  // an opaque origin and touching window.localStorage / sessionStorage THROWS.
+  // JS-heavy sites crash during boot and never wire up their click handlers
+  // ("the browser doesn't recognize clicks"). This runs before any page script
+  // (we're injected at the top of <head>), so replace them with in-memory
+  // stand-ins and make history calls throw-proof.
+  function memStorage(){
+    var m = {};
+    return {
+      get length(){ return Object.keys(m).length; },
+      key: function(i){ return Object.keys(m)[i] || null; },
+      getItem: function(k){ return Object.prototype.hasOwnProperty.call(m, k) ? m[k] : null; },
+      setItem: function(k, v){ m[String(k)] = String(v); },
+      removeItem: function(k){ delete m[k]; },
+      clear: function(){ m = {}; }
+    };
+  }
+  function storageDead(name){
+    try { window[name].length; return false; } catch(e){ return true; }
+  }
+  try {
+    if (storageDead("localStorage"))
+      Object.defineProperty(window, "localStorage", { value: memStorage(), configurable: true });
+    if (storageDead("sessionStorage"))
+      Object.defineProperty(window, "sessionStorage", { value: memStorage(), configurable: true });
+  } catch(e){}
+  // history.pushState/replaceState can throw SecurityError in an opaque origin;
+  // SPAs call them constantly for routing. Swallow failures so they don't crash.
+  try {
+    var hp = history.pushState.bind(history), hr = history.replaceState.bind(history);
+    history.pushState = function(){ try { return hp.apply(null, arguments); } catch(e){} };
+    history.replaceState = function(){ try { return hr.apply(null, arguments); } catch(e){} };
+  } catch(e){}
+
   function abs(u){ try { return new URL(u, document.baseURI).toString(); } catch(e){ return null; } }
   function go(u){ try { window.parent.postMessage({ type: "ff-navigate", url: u }, "*"); } catch(e){} }
+
+  // ── Dead-page detection ───────────────────────────────────────────────────
+  // Even with the stubs, some SPAs can't run here (cross-origin API calls,
+  // cookies, popups). If the user keeps clicking interactive elements and
+  // nothing navigates, tell the shell once so it can offer the full browser.
+  var inertClicks = 0, notified = false, sawError = false;
+  window.addEventListener("error", function(){ sawError = true; }, true);
+  function maybeNotify(){
+    if (notified) return;
+    if (inertClicks >= 3 || (sawError && inertClicks >= 1)) {
+      notified = true;
+      try { window.parent.postMessage({ type: "ff-page-inert" }, "*"); } catch(e){}
+    }
+  }
+
   document.addEventListener("click", function(e){
     var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
-    if(!a) return;
+    if(!a) {
+      var el = e.target && e.target.closest
+        ? e.target.closest("button,[role=button],[role=link],input[type=submit],[onclick]")
+        : null;
+      if (el) { inertClicks++; setTimeout(maybeNotify, 800); }
+      return;
+    }
     var u = abs(a.getAttribute("href"));
     if(!u || u.indexOf("http") !== 0) return;
     e.preventDefault();

@@ -54,6 +54,9 @@ export function BrowserTab() {
   const [idx, setIdx] = useState(-1);
   const [reloadKey, setReloadKey] = useState(0);
   const [sessionReady, setSessionReady] = useState(false);
+  // Set when the proxied page reports that clicks are going nowhere (JS-heavy
+  // site that can't run in the sandboxed preview). Reset on every navigation.
+  const [pageInert, setPageInert] = useState(false);
 
   const current = idx >= 0 && idx < history.length ? history[idx] : "";
 
@@ -80,6 +83,7 @@ export function BrowserTab() {
     setHistory(next);
     setIdx(next.length - 1);
     setAddress(url);
+    setPageInert(false);
   };
 
   // The injected nav-shim posts the next URL up here (it never navigates itself,
@@ -90,6 +94,8 @@ export function BrowserTab() {
       const data = e.data;
       if (data && data.type === "ff-navigate" && typeof data.url === "string") {
         navigate(data.url);
+      } else if (data && data.type === "ff-page-inert") {
+        setPageInert(true);
       }
     }
     window.addEventListener("message", onMsg);
@@ -215,7 +221,37 @@ export function BrowserTab() {
             sandbox="allow-scripts allow-forms"
             data-testid="iframe-browser"
           />
-        ) : (
+        ) : null}
+        {current && pageInert ? (
+          <div
+            className="absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-center gap-2 border-b bg-card/95 px-3 py-2 text-sm shadow-md backdrop-blur"
+            data-testid="banner-page-inert"
+          >
+            <span className="text-muted-foreground">
+              This site doesn&apos;t fully work in the built-in preview — buttons may not respond.
+            </span>
+            <Button
+              size="sm"
+              className="h-7"
+              disabled={!token || launchMut.isPending}
+              onClick={() => launchMut.mutate()}
+              data-testid="button-inert-full-browser"
+            >
+              <ExternalLink className="mr-1 h-3.5 w-3.5" />
+              Open in full browser
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7"
+              onClick={() => setPageInert(false)}
+              data-testid="button-inert-dismiss"
+            >
+              Dismiss
+            </Button>
+          </div>
+        ) : null}
+        {!current ? (
           <div className="flex h-full w-full flex-col items-center justify-center gap-6 bg-background p-8 text-center">
             <Globe className="h-14 w-14 text-muted-foreground/60" />
             <div>
@@ -235,7 +271,7 @@ export function BrowserTab() {
               ))}
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
