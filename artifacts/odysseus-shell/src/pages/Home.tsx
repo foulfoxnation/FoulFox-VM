@@ -223,10 +223,11 @@ export default function Home() {
               size="sm"
               className="ml-1 h-8 self-center px-2 text-muted-foreground hover:text-foreground"
               onClick={() => setPickerOpen(true)}
-              title="New VM"
+              title="Create another VM session (Windows, Linux, …)"
               data-testid="button-add-vm"
             >
-              <Plus className="h-4 w-4" />
+              <Plus className="mr-1 h-4 w-4" />
+              <span className="text-xs">New VM</span>
             </Button>
           </TabsList>
         </div>

@@ -26,8 +26,9 @@ import {
   Shield,
   Maximize2,
   Minimize2,
+  Copy,
 } from "lucide-react";
-import { useVmLifecycle, useDeleteVm, useRetryProvision } from "@/hooks/use-vms";
+import { useVmLifecycle, useDeleteVm, useRetryProvision, useCloneVm } from "@/hooks/use-vms";
 import { useToast } from "@/hooks/use-toast";
 import { checkAgentHealth, type AgentHealth, type VmSummary, type VmLifecycleAction } from "@/lib/vm-api";
 
@@ -51,6 +52,7 @@ export function VmTab({
   const lifecycle = useVmLifecycle();
   const del = useDeleteVm();
   const retry = useRetryProvision();
+  const clone = useCloneVm();
   const { toast } = useToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [health, setHealth] = useState<AgentHealth | null>(null);
@@ -238,6 +240,41 @@ export function VmTab({
             data-testid={`button-restart-${vm.id}`}
           >
             <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Restart
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!isStopped || !vm.diskPath || provBusy || clone.isPending}
+            title={
+              !vm.diskPath
+                ? "Install the OS first, then clone"
+                : !isStopped
+                  ? "Stop the VM before cloning"
+                  : "Duplicate this VM (copies the installed disk into a new session)"
+            }
+            onClick={() =>
+              clone.mutate(
+                { id: vm.id },
+                {
+                  onSuccess: (v) => {
+                    toast({
+                      title: `Cloning into "${v.name}"`,
+                      description: "A new VM tab was added — the disk copy runs there and it will be ready to start in a few minutes.",
+                    });
+                  },
+                  onError: (e: Error) =>
+                    toast({ title: "Clone failed", description: e.message, variant: "destructive" }),
+                },
+              )
+            }
+            data-testid={`button-clone-${vm.id}`}
+          >
+            {clone.isPending ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Copy className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Clone
           </Button>
         </div>
 

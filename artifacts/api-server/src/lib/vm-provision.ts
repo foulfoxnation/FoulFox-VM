@@ -7,10 +7,13 @@ import { spawn } from "child_process";
 import { EventEmitter } from "events";
 import {
   getVm,
+  getRuntime,
   setProvisioning,
   updateVmConfig,
   vmDiskDir,
   VM_DATA_DIR,
+  markCloneSource,
+  unmarkCloneSource,
   type ProvisioningState,
 } from "./vm-registry";
 import { binaryExists } from "./vm-capabilities";
@@ -366,6 +369,88 @@ function download(url: string, dest: string, onProgress: (pct: number) => void):
 
 function runQemuImg(args: string[]): Promise<void> {
   return runTool("qemu-img", args);
+}
+
+// ── Clone an installed VM ─────────────────────────────────────────────────────
+// Copies the source VM's disk into the target VM's directory as a flattened,
+// fully independent qcow2 (qemu-img convert collapses any backing chain), plus
+// the per-VM agent SSH keypair (the cloned guest already trusts the source's
+// public key in authorized_keys). No installer pass is needed — the clone boots
+// straight into the already-installed OS. Progress is reported through the
+// normal provisioning SSE channel keyed on the TARGET VM id.
+export async function startCloneProvisioning(sourceId: string, targetId: string): Promise<void> {
+  const existing = inFlight.get(targetId);
+  if (existing) return existing;
+  const run = doClone(sourceId, targetId).finally(() => inFlight.delete(targetId));
+  inFlight.set(targetId, run);
+  return run;
+}
+
+async function doClone(sourceId: string, targetId: string): Promise<void> {
+  const src = getVm(sourceId);
+  const tgt = getVm(targetId);
+  if (!src || !tgt) return;
+  // Lock the source for the entire copy: startVm refuses clone sources, so the
+  // disk cannot be mounted read-write by QEMU mid-convert (which would corrupt
+  // the clone). Re-check the runtime state after taking the lock to close the
+  // request-time-vs-copy-time race.
+  markCloneSource(sourceId);
+  try {
+    const srcState = getRuntime(sourceId).state;
+    if (srcState !== "stopped" && srcState !== "error") {
+      throw new Error(`Source VM is ${srcState} — stop it fully before cloning.`);
+    }
+    const srcDisk = src.config.diskPath;
+    if (!srcDisk || !fs.existsSync(srcDisk)) {
+      throw new Error("Source VM has no disk image to clone.");
+    }
+    const dir = vmDiskDir(targetId);
+    fs.mkdirSync(dir, { recursive: true });
+    const dstDisk = path.join(dir, "disk.qcow2");
+
+    emit(targetId, {
+      status: "creating-disk",
+      progress: 10,
+      error: null,
+      message: `Cloning disk from "${src.name}"… this copies the whole installed system and can take a few minutes.`,
+    });
+    await runQemuImg(["convert", "-O", "qcow2", srcDisk, dstDisk]);
+
+    // Carry over the agent keypair so key-based SSH keeps working in the clone.
+    let sshKeyPath: string | null = null;
+    if (src.config.sshKeyPath && fs.existsSync(src.config.sshKeyPath)) {
+      sshKeyPath = path.join(dir, "agent_ed25519");
+      fs.copyFileSync(src.config.sshKeyPath, sshKeyPath);
+      try { fs.chmodSync(sshKeyPath, 0o600); } catch { /* ignore */ }
+      const srcPub = src.config.sshKeyPath + ".pub";
+      if (fs.existsSync(srcPub)) fs.copyFileSync(srcPub, sshKeyPath + ".pub");
+    }
+
+    updateVmConfig(targetId, {
+      diskPath: dstDisk,
+      isoPath: null,          // installed system boots from disk; no installer CD
+      unattendIsoPath: null,  // answer file already consumed during the original install
+      virtioIsoPath: src.config.virtioIsoPath, // shared cache file, read-only CD
+      connectionMode: src.config.connectionMode,
+      sshUser: src.config.sshUser,
+      sshPassword: src.config.sshPassword,
+      sshKeyPath,
+      displayMode: src.config.displayMode,
+    });
+
+    emit(targetId, {
+      status: "ready",
+      progress: 100,
+      error: null,
+      message: `Clone of "${src.name}" is ready. Start the VM to boot it.`,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err, source: sourceId, target: targetId }, "VM clone failed");
+    emit(targetId, { status: "failed", error: msg, message: `Clone failed: ${msg}` });
+  } finally {
+    unmarkCloneSource(sourceId);
+  }
 }
 
 function runTool(cmd: string, args: string[]): Promise<void> {

@@ -7,6 +7,7 @@ import {
   fetchOsBuildStatus,
   triggerOsBuild,
   createVm,
+  cloneVm,
   vmLifecycle,
   deleteVm,
   retryProvision,
@@ -99,6 +100,14 @@ export function useCreateVm() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: CreateVmInput) => createVm(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: VM_LIST_KEY }),
+  });
+}
+
+export function useCloneVm() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name?: string }) => cloneVm(id, name),
     onSuccess: () => qc.invalidateQueries({ queryKey: VM_LIST_KEY }),
   });
 }

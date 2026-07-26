@@ -35,7 +35,7 @@ import {
   isOsKind,
   type OsKind,
 } from "../lib/vm-capabilities";
-import { startProvisioning, subscribeProvisioning } from "../lib/vm-provision";
+import { startProvisioning, startCloneProvisioning, subscribeProvisioning } from "../lib/vm-provision";
 import { authMode, checkAgentHealth } from "../lib/vm-ssh";
 import { OS_IMAGES, toPublic, getOsImage, isOsImageId } from "../lib/os-catalog";
 import { logger } from "../lib/logger";
@@ -352,6 +352,69 @@ router.post("/vm/:id/start", (req: Request, res: Response) => {
   }
   const r = startVm(vm);
   res.json({ success: r.ok, message: r.message, state: r.state });
+});
+
+// POST /vm/:id/clone — duplicate an installed VM into a new, independent VM.
+// The heavy lifting (qemu-img convert of the whole disk) runs async and reports
+// through the new VM's provisioning SSE stream, so the UI shows a progress
+// banner in the freshly created tab. The source must be fully stopped: copying
+// a disk under a running QEMU produces a corrupt image.
+router.post("/vm/:id/clone", async (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  const rt = getRuntime(vm.id);
+  if (rt.state !== "stopped" && rt.state !== "error") {
+    res.status(409).json({ error: "Stop the VM before cloning — copying a running disk would corrupt the clone." });
+    return;
+  }
+  if (!vm.config.diskPath || !fs.existsSync(vm.config.diskPath)) {
+    res.status(409).json({ error: "This VM has no installed disk to clone yet. Install the OS first, then clone." });
+    return;
+  }
+  const rawName = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  const name = rawName || `${vm.name} clone`.slice(0, 64);
+  if (!isValidVmName(name)) {
+    res.status(400).json({ error: "Invalid VM name (allowed: letters, digits, space . _ -, max 64 chars)" });
+    return;
+  }
+
+  // Same aggregate guardrails as /vm/create — a clone costs the same RAM/disk.
+  const caps = await detectHostCapabilities();
+  const existing = listVms();
+  if (existing.length >= caps.cpuCount && existing.length >= 8) {
+    res.status(409).json({ error: "Maximum number of VMs reached." });
+    return;
+  }
+  const totalRam = existing.reduce((s, v) => s + v.config.ramGb, 0) + vm.config.ramGb;
+  if (totalRam > Math.max(2, Math.floor(caps.totalRamGb * 0.75))) {
+    res.status(409).json({ error: `Not enough RAM: this clone would push total allocation to ${totalRam}GB, above the ${Math.floor(caps.totalRamGb * 0.75)}GB cap. Stop or delete a VM first (stopped VMs still count as reserved).` });
+    return;
+  }
+  if (caps.totalDiskGb > 0) {
+    const reserveGb = clampInt(process.env["FOULFOX_DISK_RESERVE_GB"], 0, caps.totalDiskGb, 30);
+    const committedDisk = existing.reduce((s, v) => s + v.diskGb, 0);
+    const vmBudgetGb = Math.max(0, caps.totalDiskGb - reserveGb);
+    if (committedDisk + vm.diskGb > vmBudgetGb) {
+      res.status(409).json({ error: `Not enough disk: this ${vm.diskGb}GB clone plus ${committedDisk}GB already reserved by other VMs exceeds the ${vmBudgetGb}GB VM budget.` });
+      return;
+    }
+  }
+
+  try {
+    const clone = await createVm({
+      name,
+      osKind: vm.osKind,
+      imageId: vm.imageId,
+      ramGb: vm.config.ramGb,
+      cpuCores: vm.config.cpuCores,
+      diskGb: vm.diskGb,
+    });
+    startCloneProvisioning(vm.id, clone.id).catch((err) =>
+      logger.error({ err, source: vm.id, clone: clone.id }, "Clone provisioning failed to start"),
+    );
+    res.json({ vm: statusPayload(clone) });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 // POST /vm/:id/stop

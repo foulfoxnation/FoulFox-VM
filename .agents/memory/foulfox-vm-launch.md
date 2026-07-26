@@ -42,3 +42,5 @@ flashed appliance — dev verification stops at catalog/resolve/typecheck.
 
 - Launch failures: startVm captures a QEMU stderr tail; nonzero exit or exit <10s after spawn (and not deliberately stopping) => state "error" + lastError. Exposed via multi-VM status routes only — default GET /vm/status is zod-parsed (GetVmStatusResponse strips unknown keys), so new status fields need the api-spec/zod schema updated or they silently vanish.
 - Start-with-no-media self-heals AND auto-starts (provisionThenStart in routes/vm.ts); do not reintroduce the "press Start again" dead end.
+
+- Multi-VM cloning: POST /vm/:id/clone copies the installed disk (qemu-img convert flatten) + agent keypair into a new VM. Source is locked via registry cloneSources set for the whole copy (startVm refuses) — a running QEMU on the source mid-convert corrupts the clone; keep that lock if refactoring.

@@ -192,6 +192,13 @@ function writeRegistryFile(data: RegistryFile): void {
 // ── Runtime map (in-memory) ──────────────────────────────────────────────────
 const runtimes = new Map<string, VmRuntimeState>();
 
+// VMs whose disk is currently being read by a clone job. Starting QEMU on a
+// disk mid-copy yields a corrupt clone, so startVm refuses while marked.
+const cloneSources = new Set<string>();
+export function markCloneSource(id: string): void { cloneSources.add(id); }
+export function unmarkCloneSource(id: string): void { cloneSources.delete(id); }
+export function isCloneSource(id: string): boolean { return cloneSources.has(id); }
+
 export function getRuntime(id: string): VmRuntimeState {
   let r = runtimes.get(id);
   if (!r) {

@@ -298,6 +298,19 @@ export async function createVm(input: CreateVmInput): Promise<VmSummary> {
   return j.vm as VmSummary;
 }
 
+// Clone an installed (stopped) VM into a new, independent VM. The disk copy
+// runs server-side and reports through the new VM's provisioning stream.
+export async function cloneVm(id: string, name?: string): Promise<VmSummary> {
+  const res = await authedFetch(`/api/vm/${encodeURIComponent(id)}/clone`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(name ? { name } : {}),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const j = await res.json();
+  return j.vm as VmSummary;
+}
+
 export async function vmLifecycle(
   id: string,
   action: VmLifecycleAction,

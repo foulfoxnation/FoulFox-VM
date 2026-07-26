@@ -5,6 +5,7 @@ import {
   getRuntime,
   listVms,
   updateVm,
+  isCloneSource,
 } from "./vm-registry";
 import {
   selectAccelerator,
@@ -137,6 +138,13 @@ export function startVm(vm: VmRecord): StartResult {
   }
   if (!vm.config.diskPath && !vm.config.isoPath) {
     return { ok: false, message: "No disk image or ISO configured for this VM.", state: rt.state };
+  }
+  if (isCloneSource(vm.id)) {
+    return {
+      ok: false,
+      message: "This VM's disk is being cloned right now — wait for the clone to finish, then start it.",
+      state: rt.state,
+    };
   }
 
   const accel = selectAccelerator();
