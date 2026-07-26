@@ -1,0 +1,80 @@
+#!/bin/sh
+# Chroot hook: bake the Odysseus semantic-memory embedding model (fastembed,
+# sentence-transformers/all-MiniLM-L6-v2, ~90 MB) into the image so the agent
+# comes online at boot with ZERO internet.
+#
+# Without this, Odysseus's import path tries to download the model from
+# HuggingFace before uvicorn ever binds its port — on an offline boot (or while
+# WiFi is still settling) that stalls/crash-loops the service and the shell
+# shows "FoulFox OS Offline" until Retry Setup is pressed.
+#
+# The cache is staged read-only at /opt/foulfox/fastembed-cache;
+# foulfox-first-run copies it once to the persistent partition
+# ($FOULFOX_HOME/fastembed_cache — Odysseus's FASTEMBED_CACHE_DIR default under
+# ODYSSEUS_DATA_DIR). Keep the model name in sync with
+# _DEFAULT_FASTEMBED_MODEL in artifacts/odysseus-service/src/embeddings.py.
+set -e
+
+SVC=/opt/foulfox/app/artifacts/odysseus-service
+BAKED_CACHE=/opt/foulfox/fastembed-cache
+
+if [ ! -x "$SVC/.venv/bin/python" ]; then
+  echo "[0050-foulfox-fastembed] ERROR: Odysseus venv missing (0020 hook must run first)" >&2
+  exit 1
+fi
+
+# ── resolv.conf fixup (same dance as the venv/ollama hooks) ──────────────────
+_resolv_was_symlink=0
+_resolv_target=""
+if [ -L /etc/resolv.conf ]; then
+  _resolv_was_symlink=1
+  _resolv_target=$(readlink /etc/resolv.conf)
+fi
+_orig_resolv=$(cat /etc/resolv.conf 2>/dev/null || true)
+rm -f /etc/resolv.conf
+echo "nameserver 8.8.8.8" > /etc/resolv.conf
+
+restore_resolv() {
+  rm -f /etc/resolv.conf
+  if [ "$_resolv_was_symlink" = "1" ]; then
+    ln -s "$_resolv_target" /etc/resolv.conf
+  else
+    printf '%s\n' "$_orig_resolv" > /etc/resolv.conf
+  fi
+}
+trap restore_resolv EXIT
+
+mkdir -p "$BAKED_CACHE"
+echo "[0050-foulfox-fastembed] Downloading embedding model into $BAKED_CACHE ..."
+"$SVC/.venv/bin/python" - "$BAKED_CACHE" <<'PYEOF'
+import sys
+from fastembed import TextEmbedding
+
+cache_dir = sys.argv[1]
+model = "sentence-transformers/all-MiniLM-L6-v2"
+emb = TextEmbedding(model_name=model, cache_dir=cache_dir)
+# Force a real embed so we know the ONNX files are complete and loadable.
+vecs = list(emb.embed(["foulfox bake check"]))
+assert vecs and len(vecs[0]) > 0, "embedding produced no output"
+print(f"[0050-foulfox-fastembed] OK: {model} baked (dim={len(vecs[0])})")
+PYEOF
+
+# Verify it now loads OFFLINE from the baked cache — this is the exact code
+# path the appliance takes at boot. Fail the build loudly if it doesn't.
+echo "[0050-foulfox-fastembed] Verifying offline load..."
+HF_HUB_OFFLINE=1 "$SVC/.venv/bin/python" - "$BAKED_CACHE" <<'PYEOF'
+import sys
+from fastembed import TextEmbedding
+
+cache_dir = sys.argv[1]
+emb = TextEmbedding(
+    model_name="sentence-transformers/all-MiniLM-L6-v2",
+    cache_dir=cache_dir,
+    local_files_only=True,
+)
+vecs = list(emb.embed(["offline check"]))
+assert vecs and len(vecs[0]) > 0
+print("[0050-foulfox-fastembed] Offline load OK")
+PYEOF
+
+du -sh "$BAKED_CACHE" || true

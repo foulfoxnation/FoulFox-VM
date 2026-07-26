@@ -62,6 +62,27 @@ fi
 mkdir -p "$OLLAMA_DEST"
 chown -R foulfox:foulfox "$FOULFOX_HOME/ollama" 2>/dev/null || true
 
+# ── Embedding model seeding (baked fastembed cache → persistent partition) ───
+# The image bakes the Odysseus semantic-memory embedding model read-only at
+# /opt/foulfox/fastembed-cache (0050 hook). Odysseus reads/writes
+# $FOULFOX_HOME/fastembed_cache (its FASTEMBED_CACHE_DIR default under
+# ODYSSEUS_DATA_DIR). Seed it once so the agent NEVER needs the internet to
+# come online at boot; marker only on success so a half-copy retries.
+BAKED_FASTEMBED=/opt/foulfox/fastembed-cache
+FASTEMBED_DEST="$FOULFOX_HOME/fastembed_cache"
+FASTEMBED_SEED_MARKER="$FOULFOX_HOME/.baked-fastembed-seeded"
+if [ -d "$BAKED_FASTEMBED" ] && [ ! -f "$FASTEMBED_SEED_MARKER" ]; then
+  echo "[foulfox-first-run] Seeding baked embedding model into $FASTEMBED_DEST ..."
+  mkdir -p "$FASTEMBED_DEST"
+  if rsync -a "$BAKED_FASTEMBED/" "$FASTEMBED_DEST/"; then
+    touch "$FASTEMBED_SEED_MARKER"
+    echo "[foulfox-first-run] Embedding model seeded."
+  else
+    echo "[foulfox-first-run] WARNING: embedding model seed copy failed; will retry next boot." >&2
+  fi
+  chown -R foulfox:foulfox "$FASTEMBED_DEST" 2>/dev/null || true
+fi
+
 # Updater state the patcher mutates AS ROOT (downloaded bundles, extracted
 # releases, shared venvs, and the status/rollback/boot-recovery markers) stays
 # root-owned so the unprivileged 'foulfox' service user — which runs the

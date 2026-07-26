@@ -36,6 +36,28 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MODEL = "all-minilm:l6-v2"
 _DEFAULT_FASTEMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
+# ── Post-boot internet quiet period (FoulFox OS appliance) ────────────────────
+# Mirrors artifacts/api-server/src/lib/net-quiet.ts: on the appliance (detected
+# by the first-run provisioner script baked into the OS image) all outbound
+# internet activity is held back for FOULFOX_NET_QUIET_SECONDS after power-on
+# while WiFi settles. Dev/other environments: no marker → always 0.
+_APPLIANCE_MARKER = "/usr/local/bin/foulfox-first-run"
+
+
+def _net_quiet_remaining() -> int:
+    """Seconds left in the post-boot internet quiet window (0 = allowed)."""
+    try:
+        if not os.path.exists(_APPLIANCE_MARKER):
+            return 0
+        quiet = int(os.environ.get("FOULFOX_NET_QUIET_SECONDS", "180") or "0")
+        if quiet <= 0:
+            return 0
+        with open("/proc/uptime", "r", encoding="utf-8") as fh:
+            uptime = float(fh.read().split()[0])
+        return max(0, int(quiet - uptime))
+    except Exception:
+        return 0
+
 
 class EmbeddingClient:
     """Drop-in replacement for SentenceTransformer.encode() using an HTTP API."""
@@ -151,7 +173,29 @@ class FastEmbedClient:
             except Exception as _e:
                 logger.debug("embedding cache symlink-heal skipped: %s", _e)
         kwargs = {"model_name": self.model, "cache_dir": cache_dir}
-        self._embedding = TextEmbedding(**kwargs)
+        # Local-first load: this constructor runs on Odysseus's import path,
+        # BEFORE uvicorn binds its port. If the model isn't cached, fastembed
+        # tries HuggingFace with retries — on an appliance boot with no/settling
+        # network that stalls or crash-loops the whole service and the shell
+        # shows "FoulFox OS Offline". So:
+        #   1. try the local cache only (instant when cached — the FoulFox OS
+        #      image bakes+seeds the cache, so this is the normal path);
+        #   2. if not cached, only go online when the post-boot internet quiet
+        #      period has passed; during the quiet window fail fast instead so
+        #      the agent still comes online (semantic memory degrades until a
+        #      later re-init picks the model up).
+        try:
+            self._embedding = TextEmbedding(local_files_only=True, **kwargs)
+        except Exception:
+            quiet = _net_quiet_remaining()
+            if quiet > 0:
+                raise RuntimeError(
+                    f"fastembed model {self.model} not in local cache and the "
+                    f"post-boot internet quiet period is active ({quiet}s left); "
+                    "skipping network download so startup isn't blocked"
+                )
+            logger.info(f"FastEmbed model {self.model} not cached locally; downloading...")
+            self._embedding = TextEmbedding(**kwargs)
         self._dim: Optional[int] = None
         self.url = "local://fastembed"
         logger.info(f"FastEmbed loaded model={self.model}")
