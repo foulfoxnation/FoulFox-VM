@@ -9,6 +9,7 @@ import {
 } from "@/hooks/use-vms";
 import type { OsBuildStatus } from "@/lib/vm-api";
 import { externalLinkClick } from "@/lib/open-external";
+import { apiUrl } from "@/lib/api-url";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -42,8 +43,18 @@ export function DownloadTab() {
   const { data: buildStatus } = useOsBuildStatus();
   const status =
     release?.status ?? (release?.available ? "ready" : "unconfigured");
-  const isoUrl = release?.isoUrl ?? null;
+  // When the newest image is only available as a build artifact (too big for a
+  // GitHub release), the server serves it via an authenticated redirect — use
+  // our own endpoint, not the raw value from the payload.
+  const isArtifact = release?.source === "artifact";
+  const isoUrl = isArtifact
+    ? apiUrl("/api/os/download/iso")
+    : (release?.isoUrl ?? null);
   const sha256Url = release?.sha256Url ?? null;
+  const isoIsZip = release?.isoIsZip ?? false;
+  const isoSizeGb = release?.isoSizeBytes
+    ? (release.isoSizeBytes / 1024 ** 3).toFixed(1)
+    : null;
   const buildRunning = buildStatus?.running ?? false;
 
   return (
@@ -109,8 +120,19 @@ export function DownloadTab() {
                 >
                   <a href={isoUrl} download>
                     <Download className="mr-2 h-4 w-4" /> Download FoulFox OS
+                    {isoSizeGb ? ` (${isoSizeGb} GB)` : ""}
                   </a>
                 </Button>
+                {isoIsZip ? (
+                  <p
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                    data-testid="text-iso-zip-note"
+                  >
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    The download is a .zip file — unzip it first, then flash the
+                    .iso inside it to your USB stick.
+                  </p>
+                ) : null}
                 {sha256Url ? (
                   <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <ShieldCheck className="h-3.5 w-3.5" />

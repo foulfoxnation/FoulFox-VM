@@ -203,6 +203,69 @@ async function fetchLatestRun(repo: string): Promise<{ run: LatestRun | null; er
   }
 }
 
+// ── Run-artifact fallback (ISO too big for a GitHub Release) ─────────────────
+// The ISO now bakes the local AI models and is ~8 GB — over GitHub's ~2 GiB
+// release-asset cap — so the build uploads it as a run ARTIFACT (guaranteed)
+// and only refreshes the rolling release when it fits. The release asset can
+// therefore be STALE (an old, smaller image). We must never hand the user an
+// outdated image: prefer the newest successful run's artifact whenever it is
+// newer than the release asset, and serve it through a token-authenticated
+// redirect (artifact downloads need auth; the redirect target is a short-lived
+// signed URL the browser can fetch directly).
+interface IsoArtifact {
+  id: number;
+  name: string;
+  sizeInBytes: number;
+  createdAt: string | null;
+}
+type IsoArtifactCache = { value: IsoArtifact | null; expires: number };
+let isoArtifactCache: IsoArtifactCache | null = null;
+const ISO_ARTIFACT_TTL_MS = 60_000;
+
+async function ghJson<T>(url: string): Promise<T | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  try {
+    const resp = await fetch(url, { headers: ghHeaders(), signal: controller.signal });
+    if (!resp.ok) return null;
+    return (await resp.json()) as T;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchLatestIsoArtifact(repo: string): Promise<IsoArtifact | null> {
+  const now = Date.now();
+  if (isoArtifactCache && isoArtifactCache.expires > now) return isoArtifactCache.value;
+
+  let value: IsoArtifact | null = null;
+  const runs = await ghJson<{ workflow_runs?: Array<{ id: number }> }>(
+    `https://api.github.com/repos/${repo}/actions/workflows/${WORKFLOW_FILE}/runs?status=success&per_page=1`,
+  );
+  const runId = runs?.workflow_runs?.[0]?.id;
+  if (runId) {
+    const arts = await ghJson<{
+      artifacts?: Array<{ id: number; name: string; size_in_bytes: number; expired: boolean; created_at: string | null }>;
+    }>(`https://api.github.com/repos/${repo}/actions/runs/${runId}/artifacts?per_page=10`);
+    const a = arts?.artifacts?.find((x) => x.name.startsWith("foulfox-os-iso") && !x.expired);
+    if (a) value = { id: a.id, name: a.name, sizeInBytes: a.size_in_bytes, createdAt: a.created_at };
+  }
+  isoArtifactCache = { value, expires: now + ISO_ARTIFACT_TTL_MS };
+  return value;
+}
+
+// Release-asset metadata (existence + updated_at) in one API call, so we can
+// tell a FRESH release asset from a STALE one left behind by an oversized build.
+async function fetchReleaseAssetUpdatedAt(repo: string): Promise<string | null> {
+  const rel = await ghJson<{ assets?: Array<{ name: string; updated_at: string | null }> }>(
+    `https://api.github.com/repos/${repo}/releases/tags/${ROLLING_TAG}`,
+  );
+  const asset = rel?.assets?.find((a) => a.name === ROLLING_ISO);
+  return asset?.updated_at ?? null;
+}
+
 const router: IRouter = Router();
 
 router.get("/os/release-info", async (_req, res) => {
@@ -217,7 +280,9 @@ router.get("/os/release-info", async (_req, res) => {
 
   let isoUrl: string | null = null;
   let sha256Url: string | null = null;
-  let source: "explicit" | "github" | null = null;
+  let source: "explicit" | "github" | "artifact" | null = null;
+  let isoIsZip = false;
+  let isoSizeBytes: number | null = null;
 
   if (explicitIso) {
     isoUrl = explicitIso;
@@ -237,7 +302,34 @@ router.get("/os/release-info", async (_req, res) => {
   if (isoUrl) {
     // Post-boot quiet period: don't touch the internet yet. Report "building"
     // (a harmless interim state the UI already renders) instead of probing.
-    available = netQuietRemaining() > 0 ? false : await isoExists(isoUrl);
+    if (netQuietRemaining() > 0) {
+      available = false;
+    } else if (source === "github" && repo) {
+      // The rolling release asset can be STALE: oversized ISOs (baked AI
+      // models) skip the release upload, leaving an old image at the stable
+      // URL. Compare it against the newest successful run's artifact and
+      // serve whichever is genuinely newest — never a stale image.
+      const [assetUpdatedAt, artifact] = await Promise.all([
+        fetchReleaseAssetUpdatedAt(repo),
+        githubToken() ? fetchLatestIsoArtifact(repo) : Promise.resolve(null),
+      ]);
+      const assetTime = assetUpdatedAt ? Date.parse(assetUpdatedAt) : 0;
+      const artifactTime = artifact?.createdAt ? Date.parse(artifact.createdAt) : 0;
+      if (artifact && artifactTime > assetTime) {
+        // Newest image only exists as a run artifact → serve it through our
+        // authenticated redirect. Artifact downloads are zip-wrapped.
+        isoUrl = "api/os/download/iso";
+        sha256Url = null;
+        source = "artifact";
+        isoIsZip = true;
+        isoSizeBytes = artifact.sizeInBytes;
+        available = true;
+      } else {
+        available = assetTime > 0;
+      }
+    } else {
+      available = await isoExists(isoUrl);
+    }
     status = available ? "ready" : "building";
   } else {
     status = "unconfigured";
@@ -250,8 +342,51 @@ router.get("/os/release-info", async (_req, res) => {
     sha256Url,
     repo,
     source,
+    isoIsZip,
+    isoSizeBytes,
     version: process.env.FOULFOX_ISO_VERSION?.trim() || null,
   });
+});
+
+// GET /os/download/iso — redirect to a short-lived signed URL for the newest
+// successful build's ISO run-artifact. Needed because artifact downloads
+// require GitHub auth, and the browser must not see the token. The artifact is
+// a .zip containing the .iso (GitHub wraps artifacts); the UI says so.
+router.get("/os/download/iso", async (_req, res) => {
+  const quiet = netQuietRemaining();
+  if (quiet > 0) {
+    res.status(503).json({ error: netQuietMessage(quiet) });
+    return;
+  }
+  const repo = resolveRepo();
+  if (!repo || !githubToken()) {
+    res.status(400).json({ error: "No GitHub repo/token configured on the server for artifact downloads." });
+    return;
+  }
+  const artifact = await fetchLatestIsoArtifact(repo);
+  if (!artifact) {
+    res.status(404).json({ error: "No built FoulFox OS image found yet — run a build first." });
+    return;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const resp = await fetch(
+      `https://api.github.com/repos/${repo}/actions/artifacts/${artifact.id}/zip`,
+      { headers: ghHeaders(), redirect: "manual", signal: controller.signal },
+    );
+    const location = resp.headers.get("location");
+    if ((resp.status === 302 || resp.status === 301) && location) {
+      res.redirect(302, location);
+      return;
+    }
+    logger.warn({ repo, status: resp.status }, "ISO artifact download redirect failed");
+    res.status(502).json({ error: `GitHub returned ${resp.status} for the image download.` });
+  } catch {
+    res.status(502).json({ error: "Could not reach GitHub to fetch the image download link." });
+  } finally {
+    clearTimeout(timer);
+  }
 });
 
 // GET /os/build-status — the ACTUAL latest GitHub Actions run for the ISO build,

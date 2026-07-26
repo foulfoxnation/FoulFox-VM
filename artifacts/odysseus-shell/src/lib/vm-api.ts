@@ -150,7 +150,9 @@ export interface OsReleaseInfo {
   isoUrl: string | null;
   sha256Url: string | null;
   repo: string | null;
-  source: "explicit" | "github" | null;
+  source: "explicit" | "github" | "artifact" | null;
+  isoIsZip?: boolean;
+  isoSizeBytes?: number | null;
   version: string | null;
 }
 
