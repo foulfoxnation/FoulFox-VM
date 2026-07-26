@@ -43,5 +43,6 @@
 - [api-server route prefix](apiserver-route-prefix.md) — routers mount at /api; defining "/api/..." inside a router → /api/api → silent 404; UI must gate success toasts on the response.
 - [Kiosk fullscreen escape](foulfox-kiosk-escape.md) — target=_blank / bare `chromium <url>` merges into the --kiosk instance (fullscreen, no way out); route external links via /api/browser/open → foulfox-open-browser.
 - [Chromium kiosk clicks](foulfox-chromium-kiosk-clicks.md) — real-HW click misses = GPU compositing (keep --disable-gpu-compositing) + popups behind kiosk (keep Chromium rules in openbox rc.xml).
+- [FoulFox baked local AI](foulfox-local-ollama.md) — ISO ships Ollama+Llama model; prepare needs TimeoutStartSec≥30min for 5GB seed; bootstrap never clobbers user model choice; CI must hardlink ISO copies.
 - [FoulFox app runtime](foulfox-app-runtime.md) — app UIs must live on a separate loopback origin (:8081, appliance) or opaque iframe (dev); never same-origin with shell API; runner start-dedupe + enforced health budget.
 - [FoulFox app-runtime security](foulfox-app-runtime-security.md) — app procs never get the shell token (/proc peer check), Origin:null dev-only, ports 27000-27199, e2e-dummy-app.sh guards it all.

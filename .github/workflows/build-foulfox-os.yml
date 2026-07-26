@@ -41,7 +41,7 @@ jobs:
       - name: Check out latest code on this ref
         uses: actions/checkout@v4
 
-      - name: Free up disk space (live-build needs ~15-20 GB)
+      - name: Free up disk space (live-build + baked AI model needs ~25-30 GB)
         run: |
           echo "Disk before:"; df -h /
           sudo rm -rf \
@@ -50,7 +50,12 @@ jobs:
             /opt/ghc \
             /usr/local/.ghcup \
             /usr/local/share/boost \
+            /usr/share/swift \
+            /usr/local/julia* \
             "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}" || true
+          # Drop the runner's preloaded Docker images; the build pulls the one
+          # debian:bookworm image it needs fresh.
+          sudo docker image prune -af || true
           sudo apt-get clean
           echo "Disk after:"; df -h /
 
@@ -127,10 +132,12 @@ jobs:
           mkdir -p out
           STAMP="$(date -u +%Y%m%d-%H%M%S)"
           SHORT="$(git rev-parse --short HEAD)"
-          # Timestamped copy for the run artifact (the guaranteed download)...
-          cp "$SRC" "out/foulfox-os_${STAMP}_${SHORT}.iso"
+          # Hardlink (not cp): the ISO is now multi-GB (baked local AI model),
+          # and two byte copies of it can blow the runner's remaining disk.
+          # Timestamped name for the run artifact (the guaranteed download)...
+          ln "$SRC" "out/foulfox-os_${STAMP}_${SHORT}.iso"
           # ...and a stable name for the rolling release (convenience link).
-          cp "$SRC" "out/foulfox-os-latest.iso"
+          ln "$SRC" "out/foulfox-os-latest.iso"
           cd out
           sha256sum foulfox-os_*.iso > "foulfox-os_${STAMP}_${SHORT}.iso.sha256"
           sha256sum foulfox-os-latest.iso > foulfox-os-latest.iso.sha256

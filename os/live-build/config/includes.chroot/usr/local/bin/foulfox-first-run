@@ -39,6 +39,29 @@ chown foulfox:foulfox \
   "$FOULFOX_USER_HOME/Documents/Screenshots" \
   "$FOULFOX_USER_HOME/Downloads" 2>/dev/null || true
 
+# ── Local AI model seeding (baked Ollama model → persistent partition) ───────
+# The image bakes Ollama's model store read-only at /opt/foulfox/ollama-models.
+# ollama.service reads/writes $FOULFOX_HOME/ollama/models (persistent, so extra
+# `ollama pull`s work and survive reboot). Seed it once from the baked copy;
+# marker only on success so a half-copy (power loss) is retried next boot.
+BAKED_OLLAMA=/opt/foulfox/ollama-models
+OLLAMA_DEST="$FOULFOX_HOME/ollama/models"
+OLLAMA_SEED_MARKER="$FOULFOX_HOME/ollama/.baked-model-seeded"
+if [ -d "$BAKED_OLLAMA" ] && [ ! -f "$OLLAMA_SEED_MARKER" ]; then
+  echo "[foulfox-first-run] Seeding baked local AI model into $OLLAMA_DEST (~5 GB, first boot only)..."
+  mkdir -p "$OLLAMA_DEST"
+  # rsync (in the package list) so an interrupted copy resumes instead of
+  # re-copying everything after a power loss mid-first-boot.
+  if rsync -a "$BAKED_OLLAMA/" "$OLLAMA_DEST/"; then
+    touch "$OLLAMA_SEED_MARKER"
+    echo "[foulfox-first-run] Local AI model seeded."
+  else
+    echo "[foulfox-first-run] WARNING: model seed copy failed; will retry next boot." >&2
+  fi
+fi
+mkdir -p "$OLLAMA_DEST"
+chown -R foulfox:foulfox "$FOULFOX_HOME/ollama" 2>/dev/null || true
+
 # Updater state the patcher mutates AS ROOT (downloaded bundles, extracted
 # releases, shared venvs, and the status/rollback/boot-recovery markers) stays
 # root-owned so the unprivileged 'foulfox' service user — which runs the

@@ -23,6 +23,7 @@ systemctl enable foulfox-prepare.service
 systemctl enable odysseus-service.service
 systemctl enable foulfox-api.service
 systemctl enable foulfox-vm-autostart.service
+systemctl enable ollama.service
 
 # ── Enable plug-and-play hardware daemons ────────────────────────────────────
 # NetworkManager (wired auto-DHCP + wifi management) and BlueZ (Bluetooth). The

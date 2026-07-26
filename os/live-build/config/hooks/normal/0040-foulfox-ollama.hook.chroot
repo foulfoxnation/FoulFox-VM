@@ -1,0 +1,95 @@
+#!/bin/sh
+# Chroot hook: bake Ollama + the default local Llama model into the image so a
+# brand-new machine has working local AI with ZERO internet after flashing.
+#
+# Model choice: llama3.1:8b-instruct-q4_K_M (~4.9 GB) — sized for the reference
+# hardware (GTX 1660 6GB VRAM + 16 GB RAM): 4-bit quant mostly fits in VRAM
+# with partial CPU offload, and runs CPU-only (slow but functional) when no
+# GPU driver binds. Keep in sync with FOULFOX_LOCAL_MODEL in foulfox.env.
+#
+# The model blobs are staged under /opt/foulfox/ollama-models (read-only
+# squashfs); foulfox-first-run copies them once to the persistent partition
+# ($FOULFOX_HOME/ollama/models) so `ollama pull` of additional models works.
+set -e
+
+MODEL="llama3.1:8b-instruct-q4_K_M"
+OLLAMA_TGZ_URL="https://ollama.com/download/ollama-linux-amd64.tgz"
+BAKED_MODELS=/opt/foulfox/ollama-models
+
+# ── resolv.conf fixup (same dance as the venv hook: the chroot's symlink often
+#    dangles because systemd-resolved isn't running at build time) ────────────
+_resolv_was_symlink=0
+_resolv_target=""
+if [ -L /etc/resolv.conf ]; then
+  _resolv_was_symlink=1
+  _resolv_target=$(readlink /etc/resolv.conf)
+fi
+_orig_resolv=$(cat /etc/resolv.conf 2>/dev/null || true)
+rm -f /etc/resolv.conf
+echo "nameserver 8.8.8.8" > /etc/resolv.conf
+
+restore_resolv() {
+  rm -f /etc/resolv.conf
+  if [ "$_resolv_was_symlink" = "1" ]; then
+    ln -s "$_resolv_target" /etc/resolv.conf
+  else
+    printf '%s\n' "$_orig_resolv" > /etc/resolv.conf
+  fi
+}
+
+# ── 1. Install the Ollama runtime (binary + bundled CUDA runners) ────────────
+echo "[0040-foulfox-ollama] Downloading Ollama runtime..."
+curl -fL --retry 3 --connect-timeout 15 -o /tmp/ollama.tgz "$OLLAMA_TGZ_URL"
+tar -C /usr/local -xzf /tmp/ollama.tgz
+rm -f /tmp/ollama.tgz
+/usr/local/bin/ollama --version
+
+# ── 2. Pull the default model into the baked models dir ─────────────────────
+# `ollama pull` needs a running server; run one on a throwaway port for the
+# duration of the pull. HOME must be writable inside the chroot.
+mkdir -p "$BAKED_MODELS"
+echo "[0040-foulfox-ollama] Pulling $MODEL (this downloads ~5 GB)..."
+export HOME=/tmp
+export OLLAMA_HOST=127.0.0.1:11599
+export OLLAMA_MODELS="$BAKED_MODELS"
+/usr/local/bin/ollama serve >/tmp/ollama-build.log 2>&1 &
+OLLAMA_PID=$!
+
+i=0
+until curl -sf "http://127.0.0.1:11599/api/tags" >/dev/null 2>&1; do
+  i=$((i + 1))
+  if [ $i -gt 60 ]; then
+    echo "[0040-foulfox-ollama] ERROR: ollama serve never came up:" >&2
+    cat /tmp/ollama-build.log >&2 || true
+    kill $OLLAMA_PID 2>/dev/null || true
+    restore_resolv
+    exit 1
+  fi
+  sleep 1
+done
+
+ok=0
+for attempt in 1 2 3; do
+  if /usr/local/bin/ollama pull "$MODEL"; then ok=1; break; fi
+  echo "[0040-foulfox-ollama] pull attempt $attempt failed; retrying..." >&2
+  sleep 10
+done
+kill $OLLAMA_PID 2>/dev/null || true
+wait $OLLAMA_PID 2>/dev/null || true
+
+if [ "$ok" != "1" ]; then
+  echo "[0040-foulfox-ollama] ERROR: model pull failed after 3 attempts — refusing to bake a model-less image." >&2
+  restore_resolv
+  exit 1
+fi
+
+# Sanity: the manifest for the model must exist.
+if ! find "$BAKED_MODELS/manifests" -type f | grep -q .; then
+  echo "[0040-foulfox-ollama] ERROR: no model manifest found under $BAKED_MODELS after pull." >&2
+  restore_resolv
+  exit 1
+fi
+
+du -sh "$BAKED_MODELS" || true
+echo "[0040-foulfox-ollama] Baked $MODEL into $BAKED_MODELS"
+restore_resolv

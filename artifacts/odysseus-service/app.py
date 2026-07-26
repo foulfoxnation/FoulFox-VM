@@ -965,6 +965,13 @@ async def _startup_event():
         _startup_tasks.append(start_bg_monitor())
     except Exception as _e:
         logger.warning("Failed to start background-job monitor: %s", _e)
+    # FoulFox OS appliance: auto-register the baked local Ollama model and
+    # assign it to the agent-suite roles (no-op unless FOULFOX_LOCAL_OLLAMA=1).
+    try:
+        from src.local_ollama_bootstrap import ensure_local_ollama
+        _startup_tasks.append(asyncio.create_task(ensure_local_ollama()))
+    except Exception as _e:
+        logger.warning("Failed to start local-ollama bootstrap: %s", _e)
     # MCP servers can be slow or blocked by local tooling. Connect them after
     # the web server is accepting traffic instead of delaying the whole UI.
     async def _startup_mcp_connections():

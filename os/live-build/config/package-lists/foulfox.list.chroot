@@ -71,6 +71,15 @@ spice-client-gtk
 usbutils
 pciutils
 
+# ── NVIDIA GPU driver (local AI acceleration) ────────────────────────────────
+# Proprietary driver for GeForce cards (GTX 1660 = Turing, supported by
+# bookworm's 535 series). nvidia-driver pulls nvidia-kernel-dkms, which builds
+# the module against the live kernel at image-build time (headers below).
+# Without a bound GPU the baked Ollama falls back to CPU — slower but works.
+nvidia-driver
+firmware-misc-nonfree
+linux-headers-amd64
+
 # ── Graphical kiosk session ──────────────────────────────────────────────────
 xserver-xorg
 xinit
