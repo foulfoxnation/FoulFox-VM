@@ -309,21 +309,31 @@ router.get("/os/release-info", async (_req, res) => {
       // models) skip the release upload, leaving an old image at the stable
       // URL. Compare it against the newest successful run's artifact and
       // serve whichever is genuinely newest — never a stale image.
+      // Artifact LISTING works without a token on public repos — only the
+      // artifact DOWNLOAD needs auth. So always check freshness; the token
+      // only decides whether we can actually serve the newer artifact.
       const [assetUpdatedAt, artifact] = await Promise.all([
         fetchReleaseAssetUpdatedAt(repo),
-        githubToken() ? fetchLatestIsoArtifact(repo) : Promise.resolve(null),
+        fetchLatestIsoArtifact(repo),
       ]);
       const assetTime = assetUpdatedAt ? Date.parse(assetUpdatedAt) : 0;
       const artifactTime = artifact?.createdAt ? Date.parse(artifact.createdAt) : 0;
       if (artifact && artifactTime > assetTime) {
-        // Newest image only exists as a run artifact → serve it through our
-        // authenticated redirect. Artifact downloads are zip-wrapped.
-        isoUrl = "api/os/download/iso";
-        sha256Url = null;
-        source = "artifact";
-        isoIsZip = true;
-        isoSizeBytes = artifact.sizeInBytes;
-        available = true;
+        if (githubToken()) {
+          // Newest image only exists as a run artifact → serve it through our
+          // authenticated redirect. Artifact downloads are zip-wrapped.
+          isoUrl = "api/os/download/iso";
+          sha256Url = null;
+          source = "artifact";
+          isoIsZip = true;
+          isoSizeBytes = artifact.sizeInBytes;
+          available = true;
+        } else {
+          // A newer image exists but we can't deliver it (no server token) —
+          // FAIL SAFE: never offer the stale release asset. The UI shows
+          // "building/not ready" instead of handing out an outdated image.
+          available = false;
+        }
       } else {
         available = assetTime > 0;
       }
