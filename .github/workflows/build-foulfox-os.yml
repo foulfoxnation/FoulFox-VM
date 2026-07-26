@@ -132,6 +132,11 @@ jobs:
           mkdir -p out
           STAMP="$(date -u +%Y%m%d-%H%M%S)"
           SHORT="$(git rev-parse --short HEAD)"
+          # The ISO is produced by root inside the privileged build container;
+          # take ownership first or hardlinking fails with
+          # "Operation not permitted" (fs.protected_hardlinks blocks linking
+          # files you don't own).
+          sudo chown "$(id -u):$(id -g)" "$SRC"
           # Hardlink (not cp): the ISO is now multi-GB (baked local AI model),
           # and two byte copies of it can blow the runner's remaining disk.
           # Timestamped name for the run artifact (the guaranteed download)...

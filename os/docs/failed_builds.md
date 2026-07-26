@@ -34,6 +34,7 @@ and what NOT to retry.
 | 11 | ISO has no UEFI boot entry → modern UEFI laptops skip USB and boot to OS | boot (not a build break — image boots only on Legacy/CSM) | add `grub-efi-amd64` + `shim-signed` packages + `--bootloaders syslinux,grub-efi` | **FIXED ✅** |
 | 12 | `0005-nodejs20.hook.chroot` — DNS failure inside chroot during NodeSource `apt-get install nodejs` | `chroot_hooks` / `0005-nodejs20` | same resolv.conf fix as #10 applied to the Node hook | **FIXED ✅** |
 | 13 | Ollama runtime `.tgz` asset gone (v0.32+ ships `.tar.zst`) → curl 404 | `chroot_hooks` / `0040-foulfox-ollama` | download `.tar.zst`, `tar --zstd`, add `zstd` package | **FIXED ✅** |
+| 14 | root-owned ISO + `fs.protected_hardlinks` → `ln: Operation not permitted` | Collect ISO (build itself green) | `sudo chown` the ISO before `ln` | **FIXED ✅** |
 
 **Build #11 (`a45d4f1`) is the first fully GREEN run** — it cleared every chroot
 stage and produced the ISO end-to-end (collect + upload + release).
@@ -260,3 +261,21 @@ When a future build fails:
   stable across Ollama versions; if this hook 404s again, list the latest
   release assets (`gh api repos/ollama/ollama/releases/latest`) and match the
   current asset naming.
+
+## 14. Collect step: `ln: Operation not permitted` on the finished ISO
+
+- **Symptom (run #45):** the ENTIRE build was green — Ollama baked, squashfs,
+  xorriso all done — then "Collect ISO + checksums" fails instantly with
+  `ln: failed to create hard link ... Operation not permitted`. No .iso in
+  the run artifacts despite a successful image.
+- **Root cause:** the image is built by root inside the privileged
+  `debian:bookworm` container, so `live-image-amd64.hybrid.iso` is root-owned
+  on the host checkout. The runner user then calls plain `ln`, and Linux
+  `fs.protected_hardlinks=1` forbids hardlinking a file you don't own.
+  This only appeared after switching from `cp` to `ln` (disk-space fix for
+  the multi-GB AI-baked ISO).
+- **Fix:** `sudo chown "$(id -u):$(id -g)" "$SRC"` before the `ln` calls in
+  the workflow.
+- **Do NOT:** revert to `cp` (two multi-GB copies can blow the runner disk),
+  and don't blame the container build — the ISO is fine; it's purely a host
+  ownership/hardlink-protection interaction.
