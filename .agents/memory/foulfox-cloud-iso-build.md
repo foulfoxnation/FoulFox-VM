@@ -26,6 +26,17 @@ firmware, the staged monorepo) will likely exceed that. So:
   link, but it is **size-gated** (only published when ISO < 2 GiB) and runs with
   `continue-on-error: true` so a release hiccup never reds a good build.
 
+**Stale-release trap (bit us for real):** once the ISO grew past 2 GiB (baked
+AI models, ~8 GB), the size gate silently stopped refreshing the rolling
+release — its `foulfox-os-latest.iso` stayed frozen at an old build and users
+flashed outdated images. Fix: `/os/release-info` compares the release asset's
+`updated_at` vs the newest successful run's ISO artifact `created_at` and
+prefers the artifact via a server-side `/os/download/iso` redirect (token stays
+server-side; GitHub 302s to a short-lived signed URL). If the artifact is newer
+but no token exists, FAIL SAFE: report not-ready rather than serve the stale
+asset. Artifact downloads are zip-wrapped — UI must say "unzip first". The
+stale release assets were deleted so the old link 404s.
+
 **"Latest" means latest pushed-to-GitHub commit.** CI only sees GitHub, so the
 repo must be on GitHub (one-time connect via Replit's Git pane) and the user must
 commit+push before clicking. The dev sandbox's local checkpoints are not enough.
