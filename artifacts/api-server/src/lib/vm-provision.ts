@@ -19,6 +19,7 @@ import {
 import { binaryExists } from "./vm-capabilities";
 import { getOsImage, defaultImageForOs } from "./os-catalog";
 import { resolveWindowsIso } from "./os-images/windows-msdl";
+import { netQuietRemaining } from "./net-quiet";
 import { logger } from "./logger";
 
 // ── Progress pub/sub ───────────────────────────────────────────────────────────
@@ -47,6 +48,26 @@ const VIRTIO_WIN_URL =
   "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso";
 
 const CACHE_DIR = path.join(VM_DATA_DIR, "_image-cache");
+
+// Hold VM image downloads until the post-boot internet quiet window has passed
+// (WiFi is usually still settling in the first minutes on real hardware, and a
+// half-up network turns a multi-GB download into a misleading instant failure).
+// Cached/frontloaded media never waits — only actual network fetches do. The
+// countdown is surfaced through the VM's provisioning banner so the user sees
+// WHY nothing is downloading yet. Dev workspaces are never quiet.
+async function waitForNetQuiet(vmId: string, what: string): Promise<void> {
+  let remaining = netQuietRemaining();
+  while (remaining > 0) {
+    emit(vmId, {
+      status: "downloading",
+      progress: 0,
+      error: null,
+      message: `Waiting for the network to settle after boot — ${what} starts in ~${remaining}s. Connect to WiFi now if you haven't.`,
+    });
+    await new Promise((r) => setTimeout(r, Math.min(remaining, 10) * 1000));
+    remaining = netQuietRemaining();
+  }
+}
 
 // ── Public entry point ───────────────────────────────────────────────────────────
 // Per-VM in-flight lock: /vm/create, /vm/:id/provision and the start-route
@@ -106,6 +127,7 @@ async function provisionLinux(vmId: string): Promise<void> {
 
   emit(vmId, { status: "downloading", progress: 0, error: null, message: `Downloading ${spec.label} cloud image…`, imageUrl: spec.imageUrl });
   if (!fs.existsSync(cached)) {
+    await waitForNetQuiet(vmId, `the ${spec.label} download`);
     await download(spec.imageUrl, cached, (pct) => emit(vmId, { status: "downloading", progress: pct, message: `Downloading ${spec.label} cloud image… ${pct}%` }));
   } else {
     emit(vmId, { progress: 100, message: `Using cached ${spec.label} cloud image.` });
@@ -221,6 +243,7 @@ async function provisionWindows(vmId: string): Promise<void> {
       emit(vmId, { status: "downloading", progress: 100, error: null, message: `Using cached ${label} ISO.` });
     } else {
       try {
+        await waitForNetQuiet(vmId, `the ${label} download`);
         emit(vmId, { status: "downloading", progress: 0, error: null, message: `Locating the latest ${label} ISO from Microsoft…`, imageUrl: null });
         const url = await resolveWindowsIso(spec.productEditionId);
         await download(url, cachedIso, (pct) => emit(vmId, { status: "downloading", progress: pct, message: `Downloading ${label} from Microsoft… ${pct}%` }));
@@ -246,6 +269,7 @@ async function provisionWindows(vmId: string): Promise<void> {
       virtioPath = virtioCached;
     } else {
       try {
+        await waitForNetQuiet(vmId, "the virtio drivers download");
         emit(vmId, { status: "downloading", progress: 0, message: "Downloading virtio drivers…" });
         await download(VIRTIO_WIN_URL, virtioCached, (pct) => emit(vmId, { status: "downloading", progress: pct, message: `Downloading virtio drivers… ${pct}%` }));
         virtioPath = virtioCached;
