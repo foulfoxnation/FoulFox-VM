@@ -11,7 +11,7 @@ fi
 # Group memberships: KVM (/dev/kvm), USB hotplug/passthrough, networking, X
 # video, and Bluetooth (the `bluetooth` group exists only once bluez is
 # installed — the getent guard skips it harmlessly if it is absent).
-for grp in kvm plugdev netdev video bluetooth; do
+for grp in kvm plugdev netdev video bluetooth systemd-journal adm; do
   getent group "$grp" >/dev/null 2>&1 && adduser foulfox "$grp" || true
 done
 # LightDM autologin in Debian requires membership in the "autologin" group.
