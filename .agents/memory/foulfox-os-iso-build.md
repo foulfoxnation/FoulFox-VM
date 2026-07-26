@@ -84,3 +84,5 @@ real build environment.
 
 ## GPU/display safety (black-screen incident)
 Baking `nvidia-driver` blacklists nouveau — if the nvidia .ko doesn't load on the target machine, the appliance boots to a black console with NO display driver. Guards now in place (do not remove when touching GPU packaging): build gate hook `0060-foulfox-nvidia-verify` (fails the ISO if nvidia-driver ships without a matching module for the live kernel), runtime `foulfox-gpu-fallback.service` (explicit `modprobe nouveau` bypasses the blacklist, runs before lightdm), and X fallback drivers nouveau/fbdev/vesa. Diagnose on hardware: `journalctl -b -u foulfox-gpu-fallback`. Details: failed_builds.md #15.
+
+Confirmed on hardware: nvidia-driver's modprobe.d nouveau blacklist does NOT hold on live boot — nouveau claims the GPU first and nvidia dies with "No NVIDIA devices probed". Real fix = `modprobe.blacklist=nouveau` on the kernel cmdline (--bootappend-live); fallback script also rmmods nouveau before trying nvidia.
