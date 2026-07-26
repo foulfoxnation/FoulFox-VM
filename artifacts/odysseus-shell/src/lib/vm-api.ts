@@ -153,6 +153,7 @@ export interface OsReleaseInfo {
   source: "explicit" | "github" | "artifact" | null;
   isoIsZip?: boolean;
   isoSizeBytes?: number | null;
+  build?: { runNumber: number | null; commit: string | null; builtAt: string | null } | null;
   version: string | null;
 }
 

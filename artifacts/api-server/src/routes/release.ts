@@ -217,6 +217,8 @@ interface IsoArtifact {
   name: string;
   sizeInBytes: number;
   createdAt: string | null;
+  runNumber: number | null;
+  commit: string | null;
 }
 type IsoArtifactCache = { value: IsoArtifact | null; expires: number };
 let isoArtifactCache: IsoArtifactCache | null = null;
@@ -241,16 +243,27 @@ async function fetchLatestIsoArtifact(repo: string): Promise<IsoArtifact | null>
   if (isoArtifactCache && isoArtifactCache.expires > now) return isoArtifactCache.value;
 
   let value: IsoArtifact | null = null;
-  const runs = await ghJson<{ workflow_runs?: Array<{ id: number }> }>(
+  const runs = await ghJson<{
+    workflow_runs?: Array<{ id: number; run_number?: number; head_sha?: string }>;
+  }>(
     `https://api.github.com/repos/${repo}/actions/workflows/${WORKFLOW_FILE}/runs?status=success&per_page=1`,
   );
-  const runId = runs?.workflow_runs?.[0]?.id;
+  const run = runs?.workflow_runs?.[0];
+  const runId = run?.id;
   if (runId) {
     const arts = await ghJson<{
       artifacts?: Array<{ id: number; name: string; size_in_bytes: number; expired: boolean; created_at: string | null }>;
     }>(`https://api.github.com/repos/${repo}/actions/runs/${runId}/artifacts?per_page=10`);
     const a = arts?.artifacts?.find((x) => x.name.startsWith("foulfox-os-iso") && !x.expired);
-    if (a) value = { id: a.id, name: a.name, sizeInBytes: a.size_in_bytes, createdAt: a.created_at };
+    if (a)
+      value = {
+        id: a.id,
+        name: a.name,
+        sizeInBytes: a.size_in_bytes,
+        createdAt: a.created_at,
+        runNumber: run?.run_number ?? null,
+        commit: run?.head_sha ? run.head_sha.slice(0, 7) : null,
+      };
   }
   isoArtifactCache = { value, expires: now + ISO_ARTIFACT_TTL_MS };
   return value;
@@ -283,6 +296,7 @@ router.get("/os/release-info", async (_req, res) => {
   let source: "explicit" | "github" | "artifact" | null = null;
   let isoIsZip = false;
   let isoSizeBytes: number | null = null;
+  let build: { runNumber: number | null; commit: string | null; builtAt: string | null } | null = null;
 
   if (explicitIso) {
     isoUrl = explicitIso;
@@ -327,6 +341,7 @@ router.get("/os/release-info", async (_req, res) => {
           source = "artifact";
           isoIsZip = true;
           isoSizeBytes = artifact.sizeInBytes;
+          build = { runNumber: artifact.runNumber, commit: artifact.commit, builtAt: artifact.createdAt };
           available = true;
         } else {
           // A newer image exists but we can't deliver it (no server token) —
@@ -354,6 +369,7 @@ router.get("/os/release-info", async (_req, res) => {
     source,
     isoIsZip,
     isoSizeBytes,
+    build,
     version: process.env.FOULFOX_ISO_VERSION?.trim() || null,
   });
 });

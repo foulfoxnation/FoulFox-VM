@@ -120,9 +120,22 @@ export function DownloadTab() {
                 >
                   <a href={isoUrl} download>
                     <Download className="mr-2 h-4 w-4" /> Download FoulFox OS
+                    {release?.build?.runNumber ? ` — build #${release.build.runNumber}` : ""}
                     {isoSizeGb ? ` (${isoSizeGb} GB)` : ""}
                   </a>
                 </Button>
+                {release?.build?.runNumber ? (
+                  <p
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                    data-testid="text-iso-build-info"
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                    This link downloads build #{release.build.runNumber}
+                    {release.build.commit ? ` (${release.build.commit})` : ""}
+                    {release.build.builtAt ? `, built ${fmtAgo(release.build.builtAt)}` : ""} — the
+                    newest successful build.
+                  </p>
+                ) : null}
                 {isoIsZip ? (
                   <p
                     className="flex items-center gap-1.5 text-xs text-muted-foreground"
