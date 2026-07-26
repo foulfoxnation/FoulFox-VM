@@ -45,5 +45,6 @@
 - [Kiosk fullscreen escape](foulfox-kiosk-escape.md) — target=_blank / bare `chromium <url>` merges into the --kiosk instance (fullscreen, no way out); route external links via /api/browser/open → foulfox-open-browser.
 - [Chromium kiosk clicks](foulfox-chromium-kiosk-clicks.md) — real-HW click misses = GPU compositing (keep --disable-gpu-compositing) + popups behind kiosk (keep Chromium rules in openbox rc.xml).
 - [FoulFox baked local AI](foulfox-local-ollama.md) — ISO ships Ollama+Llama model; prepare needs TimeoutStartSec≥30min for 5GB seed; bootstrap never clobbers user model choice; CI must hardlink ISO copies.
+- [Odysseus agent updater](odysseus-agent-updater.md) — marker-file upstream sync via rsync; excludes protect data/apps/start.sh; new /api/os/* mutation prefixes need explicit auth in app.ts.
 - [FoulFox app runtime](foulfox-app-runtime.md) — app UIs must live on a separate loopback origin (:8081, appliance) or opaque iframe (dev); never same-origin with shell API; runner start-dedupe + enforced health budget.
 - [FoulFox app-runtime security](foulfox-app-runtime-security.md) — app procs never get the shell token (/proc peer check), Origin:null dev-only, ports 27000-27199, e2e-dummy-app.sh guards it all.

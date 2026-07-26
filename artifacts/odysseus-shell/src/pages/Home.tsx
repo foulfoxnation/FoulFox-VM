@@ -10,6 +10,7 @@ import { AgentChatPane, type ChatTarget, type ChatPaneHandle } from "@/component
 import { VmTab } from "@/components/VmTab";
 import { OsPicker } from "@/components/OsPicker";
 import { GetFoulFoxOsModal } from "@/components/GetFoulFoxOsModal";
+import { OdysseusUpdateButton } from "@/components/OdysseusUpdateButton";
 import { HostShellModal } from "@/components/HostShellModal";
 import { FileExplorerModal } from "@/components/FileExplorerModal";
 import { BrowserTab } from "@/components/BrowserTab";
@@ -164,6 +165,7 @@ export default function Home() {
           <HostShellModal onSendToOdysseus={(output) => setPendingOdysseusContext(output)} />
           <FileExplorerModal />
           <GetFoulFoxOsModal />
+          <OdysseusUpdateButton />
           <ConnectLlamaModal />
           <SnapshotModal />
           <DiskInstallPanel />

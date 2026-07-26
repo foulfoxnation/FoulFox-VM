@@ -133,6 +133,9 @@ app.use("/api/vm", localhostOnly, requireStateChangeToken);
 // foulfox-patcher via sudo). /api/os/app-update-info is intentionally NOT here —
 // it is a public read-only probe like /api/os/release-info.
 app.use("/api/os/update", localhostOnly, requireStateChangeToken);
+// Odysseus agent updater: same pattern — the check/status GETs pass via the
+// read-only exemption; the apply POST (clone+rsync+service restart) needs the token.
+app.use("/api/os/odysseus-update", localhostOnly, requireStateChangeToken);
 app.use("/api/os/disk-install", localhostOnly, requireStateChangeToken);
 
 // Service restart ("Retry Setup") + boot diagnostics: localhost only. The

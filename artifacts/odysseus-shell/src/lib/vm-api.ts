@@ -280,6 +280,45 @@ export async function rollbackAppUpdate(): Promise<UpdateActionResult> {
   return res.json();
 }
 
+// ── Odysseus patch updater ────────────────────────────────────────────────────
+export interface OdysseusUpdateCheck {
+  installed: boolean;
+  healthy: boolean;
+  localCommit: string | null;
+  remoteCommit: string | null;
+  upToDate: boolean;
+  updating: boolean;
+  action: "none" | "update" | "install" | "repair";
+}
+
+export interface OdysseusUpdateStatus {
+  state: "idle" | "running" | "done" | "error";
+  message: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export async function checkOdysseusUpdate(): Promise<OdysseusUpdateCheck> {
+  const res = await fetch(apiUrl("/api/os/odysseus-update/check"));
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function applyOdysseusUpdate(): Promise<UpdateActionResult> {
+  const res = await authedFetch("/api/os/odysseus-update/apply", {
+    method: "POST",
+    headers: jsonHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function fetchOdysseusUpdateStatus(): Promise<OdysseusUpdateStatus> {
+  const res = await fetch(apiUrl("/api/os/odysseus-update/status"));
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export interface CreateVmInput {
   name: string;
   osKind: OsKind;
