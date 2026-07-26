@@ -31,6 +31,13 @@ if command -v lspci >/dev/null 2>&1 && lspci -n 2>/dev/null | grep -qi ' 10de:';
 fi
 
 if [ "$NVIDIA_GPU" = "1" ]; then
+  # If nouveau somehow loaded anyway (it is blacklisted on the kernel cmdline),
+  # it owns the GPU and the nvidia probe will fail with "No NVIDIA devices
+  # probed" (seen on real hardware). Unload it first so nvidia gets the card.
+  if lsmod | grep -q '^nouveau'; then
+    log "nouveau is loaded — unloading so nvidia can claim the GPU"
+    rmmod nouveau 2>/dev/null || log "could not unload nouveau (in use)"
+  fi
   if modprobe nvidia_drm modeset=1 2>/dev/null || modprobe nvidia 2>/dev/null; then
     log "nvidia module loaded"
   else

@@ -41,5 +41,5 @@ lb config noauto \
   --firmware-chroot false \
   --firmware-binary false \
   --bootloaders "syslinux,grub-efi" \
-  --bootappend-live "boot=live components username=foulfox user-fullname=FoulFox hostname=foulfox persistence persistence-label=foulfox-persist" \
+  --bootappend-live "boot=live components username=foulfox user-fullname=FoulFox hostname=foulfox persistence persistence-label=foulfox-persist modprobe.blacklist=nouveau" \
   "${@}"

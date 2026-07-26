@@ -285,11 +285,16 @@ When a future build fails:
 - **Symptom (build 4c76d59, first flash on the reference HP):** machine powers
   on and sits on a black console ("like a DOS window") — X/lightdm never
   appears. The build itself was green.
-- **Suspected root cause:** this was the FIRST image with `nvidia-driver`
-  baked (for GTX 1660 AI accel). The Debian package blacklists nouveau; if the
-  nvidia kernel module fails to load on the target machine (DKMS/kernel
-  mismatch, unsupported card, secure-boot-ish EFI quirks), NO display driver
-  binds and the kiosk never starts.
+- **CONFIRMED root cause (photo of the console):** NVRM: "The NVIDIA probe
+  routine was not called for 1 device(s) ... nouveau ... was loaded and
+  obtained ownership of the NVIDIA device(s) ... No NVIDIA devices probed."
+  The modprobe.d blacklist shipped by nvidia-driver did NOT keep nouveau out
+  on the live boot — nouveau claimed the GTX 1660 first, the nvidia module
+  then failed to probe, and the two deadlocked with no working display.
+- **Additional fix (second pass):** `modprobe.blacklist=nouveau` added to
+  --bootappend-live (kernel-cmdline blacklist beats modprobe.d timing races),
+  and foulfox-gpu-fallback now rmmod's nouveau before trying nvidia when both
+  collide.
 - **Fix:** (a) build gate `0060-foulfox-nvidia-verify.hook.chroot` — image
   build FAILS if nvidia-driver is installed but no `nvidia*.ko` exists for the
   live kernel; (b) runtime `foulfox-gpu-fallback.service` (Before=
