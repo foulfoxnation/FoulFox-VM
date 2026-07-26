@@ -24,6 +24,10 @@ systemctl enable odysseus-service.service
 systemctl enable foulfox-api.service
 systemctl enable foulfox-vm-autostart.service
 systemctl enable ollama.service
+# GPU driver fallback: if the baked NVIDIA module can't load on this machine,
+# explicitly load nouveau so the kiosk NEVER boots to a black screen.
+chmod 0755 /usr/local/sbin/foulfox-gpu-fallback
+systemctl enable foulfox-gpu-fallback.service
 
 # ── Enable plug-and-play hardware daemons ────────────────────────────────────
 # NetworkManager (wired auto-DHCP + wifi management) and BlueZ (Bluetooth). The

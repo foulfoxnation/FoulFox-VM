@@ -1,0 +1,13 @@
+[Unit]
+Description=FoulFox GPU driver fallback (never boot to a black screen)
+After=systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/foulfox-gpu-fallback
+RemainAfterExit=yes
+
+[Install]
+WantedBy=graphical.target

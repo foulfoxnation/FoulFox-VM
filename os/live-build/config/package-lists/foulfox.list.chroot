@@ -82,6 +82,12 @@ linux-headers-amd64
 
 # ── Graphical kiosk session ──────────────────────────────────────────────────
 xserver-xorg
+# Last-resort X drivers so a failed GPU driver can never mean "no screen":
+# nouveau (NVIDIA open driver, used by foulfox-gpu-fallback when the
+# proprietary module won't load) + dumb framebuffer/vesa fallbacks.
+xserver-xorg-video-nouveau
+xserver-xorg-video-fbdev
+xserver-xorg-video-vesa
 xinit
 x11-xserver-utils
 openbox

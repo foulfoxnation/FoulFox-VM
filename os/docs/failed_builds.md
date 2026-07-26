@@ -279,3 +279,24 @@ When a future build fails:
 - **Do NOT:** revert to `cp` (two multi-GB copies can blow the runner disk),
   and don't blame the container build — the ISO is fine; it's purely a host
   ownership/hardlink-protection interaction.
+
+## 15. First NVIDIA-baked ISO boots real HP hardware to a black screen (runtime, not build)
+
+- **Symptom (build 4c76d59, first flash on the reference HP):** machine powers
+  on and sits on a black console ("like a DOS window") — X/lightdm never
+  appears. The build itself was green.
+- **Suspected root cause:** this was the FIRST image with `nvidia-driver`
+  baked (for GTX 1660 AI accel). The Debian package blacklists nouveau; if the
+  nvidia kernel module fails to load on the target machine (DKMS/kernel
+  mismatch, unsupported card, secure-boot-ish EFI quirks), NO display driver
+  binds and the kiosk never starts.
+- **Fix:** (a) build gate `0060-foulfox-nvidia-verify.hook.chroot` — image
+  build FAILS if nvidia-driver is installed but no `nvidia*.ko` exists for the
+  live kernel; (b) runtime `foulfox-gpu-fallback.service` (Before=
+  display-manager) — tries nvidia, falls back to explicit `modprobe nouveau`
+  (runtime modprobe by name bypasses the blacklist); (c) X fallback drivers
+  `xserver-xorg-video-nouveau/fbdev/vesa` added to the package list.
+- **Do NOT:** remove the nouveau blacklist shipped by nvidia-driver (breaks
+  the proprietary driver when it DOES work) or drop the fallback service when
+  touching GPU packaging. Diagnose on hardware with
+  `journalctl -b -u foulfox-gpu-fallback` + `/var/log/Xorg.0.log`.

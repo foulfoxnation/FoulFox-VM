@@ -1,0 +1,60 @@
+#!/bin/sh
+# FoulFox OS — GPU driver fallback, runs before the display manager.
+#
+# The image bakes the proprietary NVIDIA driver (for local-AI acceleration on
+# GeForce cards). Installing it blacklists nouveau, so if the nvidia kernel
+# module fails to load on THIS machine (non-NVIDIA GPU, unsupported card,
+# DKMS/kernel mismatch), the machine would otherwise boot to a black console
+# with no graphics at all. This script guarantees SOME display driver binds:
+#
+#   1. If an NVIDIA GPU is present, try the nvidia module.
+#   2. If that fails (or no NVIDIA GPU), explicitly modprobe nouveau —
+#      a runtime modprobe by exact name works even when blacklisted.
+#   3. Non-NVIDIA GPUs (Intel/AMD) already auto-load i915/amdgpu; untouched.
+#
+# Never exits non-zero: a fallback helper must not block lightdm.
+set -u
+
+log() { echo "foulfox-gpu-fallback: $*"; }
+
+# Any KMS driver already bound? (i915/amdgpu/nouveau/nvidia-drm…)
+has_drm() {
+  for d in /sys/class/drm/card[0-9]*; do
+    [ -e "$d" ] && return 0
+  done
+  return 1
+}
+
+NVIDIA_GPU=0
+if command -v lspci >/dev/null 2>&1 && lspci -n 2>/dev/null | grep -qi ' 10de:'; then
+  NVIDIA_GPU=1
+fi
+
+if [ "$NVIDIA_GPU" = "1" ]; then
+  if modprobe nvidia_drm modeset=1 2>/dev/null || modprobe nvidia 2>/dev/null; then
+    log "nvidia module loaded"
+  else
+    log "nvidia module FAILED to load — falling back to nouveau"
+    if modprobe nouveau 2>/dev/null; then
+      log "nouveau loaded as fallback"
+    else
+      log "nouveau also failed to load"
+    fi
+  fi
+fi
+
+# Last resort: still no display device at all → try everything we have.
+if ! has_drm; then
+  log "no DRM device present — trying nouveau explicitly"
+  modprobe nouveau 2>/dev/null || true
+  # Give udev a moment to create the card node before lightdm starts.
+  sleep 2
+fi
+
+if has_drm; then
+  log "display device ready"
+else
+  log "WARNING: no display device found; X may fall back to fbdev/vesa"
+fi
+
+exit 0

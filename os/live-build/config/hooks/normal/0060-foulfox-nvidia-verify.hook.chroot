@@ -1,0 +1,36 @@
+#!/bin/sh
+# Chroot hook: verify the NVIDIA DKMS module actually built for the LIVE
+# kernel that ships in this image. nvidia-driver blacklists nouveau, so an
+# image where the nvidia .ko is missing/mismatched boots NVIDIA machines to a
+# BLACK SCREEN (no display driver at all). Fail the build loudly instead —
+# runtime has foulfox-gpu-fallback as the last line of defense, but a build
+# with a known-broken module must never ship.
+set -e
+
+echo "=== NVIDIA DKMS verification ==="
+
+# The kernel the live image boots (installed linux-image), NOT `uname -r`
+# (that's the build host's kernel).
+KVER=$(ls -1 /lib/modules | sort -V | tail -n 1)
+if [ -z "$KVER" ]; then
+  echo "ERROR: no kernels found under /lib/modules" >&2
+  exit 1
+fi
+echo "Live kernel: $KVER"
+
+if ! dpkg -l nvidia-driver >/dev/null 2>&1; then
+  echo "nvidia-driver not installed — nothing to verify."
+  exit 0
+fi
+
+# Accept either DKMS-built or prebuilt module locations.
+if find "/lib/modules/$KVER" -name 'nvidia*.ko*' 2>/dev/null | grep -q .; then
+  echo "OK: nvidia kernel module present for $KVER:"
+  find "/lib/modules/$KVER" -name 'nvidia*.ko*'
+else
+  echo "ERROR: nvidia-driver is installed (and blacklists nouveau) but NO" >&2
+  echo "nvidia kernel module exists for the live kernel $KVER." >&2
+  echo "This image would black-screen on NVIDIA machines. DKMS status:" >&2
+  dkms status >&2 || true
+  exit 1
+fi
