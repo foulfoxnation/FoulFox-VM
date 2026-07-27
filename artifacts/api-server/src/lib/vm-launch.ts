@@ -29,8 +29,10 @@ export function buildQemuArgs(vm: VmRecord, accel: AcceleratorInfo): string[] {
 
   // CPU model: hardware accelerators expose the host CPU; software/whpx use max.
   const cpuModel = accel.accel === "kvm" || accel.accel === "hvf" ? "host" : "max";
+  // NOTE: newer QEMU rejects passing BOTH "-machine accel=" and "-accel" —
+  // "The -accel and -machine accel= options are incompatible". Specify the
+  // accelerator once, on the machine option only.
   args.push("-machine", `type=q35,accel=${accel.accel}`);
-  args.push("-accel", accel.accel);
   args.push("-cpu", cpuModel);
   args.push("-m", `${c.ramGb}G`);
   args.push("-smp", `cores=${c.cpuCores}`);
