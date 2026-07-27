@@ -1,9 +1,11 @@
 [Unit]
 Description=Ollama local LLM server (FoulFox local AI, loopback :11434)
-# Ordered after first-run so the baked model has been seeded onto the
-# persistent partition before the server scans its models dir. Requires= keeps
-# the same fail-closed boot invariant as the other FoulFox services.
-After=foulfox-prepare.service
+# Deferred start: the baked ~5 GB model is seeded by foulfox-seed-ollama.service
+# AFTER the user-facing stack (shell + Odysseus) is up, so ollama starts once the
+# model store is ready instead of blocking the boot chain. Requires= keeps the
+# same fail-closed boot invariant as the other FoulFox services.
+After=foulfox-prepare.service foulfox-seed-ollama.service
+Wants=foulfox-seed-ollama.service
 Requires=foulfox-prepare.service
 # Local server: never wait on network-online.target (offline boot is the norm).
 

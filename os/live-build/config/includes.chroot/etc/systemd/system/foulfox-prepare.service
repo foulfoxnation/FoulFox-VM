@@ -10,11 +10,11 @@ Before=foulfox-api.service odysseus-service.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-# First boot seeds the baked ~5 GB local-AI model onto the persistent
-# partition; on slow USB/HDD storage that copy can far exceed systemd's
-# default ~90 s start timeout, which would fail prepare and (fail-closed)
-# keep every FoulFox service down. Give it generous room.
-TimeoutStartSec=30min
+# Fast path only: the ~5 GB local-AI model seed moved to
+# foulfox-seed-ollama.service (deferred, after the shell is up). What remains
+# here (dirs, embedding-model seed, chown, VM config) is quick, but allow for
+# slow USB storage on first boot rather than failing fail-closed.
+TimeoutStartSec=10min
 EnvironmentFile=/etc/foulfox/foulfox.env
 ExecStart=/usr/local/bin/foulfox-first-run
 

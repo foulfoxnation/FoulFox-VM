@@ -1,0 +1,20 @@
+[Unit]
+Description=FoulFox deferred local-AI model seeding (first boot only, ~5 GB)
+# Deliberately ordered AFTER the user-facing stack: the shell (foulfox-api) and
+# the agent (odysseus-service) must never wait behind this multi-minute copy.
+After=foulfox-prepare.service foulfox-api.service odysseus-service.service
+Requires=foulfox-prepare.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Slow USB/HDD first-boot copy can take a long time; give it generous room.
+TimeoutStartSec=45min
+# Keep the copy from starving the interactive stack on a single slow disk.
+IOSchedulingClass=idle
+Nice=10
+EnvironmentFile=/etc/foulfox/foulfox.env
+ExecStart=/usr/local/bin/foulfox-seed-ollama
+
+[Install]
+WantedBy=multi-user.target

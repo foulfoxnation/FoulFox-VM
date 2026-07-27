@@ -26,9 +26,13 @@ OLLAMA_NATIVE = "http://127.0.0.1:11434"
 OLLAMA_OPENAI_BASE = "http://127.0.0.1:11434/v1"
 ENDPOINT_NAME = "FoulFox Local AI"
 
-# How long to keep polling for ollama.service. First boot seeds ~5 GB of model
-# blobs onto the persistent partition before the server starts, so be patient.
-WAIT_TOTAL_SECONDS = 600
+# How long to keep polling for ollama.service. On the appliance the ~5 GB baked
+# model is seeded by foulfox-seed-ollama.service AFTER the user-facing stack is
+# up (deferred, idle-priority, up to 45 min on slow USB storage), and
+# ollama.service only starts once that finishes — so this async poll must
+# outlast the whole seed window. It runs in the background and never blocks
+# startup, so a long window costs nothing.
+WAIT_TOTAL_SECONDS = 3600
 POLL_INTERVAL_SECONDS = 5
 
 

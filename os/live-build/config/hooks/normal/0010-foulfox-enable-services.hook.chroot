@@ -24,6 +24,7 @@ systemctl enable odysseus-service.service
 systemctl enable foulfox-api.service
 systemctl enable foulfox-vm-autostart.service
 systemctl enable ollama.service
+systemctl enable foulfox-seed-ollama.service
 # GPU driver fallback: if the baked NVIDIA module can't load on this machine,
 # explicitly load nouveau so the kiosk NEVER boots to a black screen.
 chmod 0755 /usr/local/sbin/foulfox-gpu-fallback
@@ -79,6 +80,7 @@ fi
 
 # ── Permissions ──────────────────────────────────────────────────────────────
 chmod +x /usr/local/bin/foulfox-first-run \
+         /usr/local/bin/foulfox-seed-ollama \
          /usr/local/bin/foulfox-kiosk \
          /usr/local/bin/foulfox-open-vm-viewer \
          /usr/local/bin/foulfox-open-browser \

@@ -39,27 +39,12 @@ chown foulfox:foulfox \
   "$FOULFOX_USER_HOME/Documents/Screenshots" \
   "$FOULFOX_USER_HOME/Downloads" 2>/dev/null || true
 
-# ── Local AI model seeding (baked Ollama model → persistent partition) ───────
-# The image bakes Ollama's model store read-only at /opt/foulfox/ollama-models.
-# ollama.service reads/writes $FOULFOX_HOME/ollama/models (persistent, so extra
-# `ollama pull`s work and survive reboot). Seed it once from the baked copy;
-# marker only on success so a half-copy (power loss) is retried next boot.
-BAKED_OLLAMA=/opt/foulfox/ollama-models
-OLLAMA_DEST="$FOULFOX_HOME/ollama/models"
-OLLAMA_SEED_MARKER="$FOULFOX_HOME/ollama/.baked-model-seeded"
-if [ -d "$BAKED_OLLAMA" ] && [ ! -f "$OLLAMA_SEED_MARKER" ]; then
-  echo "[foulfox-first-run] Seeding baked local AI model into $OLLAMA_DEST (~5 GB, first boot only)..."
-  mkdir -p "$OLLAMA_DEST"
-  # rsync (in the package list) so an interrupted copy resumes instead of
-  # re-copying everything after a power loss mid-first-boot.
-  if rsync -a "$BAKED_OLLAMA/" "$OLLAMA_DEST/"; then
-    touch "$OLLAMA_SEED_MARKER"
-    echo "[foulfox-first-run] Local AI model seeded."
-  else
-    echo "[foulfox-first-run] WARNING: model seed copy failed; will retry next boot." >&2
-  fi
-fi
-mkdir -p "$OLLAMA_DEST"
+# ── Local AI model seeding: MOVED to foulfox-seed-ollama.service ─────────────
+# The ~5 GB baked-model copy used to run here and blocked the entire boot chain
+# (api-server + Odysseus Require this unit) for minutes on slow USB storage.
+# It now runs deferred, AFTER the shell and Odysseus are up. Only the dirs are
+# created here so ollama.service can start (with no models yet) immediately.
+mkdir -p "$FOULFOX_HOME/ollama/models"
 chown -R foulfox:foulfox "$FOULFOX_HOME/ollama" 2>/dev/null || true
 
 # ── Embedding model seeding (baked fastembed cache → persistent partition) ───
