@@ -11,11 +11,12 @@ Type=simple
 User=foulfox
 Group=foulfox
 EnvironmentFile=/etc/foulfox/foulfox.env
-# foulfox.env sets PORT=8080 for the api-server. Override it here so uvicorn
-# binds to its own loopback port (7000) instead of conflicting with the
-# api-server. Without this Odysseus crashes on startup and loops forever,
-# making the shell show "FoulFox OS Offline".
-Environment=PORT=7000
+# PORT: foulfox.env sets PORT=8080 for the api-server, and systemd's
+# EnvironmentFile ALWAYS overrides Environment= lines (regardless of order in
+# this file) — so an Environment=PORT=7000 override here can never win, and
+# Odysseus would bind 8080, collide with the api-server, and crash-loop.
+# The port is therefore selected inside start.sh, which prefers foulfox.env's
+# ODYSSEUS_PORT=7000 over PORT. Do not add Environment=PORT here.
 # Run from the active app release (a symlink the patcher flips for live updates);
 # defaults to the baked /opt/foulfox/app. See foulfox-first-run + foulfox-patcher.
 WorkingDirectory=/var/lib/foulfox/app-current/artifacts/odysseus-service

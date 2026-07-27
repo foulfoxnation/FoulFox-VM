@@ -38,6 +38,7 @@ while ! curl -sf -o /dev/null "$url"; do
   if [ "$waited" -eq 45 ] && [ -z "$splash_pid" ]; then
     chromium \
       --class=FoulFoxSplash \
+      --disable-gpu-compositing \
       --kiosk --no-first-run --disable-infobars --noerrdialogs \
       --disable-session-crashed-bubble --password-store=basic \
       "data:text/html,<html><body style='background:%23111;color:%23ddd;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'><div style='max-width:40em;text-align:center'><h1 style='color:%23f80'>FoulFox OS is still starting&%238230;</h1><p>Services are taking longer than usual. This screen will be replaced automatically once they are up.</p><p style='color:%23888;font-size:0.9em'>If it never does: press Ctrl+Alt+F2, log in, and run<br><code>journalctl -u foulfox-prepare -u foulfox-api -b</code></p></div></body></html>" \
@@ -59,6 +60,7 @@ done
 while true; do
   chromium \
     --class=FoulFoxKiosk \
+    --disable-gpu-compositing \
     --kiosk \
     --no-first-run \
     --disable-infobars \

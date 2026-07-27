@@ -1,0 +1,120 @@
+2026-07-26 20:51:18,057 - src.personal_docs - INFO - Refreshed index: 0 documents from 1 directories
+2026-07-26 20:51:18,205 - src.embeddings - INFO - FastEmbed loaded model=sentence-transformers/all-MiniLM-L6-v2
+2026-07-26 20:51:18,251 - src.embeddings - INFO - Embedding dimension: 384 (model=sentence-transformers/all-MiniLM-L6-v2)
+2026-07-26 20:51:18,251 - src.embeddings - INFO - Using local FastEmbed: model=sentence-transformers/all-MiniLM-L6-v2
+2026-07-26 20:51:18,251 - src.embedding_lanes - WARNING - Custom embedding lane unavailable for odysseus_memories: HTTP embedding lane unavailable
+2026-07-26 20:51:18,405 - src.embeddings - INFO - FastEmbed loaded model=sentence-transformers/all-MiniLM-L6-v2
+2026-07-26 20:51:18,450 - src.embeddings - INFO - Embedding dimension: 384 (model=sentence-transformers/all-MiniLM-L6-v2)
+2026-07-26 20:51:18,453 - src.memory_vector - INFO - MemoryVectorStore ready (lanes=['fastembed'] entries=0)
+2026-07-26 20:51:18,453 - src.app_initializer - INFO - MemoryVectorStore initialized
+2026-07-26 20:51:18,453 - src.research_handler - INFO - Legacy research_engine.py not found — DeepResearcher only
+2026-07-26 20:51:18,461 - app - INFO - TTS service initialized (provider managed via admin settings)
+2026-07-26 20:51:18,912 - app - INFO - STT service initialized (provider managed via settings)
+2026-07-26 20:51:19,294 - app - INFO - MCP routes initialized
+2026-07-26 20:51:19,307 - app - INFO - AI interaction tools initialized (session, memory, RAG, UI control)
+2026-07-26 20:51:19,323 - app - INFO - Webhook & API token routes initialized
+INFO:     Started server process [7922]
+INFO:     Waiting for application startup.
+2026-07-26 20:51:19,562 - app - INFO - Application starting up...
+2026-07-26 20:51:19,567 - src.bg_monitor - INFO - Background-job monitor started (poll 5s)
+2026-07-26 20:51:19,581 - src.task_scheduler - INFO - Task scheduler started (concurrency cap: 1)
+2026-07-26 20:51:19,584 - app - INFO - Application startup complete
+2026-07-26 20:51:19,624 - src.builtin_mcp - INFO - NPX binary resolved to: /usr/bin/npx
+INFO:     Application startup complete.
+2026-07-26 20:51:19,633 - src.model_discovery - INFO - Scanning 2 hosts for models: ['localhost', 'host.docker.internal']
+2026-07-26 20:51:19,931 - src.embeddings - INFO - FastEmbed loaded model=sentence-transformers/all-MiniLM-L6-v2
+2026-07-26 20:51:20,143 - src.embeddings - INFO - Embedding dimension: 384 (model=sentence-transformers/all-MiniLM-L6-v2)
+2026-07-26 20:51:20,143 - src.embeddings - INFO - Using local FastEmbed: model=sentence-transformers/all-MiniLM-L6-v2
+2026-07-26 20:51:20,144 - src.embedding_lanes - WARNING - Custom embedding lane unavailable for odysseus_tool_index: HTTP embedding lane unavailable
+2026-07-26 20:51:20,463 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-26 20:51:20,590 - src.embeddings - INFO - FastEmbed loaded model=sentence-transformers/all-MiniLM-L6-v2
+2026-07-26 20:51:20,691 - httpx - INFO - HTTP Request: GET http://localhost:11434/api/v1/models "HTTP/1.1 404 Not Found"
+2026-07-26 20:51:20,697 - src.embeddings - INFO - Embedding dimension: 384 (model=sentence-transformers/all-MiniLM-L6-v2)
+2026-07-26 20:51:20,708 - src.tool_index - INFO - ToolIndex initialized (lanes=['fastembed'])
+2026-07-26 20:51:20,715 - src.model_discovery - INFO - Discovered 1 model endpoints across 2 hosts
+ERROR:    [Errno 98] error while attempting to bind on address ('127.0.0.1', 8080): address already in use
+INFO:     Waiting for application shutdown.
+2026-07-26 20:51:21,100 - app - INFO - Application shutting down...
+2026-07-26 20:51:21,111 - src.task_scheduler - INFO - Task scheduler stopped
+2026-07-26 20:51:21,111 - app - INFO - Application shutdown complete
+2026-07-26 20:51:21,113 - httpx - INFO - HTTP Request: GET http://127.0.0.1:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     Application shutdown complete.
+2026-07-26 20:51:21,144 - src.builtin_mcp - WARNING - Built-in MCP server Built-in: Image Generation cancelled
+2026-07-26 20:51:21,144 - src.builtin_mcp - WARNING - Built-in MCP server Built-in: Memory cancelled
+2026-07-26 20:51:21,144 - src.builtin_mcp - WARNING - Built-in MCP server Built-in: RAG cancelled
+2026-07-26 20:51:21,145 - src.builtin_mcp - WARNING - Built-in MCP server Built-in: Email cancelled
+2026-07-26 20:51:24,017 - src.tool_index - INFO - Indexed 71 built-in tools
+odysseus-service.service: Main process exited, code=exited, status=3/NOTIMPLEMENTED
+odysseus-service.service: Failed with result 'exit-code'.
+odysseus-service.service: Consumed 26.049s CPU time.
+odysseus-service.service: Scheduled restart job, restart counter is at 6.
+Stopped odysseus-service.service - Odysseus AI agent (FastAPI, loopback :7000).
+odysseus-service.service: Consumed 26.049s CPU time.
+Started odysseus-service.service - Odysseus AI agent (FastAPI, loopback :7000).
+2026-07-26 20:51:29,209 - core.auth - INFO - No auth config found — first-run setup required
+2026-07-26 20:51:29,210 - app - INFO - Auth middleware enabled (AUTH_ENABLED=true)
+2026-07-26 20:51:29,550 - services.youtube.youtube_handler - INFO - YouTube transcript API available
+2026-07-26 20:51:30,118 - src.chroma_client - INFO - ChromaDB ready (embedded): /var/lib/foulfox/chroma
+2026-07-26 20:51:30,235 - httpx - INFO - HTTP Request: POST http://localhost:11434/v1/embeddings "HTTP/1.1 404 Not Found"
+2026-07-26 20:51:30,236 - src.embeddings - WARNING - HTTP embedding API unavailable (Client error '404 Not Found' for url 'http://localhost:11434/v1/embeddings'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404); using local FastEmbed for the rest of this process
+2026-07-26 20:51:30,607 - src.embeddings - INFO - FastEmbed loaded model=sentence-transformers/all-MiniLM-L6-v2
+2026-07-26 20:51:30,648 - src.embeddings - INFO - Embedding dimension: 384 (model=sentence-transformers/all-MiniLM-L6-v2)
+2026-07-26 20:51:30,648 - src.embeddings - INFO - Using local FastEmbed: model=sentence-transformers/all-MiniLM-L6-v2
+2026-07-26 20:51:30,648 - src.embedding_lanes - WARNING - Custom embedding lane unavailable for odysseus_rag: HTTP embedding lane unavailable
+2026-07-26 20:51:30,781 - src.embeddings - INFO - FastEmbed loaded model=sentence-transformers/all-MiniLM-L6-v2
+2026-07-26 20:51:30,820 - src.embeddings - INFO - Embedding dimension: 384 (model=sentence-transformers/all-MiniLM-L6-v2)
+2026-07-26 20:51:30,823 - src.rag_vector - INFO - VectorRAG ready (lanes=['fastembed'] docs=0)
+2026-07-26 20:51:30,823 - src.rag_singleton - INFO - Initialized VectorRAG with ChromaDB
+2026-07-26 20:51:30,823 - app - INFO - Vector document RAG initialized
+2026-07-26 20:51:30,964 - core.session_manager - INFO - Loaded 0 session(s) (metadata only)
+2026-07-26 20:51:30,965 - src.upload_handler - WARNING - python-magic not available, falling back to basic detection
+2026-07-26 20:51:30,965 - src.personal_docs - INFO - Refreshed index: 0 documents from 1 directories
+2026-07-26 20:51:31,117 - src.embeddings - INFO - FastEmbed loaded model=sentence-transformers/all-MiniLM-L6-v2
+2026-07-26 20:51:31,164 - src.embeddings - INFO - Embedding dimension: 384 (model=sentence-transformers/all-MiniLM-L6-v2)
+2026-07-26 20:51:31,164 - src.embeddings - INFO - Using local FastEmbed: model=sentence-transformers/all-MiniLM-L6-v2
+2026-07-26 20:51:31,164 - src.embedding_lanes - WARNING - Custom embedding lane unavailable for odysseus_memories: HTTP embedding lane unavailable
+2026-07-26 20:51:31,311 - src.embeddings - INFO - FastEmbed loaded model=sentence-transformers/all-MiniLM-L6-v2
+2026-07-26 20:51:31,358 - src.embeddings - INFO - Embedding dimension: 384 (model=sentence-transformers/all-MiniLM-L6-v2)
+2026-07-26 20:51:31,361 - src.memory_vector - INFO - MemoryVectorStore ready (lanes=['fastembed'] entries=0)
+2026-07-26 20:51:31,362 - src.app_initializer - INFO - MemoryVectorStore initialized
+2026-07-26 20:51:31,362 - src.research_handler - INFO - Legacy research_engine.py not found — DeepResearcher only
+2026-07-26 20:51:31,370 - app - INFO - TTS service initialized (provider managed via admin settings)
+2026-07-26 20:51:31,817 - app - INFO - STT service initialized (provider managed via settings)
+2026-07-26 20:51:32,192 - app - INFO - MCP routes initialized
+2026-07-26 20:51:32,204 - app - INFO - AI interaction tools initialized (session, memory, RAG, UI control)
+2026-07-26 20:51:32,219 - app - INFO - Webhook & API token routes initialized
+INFO:     Started server process [8110]
+INFO:     Waiting for application startup.
+2026-07-26 20:51:32,458 - app - INFO - Application starting up...
+2026-07-26 20:51:32,463 - src.bg_monitor - INFO - Background-job monitor started (poll 5s)
+2026-07-26 20:51:32,476 - src.task_scheduler - INFO - Task scheduler started (concurrency cap: 1)
+2026-07-26 20:51:32,479 - app - INFO - Application startup complete
+2026-07-26 20:51:32,518 - src.builtin_mcp - INFO - NPX binary resolved to: /usr/bin/npx
+INFO:     Application startup complete.
+2026-07-26 20:51:32,527 - src.model_discovery - INFO - Scanning 2 hosts for models: ['localhost', 'host.docker.internal']
+2026-07-26 20:51:32,792 - src.embeddings - INFO - FastEmbed loaded model=sentence-transformers/all-MiniLM-L6-v2
+2026-07-26 20:51:32,972 - src.embeddings - INFO - Embedding dimension: 384 (model=sentence-transformers/all-MiniLM-L6-v2)
+2026-07-26 20:51:32,991 - src.embeddings - INFO - Using local FastEmbed: model=sentence-transformers/all-MiniLM-L6-v2
+2026-07-26 20:51:33,016 - src.embedding_lanes - WARNING - Custom embedding lane unavailable for odysseus_tool_index: HTTP embedding lane unavailable
+2026-07-26 20:51:33,437 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-26 20:51:33,511 - src.embeddings - INFO - FastEmbed loaded model=sentence-transformers/all-MiniLM-L6-v2
+2026-07-26 20:51:33,589 - src.embeddings - INFO - Embedding dimension: 384 (model=sentence-transformers/all-MiniLM-L6-v2)
+2026-07-26 20:51:33,591 - src.tool_index - INFO - ToolIndex initialized (lanes=['fastembed'])
+2026-07-26 20:51:33,592 - httpx - INFO - HTTP Request: GET http://localhost:11434/api/v1/models "HTTP/1.1 404 Not Found"
+2026-07-26 20:51:33,608 - src.model_discovery - INFO - Discovered 1 model endpoints across 2 hosts
+ERROR:    [Errno 98] error while attempting to bind on address ('127.0.0.1', 8080): address already in use
+INFO:     Waiting for application shutdown.
+2026-07-26 20:51:33,966 - app - INFO - Application shutting down...
+2026-07-26 20:51:33,977 - src.task_scheduler - INFO - Task scheduler stopped
+2026-07-26 20:51:33,992 - app - INFO - Application shutdown complete
+2026-07-26 20:51:33,994 - httpx - INFO - HTTP Request: GET http://127.0.0.1:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     Application shutdown complete.
+2026-07-26 20:51:34,004 - src.builtin_mcp - WARNING - Built-in MCP server Built-in: Image Generation cancelled
+2026-07-26 20:51:34,004 - src.builtin_mcp - WARNING - Built-in MCP server Built-in: Memory cancelled
+2026-07-26 20:51:34,005 - src.builtin_mcp - WARNING - Built-in MCP server Built-in: RAG cancelled
+2026-07-26 20:51:34,005 - src.builtin_mcp - WARNING - Built-in MCP server Built-in: Email cancelled
+2026-07-26 20:51:36,953 - src.tool_index - INFO - Indexed 71 built-in tools
+odysseus-service.service: Main process exited, code=exited, status=3/NOTIMPLEMENTED
+odysseus-service.service: Failed with result 'exit-code'.
+odysseus-service.service: Consumed 25.504s CPU time.

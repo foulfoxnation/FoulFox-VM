@@ -87,7 +87,14 @@ if [ -z "$ODYSSEUS_SHELL_EXEC_BASE" ]; then
   export ODYSSEUS_SHELL_EXEC_BASE="http://127.0.0.1:${API_SERVER_PORT:-8080}"
 fi
 
+# Port selection: ODYSSEUS_PORT beats PORT. On the appliance, systemd's
+# EnvironmentFile (/etc/foulfox/foulfox.env) sets PORT=8080 for the api-server
+# and ALWAYS overrides the unit's Environment=PORT=7000 (systemd reads
+# EnvironmentFile after Environment=, regardless of order in the unit file) —
+# with PORT alone Odysseus binds 8080, collides with the api-server, and
+# crash-loops with "address already in use". foulfox.env's ODYSSEUS_PORT=7000
+# is the authoritative value; PORT remains the dev/workspace fallback.
 exec "$PY" -m uvicorn app:app \
   --host "${HOST:-127.0.0.1}" \
-  --port "${PORT:-7000}" \
+  --port "${ODYSSEUS_PORT:-${PORT:-7000}}" \
   --log-level info
