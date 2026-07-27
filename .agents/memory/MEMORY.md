@@ -47,6 +47,7 @@
 - [FoulFox baked local AI](foulfox-local-ollama.md) — ISO ships Ollama+Llama model; prepare needs TimeoutStartSec≥30min for 5GB seed; bootstrap never clobbers user model choice; CI must hardlink ISO copies.
 - [Odysseus agent updater](odysseus-agent-updater.md) — marker-file upstream sync via rsync; excludes protect data/apps/start.sh; new /api/os/* mutation prefixes need explicit auth in app.ts.
 - [MCP stdio crash containment](odysseus-mcp-stdio-containment.md) — stdio MCP connects must live in one owner task or anyio cancel-scope errors kill uvicorn (offline-boot crash loop).
+- [FoulFox update mirror](foulfox-update-mirror.md) — OTA: GitHub primary, published site mirror (public by design, sha256 = integrity); mirror routes dead until user republishes; never silently fall back to legacy git-sync.
 - [FoulFox app runtime](foulfox-app-runtime.md) — app UIs must live on a separate loopback origin (:8081, appliance) or opaque iframe (dev); never same-origin with shell API; runner start-dedupe + enforced health budget.
 - [FoulFox app-runtime security](foulfox-app-runtime-security.md) — app procs never get the shell token (/proc peer check), Origin:null dev-only, ports 27000-27199, e2e-dummy-app.sh guards it all.
 - [systemd EnvironmentFile beats Environment=](foulfox-desktop-apps.md) — see also start.sh: unit Environment=PORT can NEVER override foulfox.env; services must read their own var (ODYSSEUS_PORT).
