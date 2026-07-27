@@ -17,6 +17,8 @@ if [ -n "$REPL_ID" ] || [ -n "$REPLIT_DEV_DOMAIN" ]; then
   # service. Port 7000 is not a registered artifact, so it stays internal to the
   # container and is only reached through the Express API server proxy.
   export HOST="${HOST:-0.0.0.0}"
+  # Dev fallback: PORT is the workflow-assigned port and is safe to honor here.
+  PORT_FALLBACK="${PORT:-7000}"
 else
   VENV_DIR="$SCRIPT_DIR/.venv"
   PY_BOOT="${ODYSSEUS_PYTHON:-python3}"
@@ -92,9 +94,11 @@ fi
 # and ALWAYS overrides the unit's Environment=PORT=7000 (systemd reads
 # EnvironmentFile after Environment=, regardless of order in the unit file) —
 # with PORT alone Odysseus binds 8080, collides with the api-server, and
-# crash-loops with "address already in use". foulfox.env's ODYSSEUS_PORT=7000
-# is the authoritative value; PORT remains the dev/workspace fallback.
+# crash-loops with "address already in use". Older flashed images don't have
+# ODYSSEUS_PORT in foulfox.env at all, so the packaged path must NEVER fall
+# back to PORT: it is always the api-server's port there. PORT is honored
+# only in the Replit dev branch above (PORT_FALLBACK).
 exec "$PY" -m uvicorn app:app \
   --host "${HOST:-127.0.0.1}" \
-  --port "${ODYSSEUS_PORT:-${PORT:-7000}}" \
+  --port "${ODYSSEUS_PORT:-${PORT_FALLBACK:-7000}}" \
   --log-level info
