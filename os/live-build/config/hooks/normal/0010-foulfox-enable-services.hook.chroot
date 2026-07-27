@@ -68,6 +68,15 @@ EOF
 # Boot to the graphical target.
 systemctl set-default graphical.target
 
+# ── Pre-seeded WiFi (NetworkManager keyfiles) ─────────────────────────────────
+# NetworkManager REFUSES to load a system-connection keyfile unless it is owned
+# by root and mode 0600 (it contains the wifi PSK). Enforce that here so the
+# baked network profile actually autoconnects on first boot.
+if [ -d /etc/NetworkManager/system-connections ]; then
+  chown root:root /etc/NetworkManager/system-connections/*.nmconnection 2>/dev/null || true
+  chmod 0600 /etc/NetworkManager/system-connections/*.nmconnection 2>/dev/null || true
+fi
+
 # ── Permissions ──────────────────────────────────────────────────────────────
 chmod +x /usr/local/bin/foulfox-first-run \
          /usr/local/bin/foulfox-kiosk \
