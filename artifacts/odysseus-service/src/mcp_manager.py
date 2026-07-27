@@ -5,6 +5,7 @@ Manages connections to MCP (Model Context Protocol) tool servers.
 Each server exposes tools that are made available to the agent loop.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -177,31 +178,83 @@ class McpManager:
             return False
 
     async def _connect_stdio(self, server_id: str, name: str, command: str, args: List[str], env: Dict[str, str]) -> bool:
-        """Connect to an MCP server via stdio transport."""
+        """Connect to an MCP server via stdio transport.
+
+        CRASH CONTAINMENT (FoulFox appliance boot): mcp.client.stdio uses an
+        internal anyio task group whose cancel scopes MUST be entered and exited
+        in the same asyncio task. If the connect/teardown paths cross tasks
+        (e.g. a server subprocess dies mid-handshake, or an AsyncExitStack is
+        closed later from another task), anyio raises "Attempted to exit cancel
+        scope in a different task than it was entered in" — and that error
+        cascades cancellations through the event loop and kills uvicorn itself
+        (observed as odysseus-service exit status 3 crash-looping on offline
+        first boot). The fix: a dedicated OWNER TASK per server opens the stdio
+        transport + session with `async with` and holds them until told to
+        stop, so every scope enters and exits in that one task; the owner task
+        swallows all exceptions after startup, so nothing can escape into the
+        rest of the app.
+        """
         try:
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
-            from contextlib import AsyncExitStack
+        except ImportError:
+            logger.warning("MCP package not installed. Install with: pip install mcp")
+            self._connections[server_id] = {"status": "error", "error": "mcp package not installed", "name": name}
+            return False
 
-            server_params = StdioServerParameters(
-                command=command,
-                args=args,
-                env={**os.environ, **env} if env else None,
-            )
+        server_params = StdioServerParameters(
+            command=command,
+            args=args,
+            env={**os.environ, **env} if env else None,
+        )
 
-            stack = AsyncExitStack()
+        loop = asyncio.get_running_loop()
+        ready: asyncio.Future = loop.create_future()
+        stop = asyncio.Event()
+
+        async def _owner():
             try:
-                transport = await stack.enter_async_context(stdio_client(server_params))
-                read_stream, write_stream = transport
-                session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
+                async with stdio_client(server_params) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        tools_result = await session.list_tools()
+                        if not ready.done():
+                            ready.set_result((session, tools_result))
+                        await stop.wait()
+            except BaseException as e:  # noqa: BLE001 — nothing may escape the owner task
+                if not ready.done():
+                    err = e if isinstance(e, Exception) else RuntimeError(f"{type(e).__name__}: {e}")
+                    ready.set_exception(err)
+                elif isinstance(e, asyncio.CancelledError):
+                    pass  # normal teardown
+                else:
+                    logger.warning(
+                        f"MCP stdio server {name} ({server_id}) terminated: {type(e).__name__}: {e}"
+                    )
 
-                await session.initialize()
+        owner_task = asyncio.create_task(_owner(), name=f"mcp-stdio-{server_id}")
 
-                # Discover tools
-                tools_result = await session.list_tools()
-            except Exception:
-                await stack.aclose()
+        # Consume any late exception the owner sets after the caller has already
+        # given up (timeout race) — avoids "Future exception was never retrieved".
+        ready.add_done_callback(lambda f: f.exception() if not f.cancelled() else None)
+
+        try:
+            session, tools_result = await asyncio.wait_for(asyncio.shield(ready), timeout=60)
+        except BaseException as e:  # timeout, server startup failure, or cancellation
+            stop.set()
+            owner_task.cancel()
+            try:
+                await asyncio.wait_for(owner_task, timeout=5)
+            except BaseException:
+                pass  # bounded, best-effort teardown — never let it escape
+            if isinstance(e, asyncio.CancelledError):
                 raise
+            logger.error(f"Failed to connect MCP server {name} ({server_id}): {e}")
+            error_message = _format_mcp_connection_error(name, command or "", args or [], e)
+            self._connections[server_id] = {"status": "error", "error": error_message, "name": name}
+            return False
+
+        try:
             tools = []
             for tool in tools_result.tools:
                 tools.append({
@@ -215,7 +268,9 @@ class McpManager:
                 })
 
             self._sessions[server_id] = session
-            self._stacks[server_id] = stack
+            # Store the owner-task handle where the AsyncExitStack used to live;
+            # disconnect_server() knows how to shut down either shape.
+            self._stacks[server_id] = ("owner-task", stop, owner_task)
             self._tools[server_id] = tools
             # Extract identity hints from env vars (e.g. email address, API name)
             # so tool descriptions can distinguish between multiple instances of
@@ -238,9 +293,13 @@ class McpManager:
             logger.info(f"MCP server connected: {name} ({server_id}) - {len(tools)} tools via stdio")
             return True
 
-        except ImportError:
-            logger.warning("MCP package not installed. Install with: pip install mcp")
-            self._connections[server_id] = {"status": "error", "error": "mcp package not installed", "name": name}
+        except Exception as e:
+            # Post-connect bookkeeping failed — tear the owner task down so the
+            # server subprocess doesn't leak, then report the error normally.
+            stop.set()
+            owner_task.cancel()
+            logger.error(f"Failed to register MCP server {name} ({server_id}): {e}")
+            self._connections[server_id] = {"status": "error", "error": str(e), "name": name}
             return False
 
     async def _connect_sse(self, server_id: str, name: str, url: str) -> bool:
@@ -391,7 +450,18 @@ class McpManager:
         stack = self._stacks.pop(server_id, None)
         if stack:
             try:
-                await stack.aclose()
+                if isinstance(stack, tuple) and stack and stack[0] == "owner-task":
+                    # stdio owner-task handle: signal the owner to unwind its own
+                    # scopes in its own task (see _connect_stdio), then bound the
+                    # wait so a wedged subprocess can't hang disconnect forever.
+                    _, stop, owner_task = stack
+                    stop.set()
+                    try:
+                        await asyncio.wait_for(owner_task, timeout=5)
+                    except (asyncio.TimeoutError, Exception):
+                        owner_task.cancel()
+                else:
+                    await stack.aclose()
             except Exception as e:
                 logger.warning(f"Error closing MCP server {server_id}: {e}")
 
