@@ -74,11 +74,38 @@ const CAP_LABEL: Record<AppCapability, string> = {
   "vm.computer_use": "Computer use (VM)",
 };
 
-export function AppsTab() {
+export function AppsTab({ focusAppId }: { focusAppId?: string | null }) {
   const { data: token } = useShellToken();
   const { data: apps = [], isLoading } = useApps();
   const install = useInstallApp();
   const qc = useQueryClient();
+  const focusStart = useStartApp();
+
+  // When a header shortcut targets an app: start it if it's not running and
+  // scroll its card into view.
+  const focusedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusAppId) {
+      focusedRef.current = null;
+      return;
+    }
+    if (apps.length === 0) return;
+    if (focusedRef.current === focusAppId) return;
+    const app = apps.find((a) => a.id === focusAppId);
+    if (!app) return;
+    const phase = app.run?.phase ?? "stopped";
+    const needsStart = app.status === "installed" && phase === "stopped";
+    // If the app needs starting but the shell token isn't loaded yet, don't
+    // mark as handled — the effect re-runs when the token arrives and retries.
+    if (needsStart && !token) return;
+    focusedRef.current = focusAppId;
+    if (needsStart) focusStart.mutate(app.id);
+    setTimeout(() => {
+      document
+        .querySelector(`[data-testid="card-app-${focusAppId}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  }, [focusAppId, apps, token, focusStart]);
 
   const installZip = useInstallZip();
   const installFromPath = useInstallFromPath();
@@ -583,16 +610,18 @@ function AppCard({ app, token }: { app: InstalledApp; token?: string | null }) {
                 <FileText className="h-3.5 w-3.5" />
               )}
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2 text-xs text-destructive hover:text-destructive"
-              onClick={onUninstall}
-              disabled={uninstall.isPending}
-              data-testid={`button-uninstall-${app.id}`}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+            {!app.isDefault && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-xs text-destructive hover:text-destructive"
+                onClick={onUninstall}
+                disabled={uninstall.isPending}
+                data-testid={`button-uninstall-${app.id}`}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
           </div>
         </div>
 
@@ -615,6 +644,11 @@ function AppCard({ app, token }: { app: InstalledApp; token?: string | null }) {
               />
               {RUN_BADGE[phase].label}
             </span>
+            {app.isDefault && (
+              <Badge variant="secondary" className="text-[10px]">
+                Built-in
+              </Badge>
+            )}
             {app.autostart && (
               <Badge variant="outline" className="text-[10px]">
                 Autostart

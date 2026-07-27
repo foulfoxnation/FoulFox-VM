@@ -5,7 +5,7 @@ description: How OS-bundled default apps get installed on first boot, and the in
 Default FoulFox Apps are zips baked into the OS image at `/usr/share/foulfox/default-apps/` (live-build includes.chroot); api-server's boot-time seeder (`FOULFOX_DEFAULT_APPS_DIR` override for dev/tests) installs each **once per app id**, marker file `.default-apps-seeded.json` under APPS_DIR.
 
 Rules that must hold:
-- **Seed at most once per id**: marker written only after a *successful* install → transient first-boot failures (no network for npm/pip) retry on next boot; a user uninstall is respected forever (marker survives).
+- **Seed at most once per id** (marker written only after a *successful* install → transient first-boot failures retry on next boot), EXCEPT protected default apps (`PROTECTED_DEFAULT_APP_IDS` in default-apps.ts: foulfox-voice, llama-llama-studio): those reseed whenever missing from the registry, and DELETE /apps/:id returns 403 for them. Other apps: a user uninstall is respected forever (marker survives).
 - **Copy the zip before installing** — the installer deletes its source zip, and the bundled original lives on read-only squashfs.
 - Autostart: `autostartApps()` only handles already-installed apps at boot; the seeder itself calls `startApp` after install when the manifest says autostart.
 - `unzip` must stay in the OS package list — the installer shells out to it; without it every zip install silently fails.

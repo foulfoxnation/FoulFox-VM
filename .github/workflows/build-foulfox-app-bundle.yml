@@ -79,6 +79,19 @@ jobs:
           chmod +x os/scripts/*.sh
           os/scripts/stage-app.sh
 
+      - name: Vendor default-app zips for devices flashed from older ISOs
+        # The seeder prefers <api-server cwd>/default-apps over the read-only
+        # /usr/share/foulfox/default-apps squashfs copies, so a live update can
+        # deliver newer built-in apps (VoiceForge, Llama Llama Studio) with NO
+        # reflash.
+        run: |
+          set -euo pipefail
+          STAGE="os/live-build/config/includes.chroot/opt/foulfox/app"
+          SRC="os/live-build/config/includes.chroot/usr/share/foulfox/default-apps"
+          DEST="$STAGE/artifacts/api-server/default-apps"
+          mkdir -p "$DEST"
+          cp -v "$SRC"/*.zip "$DEST"/
+
       - name: Vendor wmctrl for devices flashed from older ISOs
         # Newer ISOs bake wmctrl in via the package list, but sticks flashed
         # from older images don't have it — and the window tray needs it. Ship

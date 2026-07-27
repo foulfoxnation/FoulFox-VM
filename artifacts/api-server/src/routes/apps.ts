@@ -27,6 +27,7 @@ import {
   runLog,
   forgetApp,
 } from "../lib/app-runner";
+import { isProtectedDefaultApp } from "../lib/default-apps";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -41,6 +42,7 @@ function pathParam(value: string | string[] | undefined): string {
 function summarize(a: AppRecord) {
   return {
     id: a.id,
+    isDefault: isProtectedDefaultApp(a.id),
     name: a.name,
     version: a.version,
     description: a.description,
@@ -358,6 +360,12 @@ router.delete("/apps/:id", (req: Request, res: Response) => {
   const id = pathParam(req.params.id);
   if (!getApp(id)) {
     res.status(404).json({ error: "No such app." });
+    return;
+  }
+  if (isProtectedDefaultApp(id)) {
+    res.status(403).json({
+      error: "This is a built-in FoulFox OS app and can't be uninstalled.",
+    });
     return;
   }
   forgetApp(id); // stop the running process (if any) before removing files

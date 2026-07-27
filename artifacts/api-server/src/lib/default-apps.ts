@@ -22,6 +22,16 @@ import { startInstallFromZip, getJob } from "./app-installer";
 import { startApp } from "./app-runner";
 
 const DEFAULT_DIR = "/usr/share/foulfox/default-apps";
+
+// Apps that ship with the OS and are part of the product itself (the agent's
+// voice, the AI studio). They can never be uninstalled, and if one is ever
+// missing at boot it is re-seeded from the bundled zip — even if the seeded
+// marker says it ran before.
+export const PROTECTED_DEFAULT_APP_IDS = ["foulfox-voice", "llama-llama-studio"] as const;
+
+export function isProtectedDefaultApp(id: string): boolean {
+  return (PROTECTED_DEFAULT_APP_IDS as readonly string[]).includes(id);
+}
 const SEEDED_MARKER = () => path.join(APPS_DIR, ".default-apps-seeded.json");
 const INSTALL_POLL_MS = 2000;
 const INSTALL_WAIT_MS = 60 * 60 * 1000; // heavy first installs (pip/torch) are slow
@@ -89,7 +99,9 @@ async function seedOne(zipPath: string): Promise<void> {
     return;
   }
   const seeded = readSeeded();
-  if (seeded[meta.id]) return; // seeded on an earlier boot (or user uninstalled)
+  // Protected default apps ALWAYS come back if missing; for everything else
+  // the seeded marker respects a user's uninstall.
+  if (seeded[meta.id] && !isProtectedDefaultApp(meta.id)) return;
   if (getApp(meta.id)) {
     markSeeded(meta.id); // already present (e.g. installed manually)
     return;
@@ -128,16 +140,23 @@ async function seedOne(zipPath: string): Promise<void> {
 // first-boot installs (npm + pip/torch) don't compete for CPU/network.
 export async function seedDefaultApps(): Promise<void> {
   const dir = process.env["FOULFOX_DEFAULT_APPS_DIR"] || DEFAULT_DIR;
-  let zips: string[] = [];
-  try {
-    zips = fs
-      .readdirSync(dir)
-      .filter((f) => /\.zip$/i.test(f))
-      .sort()
-      .map((f) => path.join(dir, f));
-  } catch {
-    return; // no default-apps dir on this host (e.g. dev) — nothing to do
+  // Bundle-shipped copies (vendored into the app tree by the app-bundle CI)
+  // take priority over the read-only squashfs copies from the ISO: devices
+  // flashed from an older image get the NEWER default-app zips via live
+  // update, without a reflash. Same filename in both dirs → bundle wins.
+  const bundleDir = path.resolve(process.cwd(), "default-apps");
+  const byName = new Map<string, string>();
+  for (const d of [dir, bundleDir]) {
+    try {
+      for (const f of fs.readdirSync(d)) {
+        if (/\.zip$/i.test(f)) byName.set(f, path.join(d, f));
+      }
+    } catch {
+      // dir missing on this host (e.g. dev) — fine
+    }
   }
+  const zips = [...byName.keys()].sort().map((k) => byName.get(k)!);
+  if (zips.length === 0) return;
   for (const zip of zips) {
     try {
       await seedOne(zip);

@@ -37,6 +37,7 @@ export interface AppWindow {
 
 export interface InstalledApp {
   id: string;
+  isDefault?: boolean;
   name: string;
   version: string;
   description: string;

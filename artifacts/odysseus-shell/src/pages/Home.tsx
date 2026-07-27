@@ -33,6 +33,8 @@ import {
   Boxes,
   Wifi,
   PanelLeft,
+  Mic,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -59,6 +61,13 @@ export default function Home() {
   const [pickerOpen, setPickerOpen] = useState(false);
   // Terminal context pending delivery to the agent chat (host shell -> chat).
   const [pendingOdysseusContext, setPendingOdysseusContext] = useState<string | null>(null);
+  // Header shortcuts for the built-in apps: switch to the Apps tab and
+  // start/focus a specific default app (Voice Forge, Llama Llama Studio).
+  const [focusAppId, setFocusAppId] = useState<string | null>(null);
+  const openDefaultApp = (id: string) => {
+    setFocusAppId(id);
+    setActiveTab("apps");
+  };
   // Width (% of the content row) of the side-by-side agent chat panel.
   const [chatWidthPct, setChatWidthPct] = useState(38);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -141,6 +150,28 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
+            onClick={() => openDefaultApp("foulfox-voice")}
+            title="Voice Forge — talk to the agent (TTS/STT)"
+            data-testid="button-app-voice-forge"
+          >
+            <Mic className="h-4 w-4" />
+            <span className="hidden sm:inline text-xs">Voice Forge</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
+            onClick={() => openDefaultApp("llama-llama-studio")}
+            title="Llama Llama Studio — local AI research studio"
+            data-testid="button-app-llama-studio"
+          >
+            <Sparkles className="h-4 w-4" />
+            <span className="hidden sm:inline text-xs">Llama Studio</span>
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -284,7 +315,7 @@ export default function Home() {
               <DevicesTab />
             </Body>
             <Body show={activeTab === "apps"}>
-              <AppsTab />
+              <AppsTab focusAppId={activeTab === "apps" ? focusAppId : null} />
             </Body>
             {vms.map((vm) => (
               <Body key={vm.id} show={activeTab === `vm:${vm.id}`}>
