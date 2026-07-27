@@ -42,6 +42,7 @@ export interface BrowserCapabilities {
   nativeBrowser: boolean;
   chromium: boolean;
   firefox?: boolean;
+  discord?: boolean;
   hasDisplay: boolean;
   openBrowser?: boolean;
 }
@@ -66,10 +67,10 @@ export async function launchNativeBrowser(url: string): Promise<{ ok: boolean; m
   return postJson("/api/browser/launch", { url });
 }
 
-// Open a standalone, movable browser window (Firefox or Chromium) over the
-// kiosk on the appliance. Fails honestly in dev (no launcher / no display).
+// Open a standalone, movable app window (Firefox, Chromium or Discord) over
+// the kiosk on the appliance. Fails honestly in dev (no launcher / no display).
 export async function openStandaloneBrowser(
-  browser: "firefox" | "chromium",
+  browser: "firefox" | "chromium" | "discord",
 ): Promise<{ ok: boolean; message?: string }> {
   return postJson("/api/browser/open", { browser });
 }

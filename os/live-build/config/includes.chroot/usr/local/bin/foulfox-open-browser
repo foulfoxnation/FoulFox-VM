@@ -4,7 +4,7 @@
 # back). Invoked by the shell's "Open Browser" control via the api-server, and
 # by the Openbox keyboard shortcuts (W-f / W-c).
 #
-# Usage: foulfox-open-browser [firefox|chromium] [url]
+# Usage: foulfox-open-browser [firefox|chromium|discord] [url]
 
 BROWSER="${1:-firefox}"
 URL="${2:-}"
@@ -38,8 +38,14 @@ case "$BROWSER" in
       --disable-gpu-compositing \
       --new-window ${URL:+"$URL"}
     ;;
+  discord)
+    command -v discord >/dev/null 2>&1 || { echo "discord is not installed" >&2; exit 127; }
+    # Electron app; opens as a normal decorated window (rc.xml application
+    # rule, class "discord"). No URL argument.
+    exec discord
+    ;;
   *)
-    echo "Unknown browser: $BROWSER (expected firefox or chromium)" >&2
+    echo "Unknown browser: $BROWSER (expected firefox, chromium or discord)" >&2
     exit 2
     ;;
 esac

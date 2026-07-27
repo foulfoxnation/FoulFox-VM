@@ -400,9 +400,11 @@ router.post("/browser/launch", async (req: Request, res: Response) => {
 const OPEN_BROWSER_LAUNCHER = "/usr/local/bin/foulfox-open-browser";
 
 router.post("/browser/open", async (req: Request, res: Response) => {
-  const browser = req.body?.browser === "chromium" ? "chromium" : req.body?.browser === "firefox" ? "firefox" : null;
+  const requested = req.body?.browser;
+  const browser =
+    requested === "chromium" || requested === "firefox" || requested === "discord" ? requested : null;
   if (!browser) {
-    res.status(400).json({ error: 'Expected {"browser": "firefox" | "chromium"}.' });
+    res.status(400).json({ error: 'Expected {"browser": "firefox" | "chromium" | "discord"}.' });
     return;
   }
   // Optional URL: external links from the kiosk shell open here so they get a
@@ -426,9 +428,10 @@ router.post("/browser/open", async (req: Request, res: Response) => {
     res.status(503).json(unavailable("Browser launching is only available on the booted FoulFox OS appliance (no launcher on this machine)."));
     return;
   }
-  const binary = browser === "firefox" ? "firefox-esr" : "chromium";
+  const binary = browser === "firefox" ? "firefox-esr" : browser === "discord" ? "discord" : "chromium";
+  const label = browser === "firefox" ? "Firefox" : browser === "discord" ? "Discord" : "Chromium";
   if (!(await commandExists(binary))) {
-    res.status(503).json(unavailable(`${browser === "firefox" ? "Firefox" : "Chromium"} is not installed on this machine.`));
+    res.status(503).json(unavailable(`${label} is not installed on this machine.`));
     return;
   }
   if (!process.env["DISPLAY"] && !existsSync("/tmp/.X11-unix/X0")) {
@@ -442,7 +445,7 @@ router.post("/browser/open", async (req: Request, res: Response) => {
       env: { ...process.env, DISPLAY: process.env["DISPLAY"] ?? ":0" },
     });
     child.unref();
-    res.json({ ok: true, message: `Opening ${browser === "firefox" ? "Firefox" : "Chromium"}…` });
+    res.json({ ok: true, message: `Opening ${label}…` });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
   }
@@ -452,6 +455,7 @@ router.post("/browser/open", async (req: Request, res: Response) => {
 router.get("/browser/capabilities", async (_req: Request, res: Response) => {
   const chromium = await commandExists("chromium");
   const firefox = await commandExists("firefox-esr");
+  const discord = await commandExists("discord");
   const { existsSync } = await import("fs");
   const hasLauncher = existsSync(OPEN_BROWSER_LAUNCHER);
   const hasDisplay = !!process.env["DISPLAY"] || existsSync("/tmp/.X11-unix/X0");
@@ -460,9 +464,10 @@ router.get("/browser/capabilities", async (_req: Request, res: Response) => {
     nativeBrowser: chromium && !!process.env["DISPLAY"],
     chromium,
     firefox,
+    discord,
     hasDisplay: !!process.env["DISPLAY"],
     // "Open Browser" (standalone window over the kiosk) availability:
-    openBrowser: hasLauncher && hasDisplay && (chromium || firefox),
+    openBrowser: hasLauncher && hasDisplay && (chromium || firefox || discord),
   });
 });
 

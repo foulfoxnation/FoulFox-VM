@@ -1,0 +1,40 @@
+#!/bin/bash
+# Install the Discord desktop app (official .deb) into the image so the user
+# can chat / copy-paste commands / share screenshots from the appliance itself.
+# Launched over the kiosk via foulfox-open-browser discord (decorated window,
+# Openbox rc.xml has a matching application rule).
+set -e
+
+echo "[foulfox] Installing Discord desktop app…"
+
+# resolv.conf fix — same as 0005-nodejs20.hook.chroot (see failed_builds.md #10).
+_resolv_was_symlink=0
+_resolv_target=""
+if [ -L /etc/resolv.conf ]; then
+  _resolv_was_symlink=1
+  _resolv_target=$(readlink /etc/resolv.conf)
+fi
+_orig_resolv=$(cat /etc/resolv.conf 2>/dev/null || true)
+rm -f /etc/resolv.conf
+echo "nameserver 8.8.8.8" > /etc/resolv.conf
+
+# Official "latest stable" .deb redirect. Fail the build honestly if the
+# download breaks — a silently missing Discord would ship a broken button.
+curl -fsSL -o /tmp/discord.deb \
+  "https://discord.com/api/download?platform=linux&format=deb"
+
+# apt resolves the .deb's dependencies (libatomic1, libasound2, etc.).
+apt-get update
+apt-get install -y /tmp/discord.deb
+rm -f /tmp/discord.deb
+
+# Restore resolv.conf as it was.
+rm -f /etc/resolv.conf
+if [ "$_resolv_was_symlink" = "1" ]; then
+  ln -s "$_resolv_target" /etc/resolv.conf
+else
+  printf '%s\n' "$_orig_resolv" > /etc/resolv.conf
+fi
+
+command -v discord >/dev/null || { echo "[foulfox] ERROR: discord binary missing after install" >&2; exit 1; }
+echo "[foulfox] Discord installed."

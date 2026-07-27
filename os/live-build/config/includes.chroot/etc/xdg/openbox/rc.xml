@@ -18,6 +18,11 @@
     <name>Clearlooks</name>
     <keepBorder>yes</keepBorder>
     <animateIconify>no</animateIconify>
+    <!-- Bigger titlebar text -> Openbox scales the titlebar and its
+         minimize/maximize/close buttons with the font. The default was tiny
+         and near-unclickable on the appliance's 1080p+ screen. -->
+    <font place="ActiveWindow"><name>sans</name><size>13</size><weight>Bold</weight></font>
+    <font place="InactiveWindow"><name>sans</name><size>13</size><weight>Normal</weight></font>
   </theme>
   <desktops>
     <number>1</number>
@@ -126,13 +131,32 @@
     <!-- Browsers open as normal decorated windows, maximized for usability;
          still movable/closable. The kiosk Chromium (fullscreen kiosk mode) is
          unaffected: fullscreen windows ignore decoration/maximize hints. -->
+    <!-- <fullscreen>no</fullscreen>: Firefox must never map fullscreen over
+         the kiosk (no titlebar = no way out for a non-technical user). -->
     <application class="firefox-esr" type="normal">
       <decor>yes</decor>
       <maximized>yes</maximized>
+      <fullscreen>no</fullscreen>
+      <focus>yes</focus>
     </application>
     <application class="Firefox-esr" type="normal">
       <decor>yes</decor>
       <maximized>yes</maximized>
+      <fullscreen>no</fullscreen>
+      <focus>yes</focus>
+    </application>
+    <!-- Discord (Electron, class "discord") — normal decorated window. -->
+    <application class="discord" type="normal">
+      <decor>yes</decor>
+      <maximized>yes</maximized>
+      <fullscreen>no</fullscreen>
+      <focus>yes</focus>
+    </application>
+    <application class="Discord" type="normal">
+      <decor>yes</decor>
+      <maximized>yes</maximized>
+      <fullscreen>no</fullscreen>
+      <focus>yes</focus>
     </application>
     <!-- The user-facing Chromium window (separate profile launched by
          foulfox-open-browser). Decorated + maximized + focused so new windows

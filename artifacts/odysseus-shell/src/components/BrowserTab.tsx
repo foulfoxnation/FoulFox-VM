@@ -105,7 +105,7 @@ export function BrowserTab() {
   // Open a standalone, movable browser window (Firefox/Chromium) over the
   // kiosk on the appliance. In dev this fails honestly with a clear message.
   const openBrowserMut = useMutation({
-    mutationFn: (browser: "firefox" | "chromium") => openStandaloneBrowser(browser),
+    mutationFn: (browser: "firefox" | "chromium" | "discord") => openStandaloneBrowser(browser),
     onSuccess: (r) => toast({ title: r.message || "Opening browser…", duration: 2500 }),
     onError: (e) =>
       toast({
@@ -201,6 +201,12 @@ export function BrowserTab() {
               data-testid="menu-open-chromium"
             >
               Chromium
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => openBrowserMut.mutate("discord")}
+              data-testid="menu-open-discord"
+            >
+              Discord
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
