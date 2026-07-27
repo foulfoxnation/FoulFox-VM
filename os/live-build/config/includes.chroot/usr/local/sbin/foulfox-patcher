@@ -333,8 +333,23 @@ do_apply() {
 
   write_status "checking" "running" "Fetching update manifest…"
   local mf="$STAGING_DIR/manifest.json"
-  curl -fsSL --max-time 30 -o "$mf" "$murl" \
-    || fail "Could not download the update manifest." "manifest-download"
+  if ! curl -fsSL --max-time 30 -o "$mf" "$murl"; then
+    # Primary source (GitHub) unreachable/rate-limited — fall back to the
+    # published-site mirror (FOULFOX_UPDATE_MIRROR, https manifest URL). The
+    # mirror rewrites bundleUrl to itself, so the whole download avoids GitHub.
+    local mirror="${FOULFOX_UPDATE_MIRROR:-}"
+    case "$mirror" in
+      https://*)
+        log "primary manifest failed; trying mirror $mirror"
+        write_status "checking" "running" "Primary update server unreachable — trying mirror…"
+        curl -fsSL --max-time 30 -o "$mf" "$mirror" \
+          || fail "Could not download the update manifest (primary and mirror)." "manifest-download"
+        ;;
+      *)
+        fail "Could not download the update manifest." "manifest-download"
+        ;;
+    esac
+  fi
 
   local meta
   meta="$(python3 -c 'import json,sys

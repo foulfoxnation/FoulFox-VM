@@ -20,6 +20,7 @@ import diskInstallRouter from "./disk-install";
 import powerRouter from "./power";
 import serviceRestartRouter from "./service-restart";
 import windowsRouter from "./windows";
+import updatesMirrorRouter from "./updates";
 
 const router: IRouter = Router();
 
@@ -40,6 +41,7 @@ router.use(diskInstallRouter);
 router.use(powerRouter);
 router.use(serviceRestartRouter);
 router.use(windowsRouter);
+router.use(updatesMirrorRouter);
 router.use(setupHealRouter);
 router.use(appsRouter);
 router.use(odysseusLifecycleRouter);

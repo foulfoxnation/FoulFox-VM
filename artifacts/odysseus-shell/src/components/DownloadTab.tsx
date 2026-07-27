@@ -281,11 +281,13 @@ function AppUpdatesCard() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <CardTitle className="flex items-center gap-2">
-              <RefreshCw className="h-5 w-5" /> App updates
+              <RefreshCw className="h-5 w-5" /> OS live updates
             </CardTitle>
             <CardDescription>
-              Update the running appliance in place — no reflashing. Bad updates
-              roll back on their own.
+              Patch the whole FoulFox software stack on the running device — no
+              reflashing. It pulls the latest bundle from GitHub, falls back to
+              the published FoulFox site, verifies the checksum, and swaps it in
+              atomically. Bad updates roll back on their own.
             </CardDescription>
           </div>
           <UpdateBadge

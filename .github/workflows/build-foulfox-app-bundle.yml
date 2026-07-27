@@ -92,10 +92,12 @@ jobs:
           DEST="$STAGE/artifacts/api-server/vendor/bin"
           mkdir -p "$DEST" work-wmctrl
           # Resolve the current bookworm wmctrl .deb URL from the package index
-          # (exact filename shifts with binNMUs, so don't hardcode it).
-          curl -fsSL http://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz \
-            | gunzip \
-            | awk '/^Package: wmctrl$/{f=1} f&&/^Filename: /{print $2; exit}' > work-wmctrl/path.txt
+          # (exact filename shifts with binNMUs, so don't hardcode it). Download
+          # to a file first — piping curl|gunzip|awk with `exit` trips pipefail
+          # via SIGPIPE (this exact step failed that way in run #7).
+          curl -fsSL -o work-wmctrl/Packages.gz http://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz
+          gunzip -c work-wmctrl/Packages.gz \
+            | awk '/^Package: wmctrl$/{f=1} f&&/^Filename: /{print $2; exit}' > work-wmctrl/path.txt || true
           DEB_PATH="$(cat work-wmctrl/path.txt)"
           test -n "$DEB_PATH"
           curl -fsSL -o work-wmctrl/wmctrl.deb "http://deb.debian.org/debian/$DEB_PATH"
