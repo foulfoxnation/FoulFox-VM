@@ -79,6 +79,31 @@ jobs:
           chmod +x os/scripts/*.sh
           os/scripts/stage-app.sh
 
+      - name: Vendor wmctrl for devices flashed from older ISOs
+        # Newer ISOs bake wmctrl in via the package list, but sticks flashed
+        # from older images don't have it — and the window tray needs it. Ship
+        # the Debian bookworm binary inside the bundle; the api-server falls
+        # back to vendor/bin/wmctrl when the system copy is missing, so the
+        # tray works after a live update with NO reflash. (Its runtime libs —
+        # libX11, glib — are already on every image that runs the X kiosk.)
+        run: |
+          set -euo pipefail
+          STAGE="os/live-build/config/includes.chroot/opt/foulfox/app"
+          DEST="$STAGE/artifacts/api-server/vendor/bin"
+          mkdir -p "$DEST" work-wmctrl
+          # Resolve the current bookworm wmctrl .deb URL from the package index
+          # (exact filename shifts with binNMUs, so don't hardcode it).
+          curl -fsSL http://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz \
+            | gunzip \
+            | awk '/^Package: wmctrl$/{f=1} f&&/^Filename: /{print $2; exit}' > work-wmctrl/path.txt
+          DEB_PATH="$(cat work-wmctrl/path.txt)"
+          test -n "$DEB_PATH"
+          curl -fsSL -o work-wmctrl/wmctrl.deb "http://deb.debian.org/debian/$DEB_PATH"
+          dpkg-deb -x work-wmctrl/wmctrl.deb work-wmctrl/x
+          install -m 0755 work-wmctrl/x/usr/bin/wmctrl "$DEST/wmctrl"
+          rm -rf work-wmctrl
+          echo "Vendored $(file "$DEST/wmctrl")"
+
       - name: Vendor Python wheels for offline install on-device
         # The patcher builds the odysseus-service venv with
         # `pip install --no-index --find-links wheels`, so the appliance never

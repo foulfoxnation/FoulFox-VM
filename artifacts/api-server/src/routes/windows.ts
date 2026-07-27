@@ -1,10 +1,46 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { accessSync, constants, existsSync } from "fs";
+import { dirname, resolve } from "path";
+import { fileURLToPath } from "url";
 import { commandExists, unavailable } from "../lib/peripherals";
 
 const router: IRouter = Router();
 const execFileAsync = promisify(execFile);
+
+// Resolve the wmctrl binary. Newer ISOs bake wmctrl into the OS (package list);
+// devices flashed from OLDER ISOs don't have it, so the live-update app bundle
+// vendors a Debian bookworm wmctrl at api-server/vendor/bin/wmctrl. This makes
+// the window tray work via "Odysseus Updates" alone — no reflash required.
+function vendoredWmctrlCandidates(): string[] {
+  const here = dirname(fileURLToPath(import.meta.url)); // dist/ when bundled
+  return [
+    resolve(here, "../vendor/bin/wmctrl"),
+    resolve(process.cwd(), "vendor/bin/wmctrl"),
+    "/opt/foulfox/app/artifacts/api-server/vendor/bin/wmctrl",
+  ];
+}
+
+let wmctrlPathCache: string | null | undefined;
+async function wmctrlPath(): Promise<string | null> {
+  if (wmctrlPathCache !== undefined) return wmctrlPathCache;
+  if (await commandExists("wmctrl")) {
+    wmctrlPathCache = "wmctrl";
+    return wmctrlPathCache;
+  }
+  for (const p of vendoredWmctrlCandidates()) {
+    try {
+      accessSync(p, constants.X_OK);
+      wmctrlPathCache = p;
+      return p;
+    } catch {
+      // keep looking
+    }
+  }
+  wmctrlPathCache = null;
+  return null;
+}
 
 // ── Open-window tray (appliance) ─────────────────────────────────────────────
 // The kiosk shell is fullscreen, so a minimized Firefox/Discord window has no
@@ -28,8 +64,7 @@ function displayEnv(): NodeJS.ProcessEnv {
 }
 
 async function trayAvailable(): Promise<boolean> {
-  if (!(await commandExists("wmctrl"))) return false;
-  const { existsSync } = await import("fs");
+  if ((await wmctrlPath()) === null) return false;
   return !!process.env["DISPLAY"] || existsSync("/tmp/.X11-unix/X0");
 }
 
@@ -41,7 +76,8 @@ router.get("/windows", async (_req: Request, res: Response) => {
   try {
     // -l list, -x include WM_CLASS. Format per line:
     //   0x04000007  0 navigator.Firefox-esr  hostname  Page title …
-    const { stdout } = await execFileAsync("wmctrl", ["-lx"], {
+    const wmctrl = (await wmctrlPath()) as string;
+    const { stdout } = await execFileAsync(wmctrl, ["-lx"], {
       env: displayEnv(),
       timeout: 5000,
     });
@@ -73,7 +109,8 @@ async function windowAction(req: Request, res: Response, args: (id: string) => s
     return;
   }
   try {
-    await execFileAsync("wmctrl", args(id), { env: displayEnv(), timeout: 5000 });
+    const wmctrl = (await wmctrlPath()) as string;
+    await execFileAsync(wmctrl, args(id), { env: displayEnv(), timeout: 5000 });
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
