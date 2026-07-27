@@ -138,6 +138,12 @@ unzip
 # v0.32 — without zstd the bake step cannot extract it.
 zstd
 
+# ── Window tray ──────────────────────────────────────────────────────────────
+# wmctrl: lets the api-server list open X windows and re-activate a minimized
+# one (the shell's taskbar/tray). Without it the tray simply reports
+# unavailable — but a minimized Discord/Firefox would be unreachable.
+wmctrl
+
 # ── Screenshots ──────────────────────────────────────────────────────────────
 # scrot: lightweight X11 screenshotter used by foulfox-screenshot (PrintScreen
 # key binding). libnotify-bin: the notify-send binary that shows the "Screenshot

@@ -14,6 +14,7 @@ import { OdysseusUpdateButton } from "@/components/OdysseusUpdateButton";
 import { HostShellModal } from "@/components/HostShellModal";
 import { FileExplorerModal } from "@/components/FileExplorerModal";
 import { BrowserTab } from "@/components/BrowserTab";
+import { WindowTray } from "@/components/WindowTray";
 import { DevicesTab } from "@/components/DevicesTab";
 import { AppsTab } from "@/components/AppsTab";
 import foxLogo from "@assets/FoxQuest_Logo_1781378611335.png";
@@ -231,6 +232,9 @@ export default function Home() {
               <Plus className="mr-1 h-4 w-4" />
               <span className="text-xs">New VM</span>
             </Button>
+
+            {/* Minimized/open app windows on the appliance (Discord, Firefox, …) */}
+            <WindowTray />
           </TabsList>
         </div>
 

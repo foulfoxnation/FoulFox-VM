@@ -164,6 +164,9 @@ app.use("/api/browser/open", requireShellToken);
 app.use("/api/network", localhostOnly, requireStateChangeToken);
 app.use("/api/usb", localhostOnly, requireStateChangeToken);
 app.use("/api/bluetooth", localhostOnly, requireStateChangeToken);
+// Window tray: read-only GET /api/windows passes; POST activate/minimize
+// (raises/hides arbitrary X windows on the appliance) requires the shell token.
+app.use("/api/windows", localhostOnly, requireStateChangeToken);
 
 // Local model connection endpoints: localhost only. requireStateChangeToken lets
 // the read-only GET (list endpoints) through but requires the shell token for the
