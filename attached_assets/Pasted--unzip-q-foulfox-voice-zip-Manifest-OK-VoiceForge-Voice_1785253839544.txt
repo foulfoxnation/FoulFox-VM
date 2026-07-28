@@ -1,0 +1,188 @@
+$ unzip -q foulfox-voice.zip
+
+Manifest OK: VoiceForge Voice v1.0.0 (id: foulfox-voice, runtime: node)
+
+$ npm install --omit=dev --no-audit --no-fund
+npm warn deprecated prebuild-install@7.1.3: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.
+
+added 38 packages in 2m
+npm notice
+npm notice New major version of npm available! 10.8.2 -> 12.0.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.1
+npm notice To update run: npm install -g npm@12.0.1
+npm notice
+
+$ python3 -m venv .venv-base
+
+$ .venv-base/bin/python -m pip install --no-cache-dir -r requirements-base.txt
+Collecting kokoro-onnx>=0.5.0
+  Downloading kokoro_onnx-0.5.0-py3-none-any.whl (17 kB)
+Collecting numpy>=2.4
+  Downloading numpy-2.4.6-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.9 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.9/16.9 MB 491.2 kB/s eta 0:00:00
+Collecting onnxruntime>=1.27.0
+  Downloading onnxruntime-1.28.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (19.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 19.2/19.2 MB 682.1 kB/s eta 0:00:00
+Collecting pyttsx3>=2.99
+  Downloading pyttsx3-2.99-py3-none-any.whl (32 kB)
+Collecting scipy>=1.17
+  Downloading scipy-1.17.1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (35.3 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 35.3/35.3 MB 3.9 MB/s eta 0:00:00
+Collecting soundfile>=0.14.0
+  Downloading soundfile-0.14.0-py2.py3-none-manylinux_2_28_x86_64.whl (1.3 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 3.3 MB/s eta 0:00:00
+Collecting faster-whisper>=1.0
+  Downloading faster_whisper-1.2.1-py3-none-any.whl (1.1 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 3.8 MB/s eta 0:00:00
+Collecting espeakng-loader>=0.2.4
+  Downloading espeakng_loader-0.2.4-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.1 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.1/10.1 MB 3.7 MB/s eta 0:00:00
+Collecting phonemizer-fork>=3.3.2
+  Downloading phonemizer_fork-3.3.2-py3-none-any.whl (82 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 82.7/82.7 kB 10.1 MB/s eta 0:00:00
+Collecting flatbuffers
+  Downloading flatbuffers-25.12.19-py2.py3-none-any.whl (26 kB)
+Collecting packaging
+  Downloading packaging-26.2-py3-none-any.whl (100 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100.2/100.2 kB 4.3 MB/s eta 0:00:00
+Collecting protobuf>=4.25.8
+  Downloading protobuf-7.35.1-cp310-abi3-manylinux2014_x86_64.whl (327 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 327.1/327.1 kB 1.1 MB/s eta 0:00:00
+Collecting cffi>=1.0
+  Downloading cffi-2.1.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (217 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 217.9/217.9 kB 4.6 MB/s eta 0:00:00
+Collecting typing-extensions
+  Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 45.6/45.6 kB 5.0 MB/s eta 0:00:00
+Collecting ctranslate2<5,>=4.0
+  Downloading ctranslate2-4.8.1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (39.4 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 39.4/39.4 MB 2.5 MB/s eta 0:00:00
+Collecting huggingface-hub>=0.21
+  Downloading huggingface_hub-1.25.1-py3-none-any.whl (774 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 774.9/774.9 kB 2.5 MB/s eta 0:00:00
+Collecting tokenizers<1,>=0.13
+  Downloading tokenizers-0.23.1-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.3 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 2.8 MB/s eta 0:00:00
+Collecting av>=11
+  Downloading av-18.0.0-cp311-abi3-manylinux_2_28_x86_64.whl (35.5 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 35.5/35.5 MB 1.9 MB/s eta 0:00:00
+Collecting tqdm
+  Downloading tqdm-4.70.0-py3-none-any.whl (80 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 80.2/80.2 kB 2.3 MB/s eta 0:00:00
+Collecting pycparser
+  Downloading pycparser-3.0-py3-none-any.whl (48 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 48.2/48.2 kB 4.6 MB/s eta 0:00:00
+Requirement already satisfied: setuptools in ./.venv-base/lib/python3.11/site-packages (from ctranslate2<5,>=4.0->faster-whisper>=1.0->-r requirements-base.txt (line 11)) (66.1.1)
+Collecting pyyaml<7,>=5.3
+  Downloading pyyaml-6.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (806 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 806.6/806.6 kB 2.6 MB/s eta 0:00:00
+Collecting click<9.0.0,>=8.4.2
+  Downloading click-8.4.2-py3-none-any.whl (119 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 119.2/119.2 kB 1.5 MB/s eta 0:00:00
+Collecting filelock>=3.10.0
+  Downloading filelock-3.32.0-py3-none-any.whl (97 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 97.7/97.7 kB 6.5 MB/s eta 0:00:00
+Collecting fsspec>=2023.5.0
+  Downloading fsspec-2026.6.0-py3-none-any.whl (203 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 203.9/203.9 kB 3.7 MB/s eta 0:00:00
+Collecting hf-xet<2.0.0,>=1.5.1
+  Downloading hf_xet-1.5.2-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (4.4 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.4/4.4 MB 2.7 MB/s eta 0:00:00
+Collecting httpx<1,>=0.23.0
+  Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.5/73.5 kB 1.1 MB/s eta 0:00:00
+Collecting attrs>=18.1
+  Downloading attrs-26.1.0-py3-none-any.whl (67 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 67.5/67.5 kB 9.3 MB/s eta 0:00:00
+Collecting dlinfo
+  Downloading dlinfo-2.0.0-py3-none-any.whl (3.7 kB)
+Collecting joblib
+  Downloading joblib-1.5.3-py3-none-any.whl (309 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 309.1/309.1 kB 6.3 MB/s eta 0:00:00
+Collecting segments
+  Downloading segments-2.4.0-py2.py3-none-any.whl (16 kB)
+Collecting anyio
+  Downloading anyio-4.14.2-py3-none-any.whl (125 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 125.8/125.8 kB 1.0 MB/s eta 0:00:00
+Collecting certifi
+  Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 137.0/137.0 kB 1.7 MB/s eta 0:00:00
+Collecting httpcore==1.*
+  Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 78.8/78.8 kB 4.4 MB/s eta 0:00:00
+Collecting idna
+  Downloading idna-3.18-py3-none-any.whl (65 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 65.5/65.5 kB 6.3 MB/s eta 0:00:00
+Collecting h11>=0.16
+  Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+Collecting regex
+  Downloading regex-2026.7.19-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (801 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 801.4/801.4 kB 2.5 MB/s eta 0:00:00
+Collecting csvw>=1.5.6
+  Downloading csvw-4.1.0-py2.py3-none-any.whl (69 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 69.5/69.5 kB 6.3 MB/s eta 0:00:00
+Collecting isodate
+  Downloading isodate-0.7.2-py3-none-any.whl (22 kB)
+Collecting python-dateutil
+  Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 2.2 MB/s eta 0:00:00
+Collecting rfc3986<2
+  Downloading rfc3986-1.5.0-py2.py3-none-any.whl (31 kB)
+Collecting uritemplate>=3.0.0
+  Downloading uritemplate-4.2.0-py3-none-any.whl (11 kB)
+Collecting babel
+  Downloading babel-2.18.0-py3-none-any.whl (10.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.2/10.2 MB 1.5 MB/s eta 0:00:00
+Collecting language-tags
+  Downloading language_tags-1.3.1-py3-none-any.whl (216 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 216.7/216.7 kB 1.1 MB/s eta 0:00:00
+Collecting rdflib
+  Downloading rdflib-7.6.0-py3-none-any.whl (615 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 615.4/615.4 kB 1.5 MB/s eta 0:00:00
+Collecting termcolor
+  Downloading termcolor-3.3.0-py3-none-any.whl (7.7 kB)
+Collecting jsonschema
+  Downloading jsonschema-4.26.0-py3-none-any.whl (90 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 90.6/90.6 kB 2.0 MB/s eta 0:00:00
+Collecting jsonschema-specifications>=2023.03.6
+  Downloading jsonschema_specifications-2025.9.1-py3-none-any.whl (18 kB)
+Collecting referencing>=0.28.4
+  Downloading referencing-0.37.0-py3-none-any.whl (26 kB)
+Collecting rpds-py>=0.25.0
+  Downloading rpds_py-2026.6.3-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (371 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 371.3/371.3 kB 2.8 MB/s eta 0:00:00
+Collecting six>=1.5
+  Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+Collecting pyparsing<4,>=2.1.0
+  Downloading pyparsing-3.3.2-py3-none-any.whl (122 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 122.8/122.8 kB 7.9 MB/s eta 0:00:00
+Installing collected packages: rfc3986, pyttsx3, flatbuffers, uritemplate, typing-extensions, tqdm, termcolor, six, rpds-py, regex, pyyaml, pyparsing, pycparser, protobuf, packaging, numpy, language-tags, joblib, isodate, idna, hf-xet, h11, fsspec, filelock, espeakng-loader, dlinfo, click, certifi, babel, av, attrs, scipy, referencing, rdflib, python-dateutil, onnxruntime, httpcore, ctranslate2, cffi, anyio, soundfile, jsonschema-specifications, httpx, jsonschema, huggingface-hub, tokenizers, csvw, segments, faster-whisper, phonemizer-fork, kokoro-onnx
+Successfully installed anyio-4.14.2 attrs-26.1.0 av-18.0.0 babel-2.18.0 certifi-2026.7.22 cffi-2.1.0 click-8.4.2 csvw-4.1.0 ctranslate2-4.8.1 dlinfo-2.0.0 espeakng-loader-0.2.4 faster-whisper-1.2.1 filelock-3.32.0 flatbuffers-25.12.19 fsspec-2026.6.0 h11-0.16.0 hf-xet-1.5.2 httpcore-1.0.9 httpx-0.28.1 huggingface-hub-1.25.1 idna-3.18 isodate-0.7.2 joblib-1.5.3 jsonschema-4.26.0 jsonschema-specifications-2025.9.1 kokoro-onnx-0.5.0 language-tags-1.3.1 numpy-2.4.6 onnxruntime-1.28.0 packaging-26.2 phonemizer-fork-3.3.2 protobuf-7.35.1 pycparser-3.0 pyparsing-3.3.2 python-dateutil-2.9.0.post0 pyttsx3-2.99 pyyaml-6.0.3 rdflib-7.6.0 referencing-0.37.0 regex-2026.7.19 rfc3986-1.5.0 rpds-py-2026.6.3 scipy-1.17.1 segments-2.4.0 six-1.17.0 soundfile-0.14.0 termcolor-3.3.0 tokenizers-0.23.1 tqdm-4.70.0 typing-extensions-4.16.0 uritemplate-4.2.0
+
+$ python3 -m venv .venv-clone
+
+$ .venv-clone/bin/python -m pip install --no-cache-dir torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+Looking in indexes: https://download.pytorch.org/whl/cpu
+Collecting torch==2.8.0
+  Obtaining dependency information for torch==2.8.0 from https://download-r2.pytorch.org/whl/cpu/torch-2.8.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl.metadata
+  Downloading https://download-r2.pytorch.org/whl/cpu/torch-2.8.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl.metadata (29 kB)
+Collecting torchaudio==2.8.0
+  Obtaining dependency information for torchaudio==2.8.0 from https://download-r2.pytorch.org/whl/cpu/torchaudio-2.8.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl.metadata
+  Downloading https://download-r2.pytorch.org/whl/cpu/torchaudio-2.8.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl.metadata (7.2 kB)
+Collecting filelock
+  Obtaining dependency information for filelock from https://files.pythonhosted.org/packages/81/47/dd9a212ef6e343a6857485ffe25bba537304f1913bdbed446a23f7f592e1/filelock-3.29.0-py3-none-any.whl.metadata
+  Downloading filelock-3.29.0-py3-none-any.whl.metadata (2.0 kB)
+Collecting typing-extensions>=4.10.0
+  Obtaining dependency information for typing-extensions>=4.10.0 from https://download.pytorch.org/whl/typing_extensions-4.15.0-py3-none-any.whl.metadata
+  Downloading https://download.pytorch.org/whl/typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+Discarding https://download.pytorch.org/whl/typing_extensions-4.15.0-py3-none-any.whl (from https://download.pytorch.org/whl/cpu/typing-extensions/): Requested typing-extensions>=4.10.0 from https://download.pytorch.org/whl/typing_extensions-4.15.0-py3-none-any.whl (from torch==2.8.0) has inconsistent Name: expected 'typing-extensions', but metadata has 'typing_extensions'
+  Obtaining dependency information for typing-extensions>=4.10.0 from https://download.pytorch.org/whl/typing_extensions-4.14.0-py3-none-any.whl.metadata
+  Downloading https://download.pytorch.org/whl/typing_extensions-4.14.0-py3-none-any.whl.metadata (3.0 kB)
+Discarding https://download.pytorch.org/whl/typing_extensions-4.14.0-py3-none-any.whl (from https://download.pytorch.org/whl/cpu/typing-extensions/): Requested typing-extensions>=4.10.0 from https://download.pytorch.org/whl/typing_extensions-4.14.0-py3-none-any.whl (from torch==2.8.0) has inconsistent Name: expected 'typing-extensions', but metadata has 'typing_extensions'
+  Obtaining dependency information for typing-extensions>=4.10.0 from https://download.pytorch.org/whl/typing_extensions-4.12.2-py3-none-any.whl.metadata
+  Downloading https://download.pytorch.org/whl/typing_extensions-4.12.2-py3-none-any.whl.metadata (3.0 kB)
+Discarding https://download.pytorch.org/whl/typing_extensions-4.12.2-py3-none-any.whl (from https://download.pytorch.org/whl/cpu/typing-extensions/): Requested typing-extensions>=4.10.0 from https://download.pytorch.org/whl/typing_extensions-4.12.2-py3-none-any.whl (from torch==2.8.0) has inconsistent Name: expected 'typing-extensions', but metadata has 'typing_extensions'
+ERROR: Could not find a version that satisfies the requirement typing-extensions>=4.10.0 (from torch) (from versions: 4.4.0, 4.8.0, 4.9.0, 4.12.2, 4.14.0, 4.15.0)
+ERROR: No matching distribution found for typing-extensions>=4.10.0
+
+ERROR: Command failed (exit 1): .venv-clone/bin/python -m pip install --no-cache-dir torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cpu

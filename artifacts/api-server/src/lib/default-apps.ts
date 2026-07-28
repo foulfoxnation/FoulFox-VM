@@ -54,7 +54,9 @@ function markSeeded(id: string): void {
 
 // Read foxapp.json out of the zip without extracting it (root, or inside the
 // single top-level folder — same tolerance as the installer).
-function manifestFromZip(zipPath: string): Promise<{ id: string; autostart: boolean } | null> {
+function manifestFromZip(
+  zipPath: string,
+): Promise<{ id: string; version: string | undefined; autostart: boolean } | null> {
   return new Promise((resolve) => {
     const tryPattern = (pattern: string, next: () => void) => {
       execFile(
@@ -67,7 +69,11 @@ function manifestFromZip(zipPath: string): Promise<{ id: string; autostart: bool
             const m = JSON.parse(stdout);
             const id = typeof m.id === "string" ? m.id : "";
             if (!id) return next();
-            resolve({ id, autostart: m.autostart === true });
+            resolve({
+              id,
+              version: typeof m.version === "string" ? m.version : undefined,
+              autostart: m.autostart === true,
+            });
           } catch {
             next();
           }
@@ -102,9 +108,31 @@ async function seedOne(zipPath: string): Promise<void> {
   // Protected default apps ALWAYS come back if missing; for everything else
   // the seeded marker respects a user's uninstall.
   if (seeded[meta.id] && !isProtectedDefaultApp(meta.id)) return;
-  if (getApp(meta.id)) {
-    markSeeded(meta.id); // already present (e.g. installed manually)
-    return;
+  const existing = getApp(meta.id);
+  if (existing) {
+    if (isProtectedDefaultApp(meta.id)) {
+      // For protected apps: reinstall if the last install failed (status=error)
+      // or if the bundled zip has a newer version than what's installed.
+      const versionChanged =
+        meta.version !== undefined && existing.version !== meta.version;
+      const installFailed = existing.status === "error";
+      if (!installFailed && !versionChanged) {
+        markSeeded(meta.id);
+        return;
+      }
+      logger.info(
+        {
+          appId: meta.id,
+          status: existing.status,
+          installedVersion: existing.version,
+          bundledVersion: meta.version,
+        },
+        "protected app reinstall triggered",
+      );
+    } else {
+      markSeeded(meta.id); // already present (e.g. installed manually)
+      return;
+    }
   }
 
   // The installer DELETES its source zip when done — hand it a copy, never the
