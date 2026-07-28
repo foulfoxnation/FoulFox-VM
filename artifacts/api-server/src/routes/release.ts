@@ -55,6 +55,14 @@ const OK_TTL_MS = 5 * 60_000; // it exists — re-confirm every 5 min
 const MISS_TTL_MS = 30_000; // not there yet — re-check every 30s so it flips on fast
 const PROBE_TIMEOUT_MS = 6_000;
 
+// Unauthenticated api.github.com calls (the appliance has no token — we can't
+// ship a secret inside a public ISO) are limited to 60/hr per IP. Every cache
+// below therefore uses a much longer TTL when no token is present, and keeps
+// serving the last-known-good data when GitHub refuses (rate limit, blip).
+function hasToken(): boolean {
+  return Boolean(githubToken());
+}
+
 async function isoExists(url: string): Promise<boolean> {
   const now = Date.now();
   const cached = availabilityCache.get(url);
@@ -161,7 +169,24 @@ function normalizeRunState(status: string | null, conclusion: string | null): Bu
 // polls) can't blow the GitHub API budget — one upstream call per ~12s, max.
 type BuildStatusCache = { payload: BuildStatusResponse; expires: number };
 let buildStatusCache: BuildStatusCache | null = null;
-const BUILD_STATUS_TTL_MS = 12_000;
+// With a token GitHub allows 5000 req/hr, so a 12s cache is fine. Without one
+// (the appliance) the budget is 60/hr TOTAL across all endpoints — stretch to
+// 2 min so build-status alone stays around 30/hr.
+function buildStatusTtlMs(): number {
+  return hasToken() ? 12_000 : 120_000;
+}
+
+// Last successfully fetched run, kept indefinitely: when GitHub rate-limits or
+// the network blips, showing slightly stale build info beats an error banner.
+let lastGoodRun: LatestRun | null = null;
+
+function rateLimited(resp: { status: number; headers: { get(n: string): string | null } }): boolean {
+  return (
+    resp.status === 403 &&
+    (resp.headers.get("x-ratelimit-remaining") === "0" ||
+      resp.headers.get("retry-after") !== null)
+  );
+}
 
 async function fetchLatestRun(repo: string): Promise<{ run: LatestRun | null; error: string | null }> {
   const url = `https://api.github.com/repos/${repo}/actions/workflows/${WORKFLOW_FILE}/runs?per_page=1`;
@@ -170,8 +195,18 @@ async function fetchLatestRun(repo: string): Promise<{ run: LatestRun | null; er
   try {
     const resp = await fetch(url, { headers: ghHeaders(), signal: controller.signal });
     if (!resp.ok) {
+      if (rateLimited(resp)) {
+        // Serve the last-known-good run rather than an error — GitHub resets
+        // the unauthenticated budget every hour.
+        return {
+          run: lastGoodRun,
+          error: lastGoodRun
+            ? null
+            : "GitHub is temporarily limiting status checks from this machine — it will recover on its own within the hour.",
+        };
+      }
       return {
-        run: null,
+        run: lastGoodRun,
         error:
           resp.status === 404
             ? "Build workflow not found on GitHub yet."
@@ -183,21 +218,23 @@ async function fetchLatestRun(repo: string): Promise<{ run: LatestRun | null; er
     if (!r) return { run: null, error: null };
     const status = (r.status as string | null) ?? null;
     const conclusion = (r.conclusion as string | null) ?? null;
-    return {
-      run: {
-        runNumber: typeof r.run_number === "number" ? r.run_number : null,
-        state: normalizeRunState(status, conclusion),
-        status,
-        conclusion,
-        htmlUrl: (r.html_url as string | null) ?? null,
-        event: (r.event as string | null) ?? null,
-        createdAt: (r.created_at as string | null) ?? null,
-        updatedAt: (r.updated_at as string | null) ?? null,
-      },
-      error: null,
+    const run: LatestRun = {
+      runNumber: typeof r.run_number === "number" ? r.run_number : null,
+      state: normalizeRunState(status, conclusion),
+      status,
+      conclusion,
+      htmlUrl: (r.html_url as string | null) ?? null,
+      event: (r.event as string | null) ?? null,
+      createdAt: (r.created_at as string | null) ?? null,
+      updatedAt: (r.updated_at as string | null) ?? null,
     };
+    lastGoodRun = run;
+    return { run, error: null };
   } catch {
-    return { run: null, error: "Could not reach GitHub to check build status." };
+    return {
+      run: lastGoodRun,
+      error: lastGoodRun ? null : "Could not reach GitHub to check build status.",
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -222,7 +259,11 @@ interface IsoArtifact {
 }
 type IsoArtifactCache = { value: IsoArtifact | null; expires: number };
 let isoArtifactCache: IsoArtifactCache | null = null;
-const ISO_ARTIFACT_TTL_MS = 60_000;
+// Two API calls per refresh (runs + artifacts) — without a token, refreshing
+// every 10 min keeps this at ~12 calls/hr of the shared 60/hr budget.
+function isoArtifactTtlMs(): number {
+  return hasToken() ? 60_000 : 10 * 60_000;
+}
 
 async function ghJson<T>(url: string): Promise<T | null> {
   const controller = new AbortController();
@@ -265,18 +306,27 @@ async function fetchLatestIsoArtifact(repo: string): Promise<IsoArtifact | null>
         commit: run?.head_sha ? run.head_sha.slice(0, 7) : null,
       };
   }
-  isoArtifactCache = { value, expires: now + ISO_ARTIFACT_TTL_MS };
+  isoArtifactCache = { value, expires: now + isoArtifactTtlMs() };
   return value;
 }
 
 // Release-asset metadata (existence + updated_at) in one API call, so we can
 // tell a FRESH release asset from a STALE one left behind by an oversized build.
+// Cached — this used to hit the API on EVERY /os/release-info poll, which alone
+// burned through the unauthenticated 60/hr budget.
+type AssetTimeCache = { value: string | null; expires: number };
+let assetTimeCache: AssetTimeCache | null = null;
+
 async function fetchReleaseAssetUpdatedAt(repo: string): Promise<string | null> {
+  const now = Date.now();
+  if (assetTimeCache && assetTimeCache.expires > now) return assetTimeCache.value;
   const rel = await ghJson<{ assets?: Array<{ name: string; updated_at: string | null }> }>(
     `https://api.github.com/repos/${repo}/releases/tags/${ROLLING_TAG}`,
   );
   const asset = rel?.assets?.find((a) => a.name === ROLLING_ISO);
-  return asset?.updated_at ?? null;
+  const value = asset?.updated_at ?? null;
+  assetTimeCache = { value, expires: now + (hasToken() ? 60_000 : 10 * 60_000) };
+  return value;
 }
 
 const router: IRouter = Router();
@@ -465,7 +515,7 @@ router.get("/os/build-status", async (_req, res) => {
     latestRun: run,
     error,
   };
-  buildStatusCache = { payload, expires: now + BUILD_STATUS_TTL_MS };
+  buildStatusCache = { payload, expires: now + buildStatusTtlMs() };
   res.json(payload);
 });
 
