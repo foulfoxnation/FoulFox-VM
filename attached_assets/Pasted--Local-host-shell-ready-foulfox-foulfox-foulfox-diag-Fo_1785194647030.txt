@@ -1,0 +1,232 @@
+
+Local host shell ready
+foulfox@foulfox:~$ foulfox-diag
+FoulFox Workspace diagnostics (2026-07-27T23:22:34Z)
+
+== 1. Who is listening on the agent port :7000 ==
+LISTEN 0      2048       127.0.0.1:7000      0.0.0.0:*    users:(("python",pid=1151,fd=25))
+
+== 2. Agent root page (this is what the Workspace iframe loads) ==
+GET / -> HTTP 302
+
+== 3. Workspace UI files on disk ==
+Service dir: /var/lib/foulfox/app-current/artifacts/odysseus-service
+static/index.html: PRESENT (208987 bytes)
+app-current -> /opt/foulfox/app
+
+== 4. api-server proxy health (:8080) ==
+Proxy status: {"alive":true,"statusCode":302}
+
+== 5. Service status (systemd) ==
+● odysseus-service.service - Odysseus AI agent (FastAPI, loopback :7000)
+     Loaded: loaded (/etc/systemd/system/odysseus-service.service; enabled; preset: enabled)
+     Active: active (running) since Mon 2026-07-27 23:12:53 UTC; 9min ago
+   Main PID: 1151 (python)
+      Tasks: 40 (limit: 18997)
+     Memory: 768.5M
+        CPU: 1min 7.685s
+     CGroup: /system.slice/odysseus-service.service
+             ├─1151 python -m uvicorn app:app --host 127.0.0.1 --port 7000 --log-level info
+             ├─1678 /opt/foulfox/app/artifacts/odysseus-service/.venv/bin/python /opt/foulfox/app/artifacts/odysseus-service/mcp_servers/image_gen_server.py
+             ├─1680 /opt/foulfox/app/artifacts/odysseus-service/.venv/bin/python /opt/foulfox/app/artifacts/odysseus-service/mcp_servers/memory_server.py
+             ├─1682 /opt/foulfox/app/artifacts/odysseus-service/.venv/bin/python /opt/foulfox/app/artifacts/odysseus-service/mcp_servers/rag_server.py
+             └─1684 /opt/foulfox/app/artifacts/odysseus-service/.venv/bin/python /opt/foulfox/app/artifacts/odysseus-service/mcp_servers/email_server.py
+
+Jul 27 23:22:13 foulfox env[1151]: INFO:     127.0.0.1:46290 - "GET / HTTP/1.1" 302 Found
+Jul 27 23:22:14 foulfox env[1151]: INFO:     127.0.0.1:46292 - "GET / HTTP/1.1" 302 Found
+Jul 27 23:22:20 foulfox env[1151]: INFO:     127.0.0.1:50980 - "GET / HTTP/1.1" 302 Found
+Jul 27 23:22:22 foulfox env[1151]: INFO:     127.0.0.1:50980 - "POST /api/vm-target HTTP/1.1" 401 Unauthorized
+Jul 27 23:22:25 foulfox env[1151]: INFO:     127.0.0.1:50980 - "GET / HTTP/1.1" 302 Found
+Jul 27 23:22:29 foulfox env[1151]: INFO:     127.0.0.1:50980 - "GET /api/agent-suite/state HTTP/1.1" 401 Unauthorized
+Jul 27 23:22:30 foulfox env[1151]: INFO:     127.0.0.1:50980 - "GET / HTTP/1.1" 302 Found
+Jul 27 23:22:34 foulfox env[1151]: INFO:     127.0.0.1:49590 - "GET / HTTP/1.1" 302 Found
+Jul 27 23:22:34 foulfox env[1151]: INFO:     127.0.0.1:50980 - "GET / HTTP/1.1" 302 Found
+Jul 27 23:22:34 foulfox env[1151]: INFO:     127.0.0.1:49596 - "GET / HTTP/1.1" 302 Found
+
+● foulfox-prepare.service - FoulFox OS first-run provisioning (dirs, permissions, VM config)
+     Loaded: loaded (/etc/systemd/system/foulfox-prepare.service; enabled; preset: enabled)
+     Active: active (exited) since Mon 2026-07-27 23:12:53 UTC; 9min ago
+    Process: 980 ExecStart=/usr/local/bin/foulfox-first-run (code=exited, status=0/SUCCESS)
+   Main PID: 980 (code=exited, status=0/SUCCESS)
+      Tasks: 2 (limit: 18997)
+     Memory: 120.3M
+        CPU: 4.101s
+     CGroup: /system.slice/foulfox-prepare.service
+             ├─1096 bash -c "\n      sleep 174\n      curl -sfI --connect-timeout 5 --max-time 10 https://fedorapeople.org >/dev/null 2>&1 || exit 0\n      if curl -fL --retry 2 --connect-timeout 10 --max-time 300 -o '/var/lib/foulfox/frontload/drivers/virtio-win.iso.part' 'https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso'; then\n        mv '/var/lib/foulfox/frontload/drivers/virtio-win.iso.part' '/var/lib/foulfox/frontload/drivers/virtio-win.iso'\n        chown foulfox:foulfox '/var/lib/foulfox/frontload/drivers/virtio-win.iso' 2>/dev/null || true\n      else\n        rm -f '/var/lib/foulfox/frontload/drivers/virtio-win.iso.part'\n      fi\n    "
+             └─2504 curl -fL --retry 2 --connect-timeout 10 --max-time 300 -o /var/lib/foulfox/frontload/drivers/virtio-win.iso.part https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso
+
+Jul 27 23:12:52 foulfox systemd[1]: Starting foulfox-prepare.service - FoulFox OS first-run provisioning (dirs, permissions, VM config)...
+Jul 27 23:12:53 foulfox foulfox-first-run[980]: [foulfox-first-run] Internet quiet period: deferring virtio-win download by 174s.
+Jul 27 23:12:53 foulfox foulfox-first-run[980]: [foulfox-first-run] Adaptive VM sizing: disk=384G ram=8G cpu=7 tier=large
+Jul 27 23:12:53 foulfox foulfox-first-run[980]: [foulfox-first-run] Windows ISO: <none — frontload one via the File Explorer>
+Jul 27 23:12:53 foulfox foulfox-first-run[980]: [foulfox-first-run] virtio ISO:  <none — Windows can still install, drivers optional>
+Jul 27 23:12:53 foulfox foulfox-first-run[980]: [foulfox-first-run] Guest disk:  /var/lib/foulfox/vm/windows.qcow2 (384G)
+Jul 27 23:12:53 foulfox systemd[1]: Finished foulfox-prepare.service - FoulFox OS first-run provisioning (dirs, permissions, VM config).
+
+● ollama.service - Ollama local LLM server (FoulFox local AI, loopback :11434)
+     Loaded: loaded (/etc/systemd/system/ollama.service; enabled; preset: enabled)
+     Active: active (running) since Mon 2026-07-27 23:12:53 UTC; 9min ago
+   Main PID: 1173 (ollama)
+      Tasks: 14 (limit: 18997)
+     Memory: 428.6M
+        CPU: 2.034s
+     CGroup: /system.slice/ollama.service
+             └─1173 /usr/local/bin/ollama serve
+
+Jul 27 23:19:05 foulfox ollama[1173]: [GIN] 2026/07/27 - 23:19:05 | 200 |      290.24µs |       127.0.0.1 | GET      "/v1/models"
+Jul 27 23:20:05 foulfox ollama[1173]: [GIN] 2026/07/27 - 23:20:05 | 200 |     433.535µs |       127.0.0.1 | GET      "/v1/models"
+Jul 27 23:20:06 foulfox ollama[1173]: [GIN] 2026/07/27 - 23:20:06 | 404 |       5.269µs |       127.0.0.1 | GET      "/api/v1/models"
+Jul 27 23:20:06 foulfox ollama[1173]: [GIN] 2026/07/27 - 23:20:06 | 200 |     340.513µs |       127.0.0.1 | GET      "/v1/models"
+Jul 27 23:21:06 foulfox ollama[1173]: [GIN] 2026/07/27 - 23:21:06 | 200 |      355.41µs |       127.0.0.1 | GET      "/v1/models"
+Jul 27 23:21:06 foulfox ollama[1173]: [GIN] 2026/07/27 - 23:21:06 | 404 |       8.571µs |       127.0.0.1 | GET      "/api/v1/models"
+Jul 27 23:21:06 foulfox ollama[1173]: [GIN] 2026/07/27 - 23:21:06 | 200 |     309.628µs |       127.0.0.1 | GET      "/v1/models"
+Jul 27 23:22:07 foulfox ollama[1173]: [GIN] 2026/07/27 - 23:22:07 | 200 |     393.566µs |       127.0.0.1 | GET      "/v1/models"
+Jul 27 23:22:07 foulfox ollama[1173]: [GIN] 2026/07/27 - 23:22:07 | 404 |       6.079µs |       127.0.0.1 | GET      "/api/v1/models"
+Jul 27 23:22:07 foulfox ollama[1173]: [GIN] 2026/07/27 - 23:22:07 | 200 |     337.899µs |       127.0.0.1 | GET      "/v1/models"
+
+== 6. Agent launch log (last 120 lines) ==
+2026-07-27 23:17:02,890 - src.model_discovery - INFO - Scanning 2 hosts for models: ['localhost', 'host.docker.internal']
+INFO:     127.0.0.1:39278 - "GET / HTTP/1.1" 302 Found
+2026-07-27 23:17:03,526 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-27 23:17:03,649 - httpx - INFO - HTTP Request: GET http://localhost:11434/api/v1/models "HTTP/1.1 404 Not Found"
+2026-07-27 23:17:03,653 - src.model_discovery - INFO - Discovered 1 model endpoints across 2 hosts
+2026-07-27 23:17:03,690 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-27 23:17:03,690 - app - INFO - Warmup ping OK: http://localhost:11434/v1/models
+INFO:     127.0.0.1:41156 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:41166 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:50868 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:50872 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:38420 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:38420 - "GET /api/agent-suite/state HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:38420 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:41378 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:41392 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:45180 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:45192 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:55950 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:55950 - "GET /api/agent-suite/state HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:55950 - "GET / HTTP/1.1" 302 Found
+2026-07-27 23:18:03,693 - src.model_discovery - INFO - Scanning 2 hosts for models: ['localhost', 'host.docker.internal']
+2026-07-27 23:18:04,376 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-27 23:18:04,464 - httpx - INFO - HTTP Request: GET http://localhost:11434/api/v1/models "HTTP/1.1 404 Not Found"
+2026-07-27 23:18:04,467 - src.model_discovery - INFO - Discovered 1 model endpoints across 2 hosts
+2026-07-27 23:18:04,507 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-27 23:18:04,508 - app - INFO - Warmup ping OK: http://localhost:11434/v1/models
+INFO:     127.0.0.1:58734 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:58740 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:43804 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:43816 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:43894 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:43894 - "GET /api/agent-suite/state HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:43894 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:39714 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:39716 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:39442 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:39452 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:57400 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:57400 - "GET /api/agent-suite/state HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:57400 - "GET / HTTP/1.1" 302 Found
+2026-07-27 23:19:04,509 - src.model_discovery - INFO - Scanning 2 hosts for models: ['localhost', 'host.docker.internal']
+2026-07-27 23:19:05,059 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-27 23:19:05,225 - httpx - INFO - HTTP Request: GET http://localhost:11434/api/v1/models "HTTP/1.1 404 Not Found"
+2026-07-27 23:19:05,258 - src.model_discovery - INFO - Discovered 1 model endpoints across 2 hosts
+2026-07-27 23:19:05,295 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-27 23:19:05,295 - app - INFO - Warmup ping OK: http://localhost:11434/v1/models
+INFO:     127.0.0.1:58384 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:58390 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:38892 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:38904 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:54006 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:54006 - "GET /api/agent-suite/state HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:54006 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:48364 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:48378 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:49406 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:49408 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:47550 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:47550 - "GET /api/agent-suite/state HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:47550 - "GET / HTTP/1.1" 302 Found
+2026-07-27 23:20:05,298 - src.model_discovery - INFO - Scanning 2 hosts for models: ['localhost', 'host.docker.internal']
+2026-07-27 23:20:05,870 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-27 23:20:06,036 - httpx - INFO - HTTP Request: GET http://localhost:11434/api/v1/models "HTTP/1.1 404 Not Found"
+2026-07-27 23:20:06,065 - src.model_discovery - INFO - Discovered 1 model endpoints across 2 hosts
+2026-07-27 23:20:06,102 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-27 23:20:06,103 - app - INFO - Warmup ping OK: http://localhost:11434/v1/models
+INFO:     127.0.0.1:37824 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:37840 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:51936 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:51948 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:46116 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:46116 - "GET /api/agent-suite/state HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:46116 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:41180 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:41192 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:60056 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:60058 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:40518 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:40518 - "GET /api/agent-suite/state HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:40518 - "GET / HTTP/1.1" 302 Found
+2026-07-27 23:21:06,104 - src.model_discovery - INFO - Scanning 2 hosts for models: ['localhost', 'host.docker.internal']
+2026-07-27 23:21:06,725 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-27 23:21:06,895 - httpx - INFO - HTTP Request: GET http://localhost:11434/api/v1/models "HTTP/1.1 404 Not Found"
+2026-07-27 23:21:06,902 - src.model_discovery - INFO - Discovered 1 model endpoints across 2 hosts
+2026-07-27 23:21:06,939 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-27 23:21:06,939 - app - INFO - Warmup ping OK: http://localhost:11434/v1/models
+INFO:     127.0.0.1:57572 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:57576 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:34474 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:34476 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:54854 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:54854 - "GET /api/agent-suite/state HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:54854 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:41156 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:41166 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:56232 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:56246 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:41514 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:41514 - "GET /api/agent-suite/state HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:41514 - "GET / HTTP/1.1" 302 Found
+2026-07-27 23:22:06,941 - src.model_discovery - INFO - Scanning 2 hosts for models: ['localhost', 'host.docker.internal']
+2026-07-27 23:22:07,501 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-27 23:22:07,694 - httpx - INFO - HTTP Request: GET http://localhost:11434/api/v1/models "HTTP/1.1 404 Not Found"
+2026-07-27 23:22:07,699 - src.model_discovery - INFO - Discovered 1 model endpoints across 2 hosts
+2026-07-27 23:22:07,738 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-27 23:22:07,738 - app - INFO - Warmup ping OK: http://localhost:11434/v1/models
+INFO:     127.0.0.1:46278 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:46280 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:46278 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:46290 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:46292 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:50980 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:50980 - "POST /api/vm-target HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:50980 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:50980 - "GET /api/agent-suite/state HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:50980 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:49590 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:50980 - "GET / HTTP/1.1" 302 Found
+INFO:     127.0.0.1:49596 - "GET / HTTP/1.1" 302 Found
+
+== 7. First-run provisioner log (last 60 lines) ==
+Starting foulfox-prepare.service - FoulFox OS first-run provisioning (dirs, permissions, VM config)...
+[foulfox-first-run] Seeding baked embedding model into /var/lib/foulfox/fastembed_cache ...
+[foulfox-first-run] Embedding model seeded.
+[foulfox-first-run] app-current -> /opt/foulfox/app (baked release 0)
+[foulfox-first-run] WARNING: no 'foulfox-persist' partition — running on a RAM overlay.
+[foulfox-first-run] WARNING: downloads and the Windows guest will be LOST on reboot and may exhaust memory.
+[foulfox-first-run] WARNING: add an ext4 partition labelled 'foulfox-persist' to the USB stick (see docs/first-boot.md).
+[foulfox-first-run] Internet quiet period: deferring virtio-win download by 151s.
+[foulfox-first-run] Adaptive VM sizing: disk=8G ram=8G cpu=7 tier=compact
+[foulfox-first-run] Windows ISO: <none — frontload one via the File Explorer>
+[foulfox-first-run] virtio ISO:  <none — Windows can still install, drivers optional>
+[foulfox-first-run] Guest disk:  /var/lib/foulfox/vm/windows.qcow2 (8G)
+Finished foulfox-prepare.service - FoulFox OS first-run provisioning (dirs, permissions, VM config).
+Starting foulfox-prepare.service - FoulFox OS first-run provisioning (dirs, permissions, VM config)...
+[foulfox-first-run] Internet quiet period: deferring virtio-win download by 174s.
+[foulfox-first-run] Adaptive VM sizing: disk=384G ram=8G cpu=7 tier=large
+[foulfox-first-run] Windows ISO: <none — frontload one via the File Explorer>
+[foulfox-first-run] virtio ISO:  <none — Windows can still install, drivers optional>
+[foulfox-first-run] Guest disk:  /var/lib/foulfox/vm/windows.qcow2 (384G)
+Finished foulfox-prepare.service - FoulFox OS first-run provisioning (dirs, permissions, VM config).
+
+Done. Sections 2, 3 and 6 usually contain the reason the Workspace is 404/offline.
+foulfox@foulfox:~$ 

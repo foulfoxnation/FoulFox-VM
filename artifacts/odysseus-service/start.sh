@@ -43,6 +43,18 @@ else
     fi
   fi
   PY="python"
+
+  # ── Appliance: single-user desktop, no login screen ─────────────────────────
+  # Odysseus's built-in multi-user login (AUTH_ENABLED) defaults to ON, but on
+  # the appliance no user account ever gets created, so every Workspace page
+  # request 302-loops to /login and every API call 401s ("Setup required") —
+  # the Workspace looks dead even though the service is healthy. Dev already
+  # runs with AUTH_ENABLED=false (the api-server lifecycle sets it explicitly);
+  # mirror that here for the packaged appliance. The service binds loopback
+  # only and is fronted by the api-server's shell-token gate, which is the
+  # appliance's actual auth boundary. An explicit AUTH_ENABLED in
+  # /etc/foulfox/foulfox.env still wins over this default.
+  export AUTH_ENABLED="${AUTH_ENABLED:-false}"
 fi
 
 # ── Self-contained local datastore ────────────────────────────────────────────
