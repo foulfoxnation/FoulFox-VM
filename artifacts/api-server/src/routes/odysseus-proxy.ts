@@ -15,8 +15,11 @@ const PROXY_MARKER = "/api/odysseus";
 
 // Runtime shim injected into the Odysseus HTML. It computes the proxy prefix
 // from the iframe's own pathname (base-path agnostic) and rewrites root-absolute
-// and same-origin-absolute request URLs (fetch / XHR / EventSource) to include
-// it. Odysseus sets `API_BASE = window.location.origin`, so its API calls are
+// and same-origin-absolute URLs in:
+//   - fetch / XHR / EventSource  (API calls)
+//   - history.pushState / replaceState  (SPA router navigation)
+//   - anchor click events  (any <a href="/path"> that React renders at runtime)
+// Odysseus sets `API_BASE = window.location.origin`, so its API calls are
 // origin-absolute and must be caught here too. Service-worker registration is
 // disabled because a worker scoped to a sub-path adds no value inside the embed
 // and risks caching proxied 404s.
@@ -66,6 +69,34 @@ const RUNTIME_SHIM = `<script>(function(){
     try{ W.CONNECTING = ES.CONNECTING; W.OPEN = ES.OPEN; W.CLOSED = ES.CLOSED; }catch(e){}
     window.EventSource = W;
   }
+  // Intercept SPA router navigation: pushState/replaceState with root-absolute
+  // paths would escape the proxy prefix and 404 on the api-server. Rewrite the
+  // URL argument before the state is committed so the iframe stays under /api/odysseus/*.
+  try{
+    var oh = history.pushState.bind(history);
+    history.pushState = function(state, title, url){
+      return oh(state, title, url != null ? fix(String(url)) : url);
+    };
+    var or = history.replaceState.bind(history);
+    history.replaceState = function(state, title, url){
+      return or(state, title, url != null ? fix(String(url)) : url);
+    };
+  }catch(e){}
+  // Intercept anchor clicks: React re-renders links with root-absolute hrefs at
+  // runtime, so static HTML rewriting alone isn't enough. Capture click events
+  // on <a> elements before they navigate and rewrite the href in-place, then let
+  // the browser handle the (now-correct) navigation normally.
+  try{
+    document.addEventListener("click", function(e){
+      var el = e.target;
+      while(el && el.tagName !== "A") el = el.parentElement;
+      if(!el) return;
+      var href = el.getAttribute("href");
+      if(!href) return;
+      var fixed = fix(href);
+      if(fixed !== href) el.setAttribute("href", fixed);
+    }, true);
+  }catch(e){}
   try{
     if(navigator.serviceWorker && navigator.serviceWorker.register){
       navigator.serviceWorker.register = function(){ return Promise.reject(new Error("sw disabled in embed")); };

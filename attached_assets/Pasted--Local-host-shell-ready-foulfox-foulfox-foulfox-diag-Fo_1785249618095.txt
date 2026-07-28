@@ -1,0 +1,230 @@
+
+Local host shell ready
+foulfox@foulfox:~$ foulfox-diag
+FoulFox Workspace diagnostics (2026-07-28T14:39:35Z)
+
+== 1. Who is listening on the agent port :7000 ==
+LISTEN 0      2048       127.0.0.1:7000      0.0.0.0:*    users:(("python",pid=252534,fd=29))
+
+== 2. Agent root page (this is what the Workspace iframe loads) ==
+GET / -> HTTP 200
+
+== 3. Workspace UI files on disk ==
+Service dir: /var/lib/foulfox/app-current/artifacts/odysseus-service
+static/index.html: PRESENT (208987 bytes)
+app-current -> /var/lib/foulfox/releases/4342886/app
+App version:
+{
+  "version": "4342886",
+  "commit": "43428862b0a2c4bea1e852a915e25788f5ae6f1a",
+  "builtAt": "2026-07-28T19:50:21Z"
+}
+== 4. api-server proxy health (:8080) ==
+Proxy status: {"alive":true,"statusCode":200}
+
+== 5. Service status (systemd) ==
+● odysseus-service.service - Odysseus AI agent (FastAPI, loopback :7000)
+     Loaded: loaded (/etc/systemd/system/odysseus-service.service; enabled; preset: enabled)
+     Active: active (running) since Tue 2026-07-28 14:03:32 UTC; 36min ago
+   Main PID: 252534 (python)
+      Tasks: 43 (limit: 18997)
+     Memory: 813.9M
+        CPU: 4min 9.443s
+     CGroup: /system.slice/odysseus-service.service
+             └─252534 python -m uvicorn app:app --host 127.0.0.1 --port 7000 --log-level info
+
+Jul 28 14:39:04 foulfox env[252534]: INFO:     127.0.0.1:47644 - "GET / HTTP/1.1" 200 OK
+Jul 28 14:39:09 foulfox env[252534]: INFO:     127.0.0.1:44760 - "GET / HTTP/1.1" 200 OK
+Jul 28 14:39:14 foulfox env[252534]: INFO:     127.0.0.1:44764 - "GET / HTTP/1.1" 200 OK
+Jul 28 14:39:19 foulfox env[252534]: INFO:     127.0.0.1:33558 - "GET / HTTP/1.1" 200 OK
+Jul 28 14:39:24 foulfox env[252534]: INFO:     127.0.0.1:33564 - "GET / HTTP/1.1" 200 OK
+Jul 28 14:39:29 foulfox env[252534]: INFO:     127.0.0.1:55616 - "GET / HTTP/1.1" 200 OK
+Jul 28 14:39:34 foulfox env[252534]: INFO:     127.0.0.1:55630 - "GET / HTTP/1.1" 200 OK
+Jul 28 14:39:35 foulfox env[252534]: INFO:     127.0.0.1:55638 - "GET / HTTP/1.1" 200 OK
+Jul 28 14:39:35 foulfox env[252534]: INFO:     127.0.0.1:55630 - "GET / HTTP/1.1" 200 OK
+Jul 28 14:39:35 foulfox env[252534]: INFO:     127.0.0.1:55642 - "GET / HTTP/1.1" 200 OK
+
+● foulfox-prepare.service - FoulFox OS first-run provisioning (dirs, permissions, VM config)
+     Loaded: loaded (/etc/systemd/system/foulfox-prepare.service; enabled; preset: enabled)
+     Active: active (exited) since Mon 2026-07-27 23:12:53 UTC; 15h ago
+   Main PID: 980 (code=exited, status=0/SUCCESS)
+      Tasks: 0 (limit: 18997)
+     Memory: 101.5M
+        CPU: 10.595s
+     CGroup: /system.slice/foulfox-prepare.service
+
+Jul 27 23:12:52 foulfox systemd[1]: Starting foulfox-prepare.service - FoulFox OS first-run provisioning (dirs, permissions, VM config)...
+Jul 27 23:12:53 foulfox foulfox-first-run[980]: [foulfox-first-run] Internet quiet period: deferring virtio-win download by 174s.
+Jul 27 23:12:53 foulfox foulfox-first-run[980]: [foulfox-first-run] Adaptive VM sizing: disk=384G ram=8G cpu=7 tier=large
+Jul 27 23:12:53 foulfox foulfox-first-run[980]: [foulfox-first-run] Windows ISO: <none — frontload one via the File Explorer>
+Jul 27 23:12:53 foulfox foulfox-first-run[980]: [foulfox-first-run] virtio ISO:  <none — Windows can still install, drivers optional>
+Jul 27 23:12:53 foulfox foulfox-first-run[980]: [foulfox-first-run] Guest disk:  /var/lib/foulfox/vm/windows.qcow2 (384G)
+Jul 27 23:12:53 foulfox systemd[1]: Finished foulfox-prepare.service - FoulFox OS first-run provisioning (dirs, permissions, VM config).
+
+● ollama.service - Ollama local LLM server (FoulFox local AI, loopback :11434)
+     Loaded: loaded (/etc/systemd/system/ollama.service; enabled; preset: enabled)
+     Active: active (running) since Mon 2026-07-27 23:12:53 UTC; 15h ago
+   Main PID: 1173 (ollama)
+      Tasks: 14 (limit: 18997)
+     Memory: 428.7M
+        CPU: 6.250s
+     CGroup: /system.slice/ollama.service
+             └─1173 /usr/local/bin/ollama serve
+
+Jul 28 14:36:01 foulfox ollama[1173]: [GIN] 2026/07/28 - 14:36:01 | 200 |     337.699µs |       127.0.0.1 | GET      "/v1/models"
+Jul 28 14:37:02 foulfox ollama[1173]: [GIN] 2026/07/28 - 14:37:02 | 200 |      393.47µs |       127.0.0.1 | GET      "/v1/models"
+Jul 28 14:37:02 foulfox ollama[1173]: [GIN] 2026/07/28 - 14:37:02 | 404 |       6.617µs |       127.0.0.1 | GET      "/api/v1/models"
+Jul 28 14:37:02 foulfox ollama[1173]: [GIN] 2026/07/28 - 14:37:02 | 200 |     405.452µs |       127.0.0.1 | GET      "/v1/models"
+Jul 28 14:38:03 foulfox ollama[1173]: [GIN] 2026/07/28 - 14:38:03 | 200 |     339.353µs |       127.0.0.1 | GET      "/v1/models"
+Jul 28 14:38:03 foulfox ollama[1173]: [GIN] 2026/07/28 - 14:38:03 | 404 |       6.113µs |       127.0.0.1 | GET      "/api/v1/models"
+Jul 28 14:38:03 foulfox ollama[1173]: [GIN] 2026/07/28 - 14:38:03 | 200 |     487.363µs |       127.0.0.1 | GET      "/v1/models"
+Jul 28 14:39:03 foulfox ollama[1173]: [GIN] 2026/07/28 - 14:39:03 | 200 |     349.704µs |       127.0.0.1 | GET      "/v1/models"
+Jul 28 14:39:03 foulfox ollama[1173]: [GIN] 2026/07/28 - 14:39:03 | 404 |       6.673µs |       127.0.0.1 | GET      "/api/v1/models"
+Jul 28 14:39:03 foulfox ollama[1173]: [GIN] 2026/07/28 - 14:39:03 | 200 |     264.804µs |       127.0.0.1 | GET      "/v1/models"
+
+== 6. Agent launch log (last 120 lines) ==
+INFO:     127.0.0.1:35922 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/setup-heal/events?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/research/active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/research/library?sort=recent&limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/setup-heal/events?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/setup-heal/events?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48374 - "GET /api/tasks/notifications HTTP/1.1" 200 OK
+2026-07-28 14:36:13,896 - httpx - INFO - HTTP Request: GET http://127.0.0.1:8080/api/apps "HTTP/1.1 200 OK"
+2026-07-28 14:36:13,899 - httpx - INFO - HTTP Request: GET http://127.0.0.1:8080/api/apps/ui-base "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:35922 - "GET /api/foulfox-apps HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/setup-heal/events?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/research/active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/research/library?sort=recent&limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/setup-heal/events?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/setup-heal/events?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/setup-heal/events?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/research/active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/research/library?sort=recent&limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/setup-heal/events?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/setup-heal/events?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/setup-heal/events?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57834 - "GET /api/tasks/notifications HTTP/1.1" 200 OK
+2026-07-28 14:36:43,884 - httpx - INFO - HTTP Request: GET http://127.0.0.1:8080/api/apps "HTTP/1.1 200 OK"
+2026-07-28 14:36:43,888 - httpx - INFO - HTTP Request: GET http://127.0.0.1:8080/api/apps/ui-base "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:35922 - "GET /api/foulfox-apps HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57842 - "GET /api/research/active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57834 - "GET /api/email/urgency-state HTTP/1.1" 200 OK
+2026-07-28 14:36:43,909 - routes.email_helpers - WARNING - SMTP not configured — add an Email Account in Settings or set env vars
+2026-07-28 14:36:43,909 - routes.email_helpers - WARNING - IMAP not configured — add an Email Account in Settings or set env vars
+2026-07-28 14:36:43,910 - routes.email_routes - ERROR - Failed to list emails: [Errno 111] Connection refused
+INFO:     127.0.0.1:35922 - "GET /api/email/list?folder=INBOX&limit=50&filter=unread HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/research/library?sort=recent&limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET /api/setup-heal/events?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35922 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34060 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34060 - "GET /api/research/active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34060 - "GET /api/research/library?sort=recent&limit=20 HTTP/1.1" 200 OK
+2026-07-28 14:36:57,047 - httpx - INFO - HTTP Request: GET http://127.0.0.1:8080/api/vm/list "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:34060 - "POST /api/vm-target HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34060 - "GET / HTTP/1.1" 200 OK
+2026-07-28 14:37:01,617 - src.model_discovery - INFO - Scanning 2 hosts for models: ['localhost', 'host.docker.internal']
+2026-07-28 14:37:02,191 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-28 14:37:02,362 - httpx - INFO - HTTP Request: GET http://localhost:11434/api/v1/models "HTTP/1.1 404 Not Found"
+2026-07-28 14:37:02,379 - src.model_discovery - INFO - Discovered 1 model endpoints across 2 hosts
+2026-07-28 14:37:02,418 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-28 14:37:02,419 - app - INFO - Warmup ping OK: http://localhost:11434/v1/models
+INFO:     127.0.0.1:40212 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40212 - "GET /api/research/active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40212 - "GET /api/research/library?sort=recent&limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40212 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52120 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52130 - "GET /api/tasks/notifications HTTP/1.1" 200 OK
+2026-07-28 14:37:13,884 - httpx - INFO - HTTP Request: GET http://127.0.0.1:8080/api/apps "HTTP/1.1 200 OK"
+2026-07-28 14:37:13,888 - httpx - INFO - HTTP Request: GET http://127.0.0.1:8080/api/apps/ui-base "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:52120 - "GET /api/foulfox-apps HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52120 - "GET /api/calendar/events?start=2026-06-29&end=2026-08-10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52120 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52120 - "GET /api/research/active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52120 - "GET /api/research/library?sort=recent&limit=20 HTTP/1.1" 200 OK
+2026-07-28 14:37:21,828 - httpx - INFO - HTTP Request: POST http://127.0.0.1:8080/api/apps/llama-llama-studio/start "HTTP/1.1 401 Unauthorized"
+INFO:     127.0.0.1:52120 - "POST /api/foulfox-apps/llama-llama-studio/start HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:52120 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52120 - "POST /api/vm-target HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52120 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54040 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45428 - "GET / HTTP/1.1" 200 OK
+2026-07-28 14:37:42,942 - httpx - INFO - HTTP Request: GET http://127.0.0.1:8080/api/vm/list "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:45428 - "POST /api/vm-target HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45428 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45652 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45666 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45666 - "POST /api/vm-target HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45666 - "GET / HTTP/1.1" 200 OK
+2026-07-28 14:38:01,433 - httpx - INFO - HTTP Request: GET http://127.0.0.1:8080/api/vm/list "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:45666 - "POST /api/vm-target HTTP/1.1" 200 OK
+2026-07-28 14:38:02,421 - src.model_discovery - INFO - Scanning 2 hosts for models: ['localhost', 'host.docker.internal']
+2026-07-28 14:38:03,005 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-28 14:38:03,166 - httpx - INFO - HTTP Request: GET http://localhost:11434/api/v1/models "HTTP/1.1 404 Not Found"
+2026-07-28 14:38:03,186 - src.model_discovery - INFO - Discovered 1 model endpoints across 2 hosts
+2026-07-28 14:38:03,223 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-28 14:38:03,224 - app - INFO - Warmup ping OK: http://localhost:11434/v1/models
+INFO:     127.0.0.1:45666 - "POST /api/vm-target HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45666 - "GET / HTTP/1.1" 200 OK
+2026-07-28 14:38:06,570 - httpx - INFO - HTTP Request: GET http://127.0.0.1:8080/api/vm/list "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:45666 - "POST /api/vm-target HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45666 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58384 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52358 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52372 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55640 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55648 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49146 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49160 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54580 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54590 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47640 - "GET / HTTP/1.1" 200 OK
+2026-07-28 14:39:03,225 - src.model_discovery - INFO - Scanning 2 hosts for models: ['localhost', 'host.docker.internal']
+2026-07-28 14:39:03,818 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-28 14:39:03,946 - httpx - INFO - HTTP Request: GET http://localhost:11434/api/v1/models "HTTP/1.1 404 Not Found"
+2026-07-28 14:39:03,950 - src.model_discovery - INFO - Discovered 1 model endpoints across 2 hosts
+2026-07-28 14:39:03,986 - httpx - INFO - HTTP Request: GET http://localhost:11434/v1/models "HTTP/1.1 200 OK"
+2026-07-28 14:39:03,987 - app - INFO - Warmup ping OK: http://localhost:11434/v1/models
+INFO:     127.0.0.1:47644 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44760 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44764 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33558 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33564 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55616 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55630 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55638 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55630 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55642 - "GET / HTTP/1.1" 200 OK
+
+== 7. First-run provisioner log (last 60 lines) ==
+Starting foulfox-prepare.service - FoulFox OS first-run provisioning (dirs, permissions, VM config)...
+[foulfox-first-run] Seeding baked embedding model into /var/lib/foulfox/fastembed_cache ...
+[foulfox-first-run] Embedding model seeded.
+[foulfox-first-run] app-current -> /opt/foulfox/app (baked release 0)
+[foulfox-first-run] WARNING: no 'foulfox-persist' partition — running on a RAM overlay.
+[foulfox-first-run] WARNING: downloads and the Windows guest will be LOST on reboot and may exhaust memory.
+[foulfox-first-run] WARNING: add an ext4 partition labelled 'foulfox-persist' to the USB stick (see docs/first-boot.md).
+[foulfox-first-run] Internet quiet period: deferring virtio-win download by 151s.
+[foulfox-first-run] Adaptive VM sizing: disk=8G ram=8G cpu=7 tier=compact
+[foulfox-first-run] Windows ISO: <none — frontload one via the File Explorer>
+[foulfox-first-run] virtio ISO:  <none — Windows can still install, drivers optional>
+[foulfox-first-run] Guest disk:  /var/lib/foulfox/vm/windows.qcow2 (8G)
+Finished foulfox-prepare.service - FoulFox OS first-run provisioning (dirs, permissions, VM config).
+Starting foulfox-prepare.service - FoulFox OS first-run provisioning (dirs, permissions, VM config)...
+[foulfox-first-run] Internet quiet period: deferring virtio-win download by 174s.
+[foulfox-first-run] Adaptive VM sizing: disk=384G ram=8G cpu=7 tier=large
+[foulfox-first-run] Windows ISO: <none — frontload one via the File Explorer>
+[foulfox-first-run] virtio ISO:  <none — Windows can still install, drivers optional>
+[foulfox-first-run] Guest disk:  /var/lib/foulfox/vm/windows.qcow2 (384G)
+Finished foulfox-prepare.service - FoulFox OS first-run provisioning (dirs, permissions, VM config).
+
+Done. Sections 2, 3 and 6 usually contain the reason the Workspace is 404/offline.
+foulfox@foulfox:~$ 
