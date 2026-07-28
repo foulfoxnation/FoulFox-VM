@@ -108,11 +108,56 @@
   </keyboard>
   <mouse>
     <context name="Titlebar">
+      <mousebind button="Left" action="Press">
+        <action name="Focus"/>
+        <action name="Raise"/>
+      </mousebind>
       <mousebind button="Left" action="Drag">
         <action name="Move"/>
       </mousebind>
       <mousebind button="Left" action="DoubleClick">
         <action name="ToggleMaximize"/>
+      </mousebind>
+    </context>
+    <!-- Titlebar buttons. A custom <mouse> section REPLACES Openbox's built-in
+         defaults entirely — without these bindings the close / minimize /
+         maximize buttons render but do nothing when clicked (the exact
+         "close and minimize aren't functional" symptom on the appliance). -->
+    <context name="Close">
+      <mousebind button="Left" action="Press">
+        <action name="Focus"/>
+        <action name="Raise"/>
+      </mousebind>
+      <mousebind button="Left" action="Click">
+        <action name="Close"/>
+      </mousebind>
+    </context>
+    <context name="Iconify">
+      <mousebind button="Left" action="Press">
+        <action name="Focus"/>
+        <action name="Raise"/>
+      </mousebind>
+      <mousebind button="Left" action="Click">
+        <action name="Iconify"/>
+      </mousebind>
+    </context>
+    <context name="Maximize">
+      <mousebind button="Left" action="Press">
+        <action name="Focus"/>
+        <action name="Raise"/>
+      </mousebind>
+      <mousebind button="Left" action="Click">
+        <action name="ToggleMaximize"/>
+      </mousebind>
+    </context>
+    <context name="Shade">
+      <mousebind button="Left" action="Click">
+        <action name="ToggleShade"/>
+      </mousebind>
+    </context>
+    <context name="AllDesktops">
+      <mousebind button="Left" action="Click">
+        <action name="ToggleOmnipresent"/>
       </mousebind>
     </context>
     <context name="Frame">
@@ -128,6 +173,16 @@
     </context>
   </mouse>
   <applications>
+    <!-- The FoulFox shell itself (Chromium app-mode window, class FoulFoxKiosk).
+         Borderless and maximized rather than true fullscreen so the tint2
+         taskbar at the bottom stays visible (maximized windows respect the
+         panel's reserved strip; fullscreen windows cover it). -->
+    <application class="FoulFoxKiosk" type="normal">
+      <decor>no</decor>
+      <maximized>yes</maximized>
+      <fullscreen>no</fullscreen>
+      <focus>yes</focus>
+    </application>
     <!-- Browsers open as normal decorated windows, maximized for usability;
          still movable/closable. The kiosk Chromium (fullscreen kiosk mode) is
          unaffected: fullscreen windows ignore decoration/maximize hints. -->

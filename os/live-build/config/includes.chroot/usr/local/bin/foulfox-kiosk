@@ -23,6 +23,14 @@ xset s off -dpms s noblank 2>/dev/null || true
     sleep 2
   done ) &
 
+# Taskbar — one button per open window + clock at the bottom of the screen,
+# so background windows always have a visible dock. Restarted if it crashes.
+# Config: /etc/xdg/tint2/tint2rc (foulfox has no per-user override).
+( while true; do
+    tint2 2>/dev/null || true
+    sleep 2
+  done ) &
+
 # Wait for the api-server to serve the shell before opening the browser.
 # No time limit: launching Chromium at the shell URL before the API is up
 # strands the user on a "127.0.0.1 refused to connect" error page that never
@@ -57,11 +65,16 @@ done
 # Chromium is NOT exec'd so that this script (the LightDM session process)
 # stays alive as the watchdog. If chromium crashes or is killed (e.g. a rogue
 # Firefox window closes the whole X display), it restarts automatically.
+# --app (not --kiosk): an app window is borderless but NOT fullscreen, so the
+# tint2 taskbar at the bottom stays visible. The openbox rule for the
+# FoulFoxKiosk class keeps it undecorated + maximized (respecting the panel's
+# reserved strip); --kiosk would map true-fullscreen and cover the taskbar.
 while true; do
   chromium \
     --class=FoulFoxKiosk \
     --disable-gpu-compositing \
-    --kiosk \
+    --app="$url" \
+    --start-maximized \
     --no-first-run \
     --disable-infobars \
     --disable-translate \
@@ -70,6 +83,6 @@ while true; do
     --check-for-update-interval=31536000 \
     --password-store=basic \
     --autoplay-policy=no-user-gesture-required \
-    "$url" 2>/dev/null || true
+    2>/dev/null || true
   sleep 3
 done

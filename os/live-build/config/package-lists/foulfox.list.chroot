@@ -138,6 +138,11 @@ unzip
 # v0.32 — without zstd the bake step cannot extract it.
 zstd
 
+# ── Taskbar ──────────────────────────────────────────────────────────────────
+# tint2: the bottom-of-screen taskbar (one button per open window + clock) so
+# background windows always have a visible dock; config in /etc/xdg/tint2.
+tint2
+
 # ── Window tray ──────────────────────────────────────────────────────────────
 # wmctrl: lets the api-server list open X windows and re-activate a minimized
 # one (the shell's taskbar/tray). Without it the tray simply reports
