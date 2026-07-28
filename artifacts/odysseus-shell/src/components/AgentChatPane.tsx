@@ -261,18 +261,17 @@ function AgentChatPane({
         {retryNote && <p className="mt-3 text-sm">{retryNote}</p>}
         {diagnostics && (
           <div className="mt-4 w-full max-w-3xl space-y-3 text-left" data-testid="offline-diagnostics">
-            {diagnostics.appliance === false ? (
-              <p className="text-sm">Diagnostics are only available on the FoulFox OS machine (in the dev workspace the agent is managed by the workflow).</p>
-            ) : (
-              diagnostics.sections.map((s) => (
-                <div key={s.title}>
-                  <h3 className="mb-1 text-sm font-semibold text-foreground">{s.title}</h3>
-                  <pre className="max-h-64 overflow-auto rounded-md border bg-background p-3 text-xs leading-relaxed">
-                    {s.text || "(no output)"}
-                  </pre>
-                </div>
-              ))
+            {diagnostics.appliance === false && (
+              <p className="text-sm">Full system diagnostics are only available on the FoulFox OS machine (in the dev workspace the agent is managed by the workflow).</p>
             )}
+            {diagnostics.sections.map((s) => (
+              <div key={s.title}>
+                <h3 className="mb-1 text-sm font-semibold text-foreground">{s.title}</h3>
+                <pre className="max-h-64 overflow-auto rounded-md border bg-background p-3 text-xs leading-relaxed">
+                  {s.text || "(no output)"}
+                </pre>
+              </div>
+            ))}
           </div>
         )}
       </div>

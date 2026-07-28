@@ -9,8 +9,23 @@ import { getVm, getRuntime } from "../lib/vm-registry";
 import { buildSshArgs } from "../lib/vm-ssh";
 import { logger } from "../lib/logger";
 import { SHELL_SESSION_TOKEN } from "../lib/shell-token";
+import path from "path";
+import { existsSync } from "fs";
 
 const router: IRouter = Router();
+
+// ── Shell environment ─────────────────────────────────────────────────────────
+// Put the app bundle's bin/ directory (foulfox-diag etc.) on the PATH of every
+// local shell so diagnostics commands work in the >_Shell tab. dist/ lives at
+// <app-root>/artifacts/api-server/dist, so app root is three levels up.
+const APP_BIN = path.resolve(__dirname, "..", "..", "..", "bin");
+function shellEnv(): Record<string, string> {
+  const env = { ...process.env } as Record<string, string>;
+  if (existsSync(APP_BIN)) {
+    env.PATH = `${APP_BIN}:${env.PATH ?? ""}`;
+  }
+  return env;
+}
 
 // ── Shell command history (in-memory, last 200 entries) ───────────────────────
 const shellHistory: Array<{
@@ -145,7 +160,7 @@ function ensurePty(t: ResolvedTarget): Session {
     cols: 80,
     rows: 24,
     cwd: process.env.HOME || process.cwd(),
-    env: process.env as Record<string, string>,
+    env: shellEnv(),
   });
   s.pty = p;
 
@@ -219,7 +234,7 @@ router.post("/shell/exec", (req: Request, res: Response) => {
 
   const child = spawn(spawnCmd, spawnArgs, {
     cwd: process.env.HOME || process.cwd(),
-    env: process.env,
+    env: shellEnv(),
   });
 
   const timer = setTimeout(() => {

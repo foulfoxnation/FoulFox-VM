@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# foulfox-diag — print WHY the FoulFox OS Workspace isn't coming online.
+# Run it from the >_Shell tab. Read-only; safe to run any time.
+#
+# It checks, in order, every link of the Workspace chain:
+#   shell iframe -> api-server /api/odysseus/ proxy -> Odysseus (127.0.0.1:7000)
+#   -> static/index.html on disk.
+# The sudo commands below are byte-pinned in /etc/sudoers.d/foulfox-service-restart;
+# when sudo refuses (e.g. dev workspace) each section degrades to a note.
+
+PORT="${ODYSSEUS_PORT:-7000}"
+API_PORT="${PORT_API:-8080}"
+
+bold() { printf '\033[1m%s\033[0m\n' "$*"; }
+section() { echo; bold "== $* =="; }
+
+bold "FoulFox Workspace diagnostics ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+
+section "1. Who is listening on the agent port :$PORT"
+if command -v ss >/dev/null 2>&1; then
+  ss -ltnp "sport = :$PORT" 2>/dev/null | sed 1d | grep . || echo "NOTHING is listening on :$PORT — the Odysseus agent is not running."
+else
+  echo "(ss not available)"
+fi
+
+section "2. Agent root page (this is what the Workspace iframe loads)"
+CODE="$(curl -s -o /tmp/ff-diag-root.$$ -w '%{http_code}' --max-time 5 "http://127.0.0.1:$PORT/" 2>/dev/null)"
+if [ -z "$CODE" ] || [ "$CODE" = "000" ]; then
+  echo "No HTTP response from 127.0.0.1:$PORT — service down or still starting."
+else
+  echo "GET / -> HTTP $CODE"
+  if [ "$CODE" -ge 400 ]; then
+    echo "--- first lines of the error body ---"
+    head -c 400 /tmp/ff-diag-root.$$; echo
+  fi
+fi
+rm -f /tmp/ff-diag-root.$$
+
+section "3. Workspace UI files on disk"
+SVC_DIR=""
+for d in /var/lib/foulfox/app-current/artifacts/odysseus-service \
+         /opt/foulfox/app/artifacts/odysseus-service \
+         "$(pwd)/artifacts/odysseus-service"; do
+  [ -d "$d" ] && SVC_DIR="$d" && break
+done
+if [ -n "$SVC_DIR" ]; then
+  echo "Service dir: $SVC_DIR"
+  if [ -f "$SVC_DIR/static/index.html" ]; then
+    echo "static/index.html: PRESENT ($(stat -c%s "$SVC_DIR/static/index.html") bytes)"
+  else
+    echo "static/index.html: MISSING — the agent will answer / with 404 'index.html not found'."
+  fi
+  if [ -L /var/lib/foulfox/app-current ]; then
+    echo "app-current -> $(readlink -f /var/lib/foulfox/app-current)"
+  fi
+  [ -f "$SVC_DIR/../../.foulfox-app-version" ] && { echo "App version:"; cat "$SVC_DIR/../../.foulfox-app-version"; }
+else
+  echo "Could not locate the odysseus-service directory."
+fi
+
+section "4. api-server proxy health (:$API_PORT)"
+PCODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$API_PORT/api/odysseus-status" 2>/dev/null)"
+if [ "$PCODE" = "200" ]; then
+  echo "Proxy status: $(curl -s --max-time 5 "http://127.0.0.1:$API_PORT/api/odysseus-status")"
+else
+  echo "api-server did not answer /api/odysseus-status (HTTP ${PCODE:-none})."
+fi
+
+section "5. Service status (systemd)"
+sudo -n /usr/bin/systemctl status odysseus-service foulfox-prepare ollama --no-pager -l 2>/dev/null \
+  || echo "(systemd status unavailable here — only on the FoulFox OS machine)"
+
+section "6. Agent launch log (last 120 lines)"
+sudo -n /usr/bin/journalctl -u odysseus-service -n 120 --no-pager -o cat 2>/dev/null \
+  || echo "(journal unavailable here — only on the FoulFox OS machine)"
+
+section "7. First-run provisioner log (last 60 lines)"
+sudo -n /usr/bin/journalctl -u foulfox-prepare -n 60 --no-pager -o cat 2>/dev/null \
+  || echo "(journal unavailable here)"
+
+echo
+bold "Done. Sections 2, 3 and 6 usually contain the reason the Workspace is 404/offline."

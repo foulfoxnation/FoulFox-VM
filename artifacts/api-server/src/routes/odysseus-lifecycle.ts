@@ -24,7 +24,20 @@ function checkOdysseusAlive(): Promise<boolean> {
   return new Promise((resolve) => {
     const req = http.request(
       { hostname: "127.0.0.1", port: ODYSSEUS_PORT, path: "/", method: "GET", timeout: 2000 },
-      (res) => { resolve(res.statusCode !== undefined); }
+      (res) => {
+        // A 4xx/5xx root page is NOT "alive": the Workspace iframe would just
+        // render the raw error (e.g. 404 "index.html not found"). Treat it as
+        // offline so the shell shows the offline pane with diagnostics instead.
+        const ok = res.statusCode !== undefined && res.statusCode < 400;
+        if (!ok) {
+          logger.warn(
+            { statusCode: res.statusCode },
+            "Odysseus is answering but its root page is failing — reporting offline so diagnostics show",
+          );
+        }
+        res.resume();
+        resolve(ok);
+      }
     );
     req.on("error", () => resolve(false));
     req.on("timeout", () => { req.destroy(); resolve(false); });

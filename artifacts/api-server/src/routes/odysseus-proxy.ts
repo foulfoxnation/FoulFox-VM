@@ -120,6 +120,15 @@ router.all("/odysseus{/*path}", (req: Request, res: Response) => {
     delete headers["content-security-policy"];
     headers["x-frame-options"] = "ALLOWALL";
 
+    // Surface failing Workspace page loads in the api-server journal so
+    // `journalctl -u foulfox-api` / foulfox-diag show WHY the iframe is broken.
+    if ((proxyRes.statusCode ?? 0) >= 400) {
+      logger.warn(
+        { statusCode: proxyRes.statusCode, path: targetPath },
+        "Odysseus returned an error to the Workspace proxy",
+      );
+    }
+
     const contentType = String(proxyRes.headers["content-type"] || "");
     const isHtml = contentType.includes("text/html");
     const isCss = contentType.includes("text/css");

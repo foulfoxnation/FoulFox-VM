@@ -1,6 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { execFile } from "child_process";
 import { existsSync } from "fs";
+import http from "http";
 import { logger } from "../lib/logger";
 
 // ── Service restart API ────────────────────────────────────────────────────────
@@ -93,14 +94,45 @@ router.post("/os/restart-services", async (_req: Request, res: Response) => {
 // byte-identical or sudo -n will refuse. In the dev workspace (no provisioner
 // script) we report appliance:false so the UI can say diagnostics aren't
 // available here instead of showing empty sections.
+// Fetch the agent's root page directly and describe what the Workspace iframe
+// would see — status code plus the first lines of any error body. This is the
+// exact request the Workspace tab makes, so it pinpoints 404s (e.g. missing
+// static/index.html) that a bare alive-check hides.
+function checkWorkspacePage(): Promise<string> {
+  const port = parseInt(process.env.ODYSSEUS_PORT || "7000", 10);
+  return new Promise((resolve) => {
+    const req = http.request(
+      { hostname: "127.0.0.1", port, path: "/", method: "GET", timeout: 4000 },
+      (r) => {
+        const chunks: Buffer[] = [];
+        r.on("data", (c: Buffer) => { if (Buffer.concat(chunks).length < 2048) chunks.push(c); });
+        r.on("end", () => {
+          const code = r.statusCode ?? 0;
+          if (code >= 200 && code < 400) {
+            resolve(`GET / -> HTTP ${code} — the Workspace page is being served correctly.`);
+          } else {
+            const body = Buffer.concat(chunks).toString("utf8").slice(0, 400);
+            resolve(`GET / -> HTTP ${code} — this is what the Workspace iframe is showing.\n--- response body (first lines) ---\n${body}`);
+          }
+        });
+      },
+    );
+    req.on("error", (e) => resolve(`No HTTP response from 127.0.0.1:${port} — the agent process is down or still starting (${e.message}).`));
+    req.on("timeout", () => { req.destroy(); resolve(`Timed out waiting for 127.0.0.1:${port} — the agent is hung or still starting.`); });
+    req.end();
+  });
+}
+
 router.get("/os/diagnostics", async (_req: Request, res: Response) => {
   const FIRST_RUN = "/usr/local/bin/foulfox-first-run";
-  if (!existsSync(FIRST_RUN)) {
-    res.json({ appliance: false, sections: [] });
-    return;
-  }
 
   const sections: Array<{ title: string; text: string }> = [];
+  sections.push({ title: "Workspace page check (agent root page)", text: await checkWorkspacePage() });
+
+  if (!existsSync(FIRST_RUN)) {
+    res.json({ appliance: false, sections });
+    return;
+  }
 
   const status = await sudoCapture(
     "systemctl", ["status", "odysseus-service", "foulfox-prepare", "ollama", "--no-pager", "-l"], 10_000);
