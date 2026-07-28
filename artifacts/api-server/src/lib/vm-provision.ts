@@ -805,7 +805,11 @@ ${browserAutomationCommands}${devToolsCommands}      </FirstLogonCommands>
 // Windows guests that were provisioned before dev tools were added.
 // Served by GET /api/vm/:id/dev-setup as a .ps1 download.
 export function buildWindowsDevSetupScript(): string {
-  return String.raw`#Requires -RunAsAdministrator
+  // PowerShell uses backtick as its escape character (`n = newline).
+  // We can't embed a raw backtick inside a JS template literal, so we
+  // build that one line via concatenation and splice it into the script.
+  const psNewline = String.fromCharCode(96) + "n"; // `n
+  return `#Requires -RunAsAdministrator
 <#
   FoulFox Windows Developer Setup
   --------------------------------
@@ -820,7 +824,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-function Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
+function Step($msg) { Write-Host "${psNewline}==> $msg" -ForegroundColor Cyan }
 
 # ── Git for Windows ────────────────────────────────────────────────────────────
 Step 'Installing Git for Windows'
