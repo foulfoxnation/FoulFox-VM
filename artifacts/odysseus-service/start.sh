@@ -55,6 +55,25 @@ else
   # appliance's actual auth boundary. An explicit AUTH_ENABLED in
   # /etc/foulfox/foulfox.env still wins over this default.
   export AUTH_ENABLED="${AUTH_ENABLED:-false}"
+
+  # ── Shared bridge token (Odysseus → api-server cross-service auth) ───────────
+  # Odysseus starts BEFORE the api-server (foulfox-api.service has
+  # After=odysseus-service.service). We generate a random token once, write it
+  # to a file in ODYSSEUS_DATA_DIR that both services can read, then export it
+  # so core/middleware.py picks it up as ODYSSEUS_INTERNAL_TOKEN. The api-server
+  # reads the same file at startup so requireStateChangeToken can accept Odysseus
+  # bridge calls (e.g. POST /api/apps/:id/start triggered from the Apps panel).
+  # Without this, ODYSSEUS_BRIDGE_TOKEN is undefined in the api-server and every
+  # Odysseus-initiated state-change is rejected with 401.
+  _DATA_DIR="${ODYSSEUS_DATA_DIR:-/var/lib/foulfox}"
+  _BRIDGE_TOKEN_FILE="$_DATA_DIR/odysseus-bridge-token"
+  if [ ! -s "$_BRIDGE_TOKEN_FILE" ]; then
+    mkdir -p "$_DATA_DIR"
+    openssl rand -hex 32 > "$_BRIDGE_TOKEN_FILE" 2>/dev/null \
+      || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 64 > "$_BRIDGE_TOKEN_FILE"
+    chmod 600 "$_BRIDGE_TOKEN_FILE" 2>/dev/null || true
+  fi
+  export ODYSSEUS_INTERNAL_TOKEN="${ODYSSEUS_INTERNAL_TOKEN:-$(cat "$_BRIDGE_TOKEN_FILE" 2>/dev/null)}"
 fi
 
 # ── Self-contained local datastore ────────────────────────────────────────────

@@ -74,7 +74,25 @@ function localhostOnly(req: Request, res: Response, next: NextFunction) {
 //   a) X-Shell-Token: <session_token>  — from browser/Electron frontend
 //   b) X-Odysseus-Internal-Token: <odysseus_internal_token> — from Odysseus Python tools
 //      (Odysseus adds this header automatically to all internal loopback calls)
-const ODYSSEUS_BRIDGE_TOKEN = process.env["ODYSSEUS_INTERNAL_TOKEN"];
+//
+// The token is shared via a file written by Odysseus start.sh (which runs
+// before this server, per the systemd ordering). The env var wins when set
+// (dev / Electron / foulfox.env injection), falling back to the file on the
+// appliance where foulfox.env doesn't carry the token.
+function readOdysseusBridgeToken(): string | undefined {
+  const fromEnv = process.env["ODYSSEUS_INTERNAL_TOKEN"];
+  if (fromEnv) return fromEnv;
+  const dataDir = process.env["ODYSSEUS_DATA_DIR"] ?? "/var/lib/foulfox";
+  const tokenFile = path.join(dataDir, "odysseus-bridge-token");
+  try {
+    const tok = fs.readFileSync(tokenFile, "utf-8").trim();
+    if (tok) return tok;
+  } catch {
+    /* file absent in dev — fine */
+  }
+  return undefined;
+}
+const ODYSSEUS_BRIDGE_TOKEN = readOdysseusBridgeToken();
 
 function requireShellToken(req: Request, res: Response, next: NextFunction) {
   const shellToken = req.headers["x-shell-token"] ?? req.query["token"];
