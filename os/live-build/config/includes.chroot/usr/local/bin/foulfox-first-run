@@ -138,7 +138,14 @@ fi
 # overlay: they are LOST on reboot and can exhaust memory mid-install. We never
 # repartition the user's stick automatically; warn loudly in the service log and
 # drop a note the shell surfaces, so the user can add the partition deliberately.
-if ! blkid -L foulfox-persist >/dev/null 2>&1; then
+# A full install-to-disk has no 'foulfox-persist' label but IS persistent
+# (root is a real rw filesystem, not the live overlay) — don't false-warn there.
+ROOTFS_TYPE="$(findmnt -no FSTYPE / 2>/dev/null || true)"
+case "$ROOTFS_TYPE" in
+  overlay|overlayfs|aufs|tmpfs|"") ON_LIVE_OVERLAY=1 ;;
+  *) ON_LIVE_OVERLAY=0 ;;
+esac
+if [ "$ON_LIVE_OVERLAY" = "1" ] && ! blkid -L foulfox-persist >/dev/null 2>&1; then
   echo "[foulfox-first-run] WARNING: no 'foulfox-persist' partition — running on a RAM overlay." >&2
   echo "[foulfox-first-run] WARNING: downloads and the Windows guest will be LOST on reboot and may exhaust memory." >&2
   echo "[foulfox-first-run] WARNING: add an ext4 partition labelled 'foulfox-persist' to the USB stick (see docs/first-boot.md)." >&2

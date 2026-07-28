@@ -324,8 +324,23 @@ do_apply() {
 
   # Updates need persistent storage; on a RAM overlay a release would vanish on
   # reboot and could exhaust memory. Refuse rather than pretend.
-  blkid -L foulfox-persist >/dev/null 2>&1 \
-    || fail "No 'foulfox-persist' partition — live updates need persistent storage." "no-persist"
+  # Two persistent layouts exist:
+  #   * live USB with a 'foulfox-persist' partition (label check), or
+  #   * a full install-to-disk (root is a real rw filesystem, not the live
+  #     overlay — foulfox-install-to-disk labels it 'foulfox-root').
+  # Only refuse when we're on the live overlay AND no persist partition exists.
+  if ! blkid -L foulfox-persist >/dev/null 2>&1; then
+    local rootfs
+    rootfs="$(findmnt -no FSTYPE / 2>/dev/null || true)"
+    case "$rootfs" in
+      overlay|overlayfs|aufs|tmpfs|"")
+        fail "No 'foulfox-persist' partition — live updates need persistent storage." "no-persist"
+        ;;
+      *)
+        log "No foulfox-persist label but root is '$rootfs' (installed to disk) — storage is persistent."
+        ;;
+    esac
+  fi
 
   local murl
   murl="$(resolve_manifest_url)" \
