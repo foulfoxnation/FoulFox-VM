@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SettingsModal } from "@/components/SettingsModal";
 import { DiskInstallPanel } from "@/components/DiskInstallPanel";
 import { PowerMenu } from "@/components/PowerMenu";
@@ -38,11 +37,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-const TAB_TRIGGER =
-  "relative h-12 flex items-center rounded-none border-b-2 border-b-transparent bg-transparent px-4 pb-3 pt-2 font-medium text-muted-foreground shadow-none transition-none data-[state=active]:border-b-primary data-[state=active]:text-foreground data-[state=active]:shadow-none";
-const TAB_CONTENT =
-  "flex-1 m-0 p-0 border-0 outline-none h-full data-[state=inactive]:hidden";
-
 const OS_ICON: Record<OsKind, typeof Monitor> = {
   linux: TermIcon,
   windows: Monitor,
@@ -59,16 +53,12 @@ const STATE_DOT: Record<string, string> = {
 export default function Home() {
   const [activeTab, setActiveTab] = useState("odysseus");
   const [pickerOpen, setPickerOpen] = useState(false);
-  // Terminal context pending delivery to the agent chat (host shell -> chat).
   const [pendingOdysseusContext, setPendingOdysseusContext] = useState<string | null>(null);
-  // Header shortcuts for the built-in apps: switch to the Apps tab and
-  // start/focus a specific default app (Voice Forge, Llama Llama Studio).
   const [focusAppId, setFocusAppId] = useState<string | null>(null);
   const openDefaultApp = (id: string) => {
     setFocusAppId(id);
     setActiveTab("apps");
   };
-  // Width (% of the content row) of the side-by-side agent chat panel.
   const [chatWidthPct, setChatWidthPct] = useState(38);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -77,7 +67,6 @@ export default function Home() {
   const { data: vms = [] } = useVmList();
   const chatPaneRef = useRef<ChatPaneHandle>(null);
 
-  // If the active VM tab disappears (e.g. deleted), fall back to the workspace tab.
   useEffect(() => {
     if (activeTab.startsWith("vm:")) {
       const id = activeTab.slice(3);
@@ -85,12 +74,6 @@ export default function Home() {
     }
   }, [vms, activeTab]);
 
-  // ── Workspace layout ──────────────────────────────────────────────────────
-  // The agent chat is a single persistent iframe (it never unmounts, so the
-  // conversation + the VM VNC/terminals all stay alive across tab switches).
-  // - Workspace tab      -> chat fills the area.
-  // - Host Shell + VM    -> chat on the LEFT, the tab body on the right.
-  // - File Explorer + Get FoulFox OS -> no chat (hidden, still mounted).
   const isVm = activeTab.startsWith("vm:");
   const activeVmId = isVm ? activeTab.slice(3) : null;
   const activeVm = activeVmId ? vms.find((v) => v.id === activeVmId) ?? null : null;
@@ -133,7 +116,9 @@ export default function Home() {
           setActiveTab(`vm:${id}`);
         }}
       />
-      <div className="flex items-center justify-between gap-4 border-b bg-card px-4 py-2 shadow-sm z-10">
+
+      {/* ── Top header ──────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between gap-4 border-b bg-card px-4 py-2 shadow-sm z-10 shrink-0">
         <div className="flex items-center gap-3 shrink-0">
           <img src={foxLogo} alt="FoulFox OS" className="h-8 w-8 rounded-md object-cover" />
           <div className="flex flex-col leading-tight">
@@ -149,7 +134,7 @@ export default function Home() {
           />
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-3 shrink-0 flex-wrap">
           <Button
             variant="ghost"
             size="sm"
@@ -206,134 +191,170 @@ export default function Home() {
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-1 flex-col overflow-hidden">
-        <div className="border-b px-4 bg-muted/20">
-          <TabsList className="h-12 w-full justify-start rounded-none border-b-0 bg-transparent p-0">
-            <TabsTrigger value="odysseus" className={TAB_TRIGGER} data-testid="tab-odysseus">
-              <MonitorDot className="mr-2 h-4 w-4" />
-              FoulFox OS Workspace
-            </TabsTrigger>
-            <TabsTrigger
-              value="browser"
-              className={TAB_TRIGGER}
-              data-testid="tab-browser"
-            >
-              <Globe className="mr-2 h-4 w-4" />
-              Browser
-            </TabsTrigger>
-            <TabsTrigger
-              value="devices"
-              className={TAB_TRIGGER}
-              data-testid="tab-devices"
-            >
-              <Plug className="mr-2 h-4 w-4" />
-              Devices
-            </TabsTrigger>
-            <TabsTrigger
-              value="apps"
-              className={TAB_TRIGGER}
-              data-testid="tab-apps"
-            >
-              <Boxes className="mr-2 h-4 w-4" />
-              Apps
-            </TabsTrigger>
+      {/* ── Content area ────────────────────────────────────────────────── */}
+      <div ref={contentRef} className="flex flex-1 overflow-hidden min-h-0">
+        <div
+          className={chatVisible ? "h-full min-w-0" : "hidden"}
+          style={
+            chatFull
+              ? { flex: "1 1 0%" }
+              : { width: `${chatWidthPct}%`, flexShrink: 0 }
+          }
+        >
+          <AgentChatPane
+            ref={chatPaneRef}
+            pendingContext={pendingOdysseusContext}
+            onContextConsumed={() => setPendingOdysseusContext(null)}
+            shellToken={shellToken}
+            target={chatTarget}
+            showTargetBadge={split}
+          />
+        </div>
 
-            {vms.map((vm) => {
-              const Icon = OS_ICON[vm.osKind] ?? Monitor;
-              return (
-                <TabsTrigger key={vm.id} value={`vm:${vm.id}`} className={TAB_TRIGGER} data-testid={`tab-vm-${vm.id}`}>
-                  <Icon className="mr-2 h-4 w-4" />
-                  <span className="max-w-[140px] truncate">{vm.name}</span>
+        {split && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            onPointerDown={startChatResize}
+            className="w-1.5 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/50"
+            data-testid="chat-resize-handle"
+          />
+        )}
+
+        <div className={rightVisible ? "h-full min-w-0 flex-1" : "hidden"}>
+          <Body show={activeTab === "browser"}>
+            <BrowserTab />
+          </Body>
+          <Body show={activeTab === "devices"}>
+            <DevicesTab />
+          </Body>
+          <Body show={activeTab === "apps"}>
+            <AppsTab focusAppId={activeTab === "apps" ? focusAppId : null} />
+          </Body>
+          {vms.map((vm) => (
+            <Body key={vm.id} show={activeTab === `vm:${vm.id}`}>
+              <VmTab vm={vm} isDefault={vm.id === DEFAULT_VM_ID} onDeleted={() => setActiveTab("odysseus")} />
+            </Body>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Windows-style bottom taskbar ────────────────────────────────── */}
+      <div
+        className="shrink-0 flex items-center gap-1 border-t bg-card px-2 overflow-x-auto"
+        style={{ height: "48px" }}
+        data-testid="taskbar"
+      >
+        {/* Fixed sections */}
+        <TaskbarButton
+          id="odysseus"
+          active={activeTab === "odysseus"}
+          icon={<MonitorDot className="h-4 w-4" />}
+          label="Workspace"
+          onClick={() => setActiveTab("odysseus")}
+          testId="tab-odysseus"
+        />
+        <TaskbarButton
+          id="browser"
+          active={activeTab === "browser"}
+          icon={<Globe className="h-4 w-4" />}
+          label="Browser"
+          onClick={() => setActiveTab("browser")}
+          testId="tab-browser"
+        />
+        <TaskbarButton
+          id="devices"
+          active={activeTab === "devices"}
+          icon={<Plug className="h-4 w-4" />}
+          label="Devices"
+          onClick={() => setActiveTab("devices")}
+          testId="tab-devices"
+        />
+        <TaskbarButton
+          id="apps"
+          active={activeTab === "apps"}
+          icon={<Boxes className="h-4 w-4" />}
+          label="Apps"
+          onClick={() => setActiveTab("apps")}
+          testId="tab-apps"
+        />
+
+        {/* VM buttons — one per running/stopped VM */}
+        {vms.map((vm) => {
+          const Icon = OS_ICON[vm.osKind] ?? Monitor;
+          return (
+            <TaskbarButton
+              key={vm.id}
+              id={`vm:${vm.id}`}
+              active={activeTab === `vm:${vm.id}`}
+              icon={
+                <span className="relative">
+                  <Icon className="h-4 w-4" />
                   <span
-                    className={`ml-2 h-2 w-2 rounded-full ${STATE_DOT[vm.state] ?? "bg-zinc-500"}`}
+                    className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-card ${STATE_DOT[vm.state] ?? "bg-zinc-500"}`}
                     title={vm.state}
                   />
-                </TabsTrigger>
-              );
-            })}
-
-            <Button
-              variant="ghost"
-              size="sm"
-              className="ml-1 h-8 self-center px-2 text-muted-foreground hover:text-foreground"
-              onClick={() => setPickerOpen(true)}
-              title="Create another VM session (Windows, Linux, …)"
-              data-testid="button-add-vm"
-            >
-              <Plus className="mr-1 h-4 w-4" />
-              <span className="text-xs">New VM</span>
-            </Button>
-
-            {/* Minimized/open app windows on the appliance (Discord, Firefox, …) */}
-            <WindowTray />
-          </TabsList>
-        </div>
-
-        {/* Content area: persistent agent chat (left) + per-tab body (right). */}
-        <div ref={contentRef} className="flex flex-1 overflow-hidden">
-          {/* The agent chat is a single iframe that never unmounts, so the
-              conversation (and any VM VNC/terminal it drives) survives tab
-              switches. It fills the area on the Workspace tab, sits on the left
-              beside the Host Shell / VM tabs, and is hidden (but kept mounted)
-              on File Explorer + Get FoulFox OS. */}
-          <div
-            className={chatVisible ? "h-full min-w-0" : "hidden"}
-            style={
-              chatFull
-                ? { flex: "1 1 0%" }
-                : { width: `${chatWidthPct}%`, flexShrink: 0 }
-            }
-          >
-            <AgentChatPane
-              ref={chatPaneRef}
-              pendingContext={pendingOdysseusContext}
-              onContextConsumed={() => setPendingOdysseusContext(null)}
-              shellToken={shellToken}
-              target={chatTarget}
-              showTargetBadge={split}
+                </span>
+              }
+              label={vm.name}
+              onClick={() => setActiveTab(`vm:${vm.id}`)}
+              testId={`tab-vm-${vm.id}`}
             />
-          </div>
+          );
+        })}
 
-          {/* Drag divider — only when the chat sits beside a tab body. */}
-          {split && (
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              onPointerDown={startChatResize}
-              className="w-1.5 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/50"
-              data-testid="chat-resize-handle"
-            />
-          )}
+        {/* New VM */}
+        <button
+          className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors h-8 shrink-0"
+          onClick={() => setPickerOpen(true)}
+          title="Create another VM (Windows, Linux, …)"
+          data-testid="button-add-vm"
+        >
+          <Plus className="h-4 w-4" />
+          <span className="hidden sm:inline">New VM</span>
+        </button>
 
-          {/* Right region — every non-chat body stays mounted; shown by tab so
-              terminal scrollback and VNC sessions are never torn down. */}
-          <div className={rightVisible ? "h-full min-w-0 flex-1" : "hidden"}>
-            <Body show={activeTab === "browser"}>
-              <BrowserTab />
-            </Body>
-            <Body show={activeTab === "devices"}>
-              <DevicesTab />
-            </Body>
-            <Body show={activeTab === "apps"}>
-              <AppsTab focusAppId={activeTab === "apps" ? focusAppId : null} />
-            </Body>
-            {vms.map((vm) => (
-              <Body key={vm.id} show={activeTab === `vm:${vm.id}`}>
-                <VmTab vm={vm} isDefault={vm.id === DEFAULT_VM_ID} onDeleted={() => setActiveTab("odysseus")} />
-              </Body>
-            ))}
-          </div>
-        </div>
-      </Tabs>
+        {/* Spacer pushes X windows to the right */}
+        <div className="flex-1" />
+
+        {/* Open X windows on the appliance (Discord, Firefox, …) */}
+        <WindowTray />
+      </div>
     </div>
   );
 }
 
-/**
- * A tab body that stays mounted but is hidden with `display:none` when its tab
- * is inactive. Keeping every body mounted preserves expensive state — terminal
- * scrollback, VM VNC sessions — across tab switches.
- */
+interface TaskbarButtonProps {
+  id: string;
+  active: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  testId?: string;
+}
+
+function TaskbarButton({ active, icon, label, onClick, testId }: TaskbarButtonProps) {
+  return (
+    <button
+      className={[
+        "relative flex items-center gap-2 px-3 rounded text-sm transition-colors h-9 shrink-0 max-w-[180px]",
+        active
+          ? "bg-muted text-foreground font-medium"
+          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+      ].join(" ")}
+      onClick={onClick}
+      data-testid={testId}
+    >
+      {icon}
+      <span className="truncate">{label}</span>
+      {/* Active indicator line at the top of the button, like Windows */}
+      {active && (
+        <span className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-primary" />
+      )}
+    </button>
+  );
+}
+
 function Body({ show, children }: { show: boolean; children: ReactNode }) {
   return <div className={show ? "h-full w-full" : "hidden"}>{children}</div>;
 }
