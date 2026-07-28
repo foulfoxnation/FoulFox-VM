@@ -630,6 +630,91 @@ exit 0`;
     sync(7, psEncoded(playwrightInstallScript)) +
     sync(8, psEncoded(cdpSetupScript));
 
+  // ── Developer tools ──────────────────────────────────────────────────────────
+  // Git for Windows, VS Code + dev extensions, GitHub CLI, .NET 8 SDK,
+  // Unity Hub, and Epic Games Launcher (for Unreal Engine). All scripts end
+  // with `exit 0` so a slow or failed download never stalls the OOBE sequence.
+  // These are also exposed via /api/vm/:id/dev-setup for existing VMs.
+
+  // Git for Windows — winget first (Windows 11 built-in), direct exe fallback.
+  const gitInstallScript = String.raw`$ErrorActionPreference='SilentlyContinue'
+$ProgressPreference='SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+$wg=Get-Command winget -ErrorAction SilentlyContinue
+if ($wg) {
+  & $wg install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements 2>$null
+} else {
+  $u='https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe'
+  $o=Join-Path $env:TEMP 'git-win-setup.exe'
+  try { Invoke-WebRequest -Uri $u -OutFile $o -UseBasicParsing } catch {}
+  if (Test-Path $o) { Start-Process $o -ArgumentList '/VERYSILENT','/NORESTART','/COMPONENTS=icons,ext\reg\shellhere,assoc,assoc_sh' -Wait }
+}
+exit 0`;
+
+  // VS Code (Microsoft's permanent latest-stable redirect URL — no version
+  // pinning needed) + a curated set of dev extensions installed post-setup.
+  const vscodeInstallScript = String.raw`$ErrorActionPreference='SilentlyContinue'
+$ProgressPreference='SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+$u='https://update.code.visualstudio.com/latest/win32-x64-user/stable'
+$o=Join-Path $env:TEMP 'vscode-user-setup.exe'
+try { Invoke-WebRequest -Uri $u -OutFile $o -UseBasicParsing } catch {}
+if (Test-Path $o) {
+  Start-Process $o -ArgumentList '/VERYSILENT','/NORESTART','/MERGETASKS=!runcode,addcontextmenufiles,addcontextmenufolders,associatewithfiles,addtopath' -Wait
+}
+$env:Path=[Environment]::GetEnvironmentVariable('Path','Machine')+';'+[Environment]::GetEnvironmentVariable('Path','User')
+$code=@(
+  "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin\code.cmd",
+  'C:\Program Files\Microsoft VS Code\bin\code.cmd'
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($code) {
+  $exts=@(
+    'ms-python.python',
+    'ms-dotnettools.csharp',
+    'ms-dotnettools.vscode-dotnet-runtime',
+    'dbaeumer.vscode-eslint',
+    'esbenp.prettier-vscode',
+    'eamodio.gitlens',
+    'github.vscode-pull-request-github',
+    'ms-vscode-remote.remote-ssh',
+    'unity.com-unity-technologies-vscode-unity',
+    'ms-vscode.live-server',
+    'visualstudioexptteam.vscodeintellicode'
+  )
+  foreach ($e in $exts) { & $code --install-extension $e --force 2>$null }
+}
+exit 0`;
+
+  // GitHub CLI + .NET 8 SDK + Epic Games Launcher (Unreal Engine hub) via
+  // winget. Best-effort: winget needs App Installer warm-up on some editions.
+  const devInfraScript = String.raw`$ErrorActionPreference='SilentlyContinue'
+$ProgressPreference='SilentlyContinue'
+$wg=Get-Command winget -ErrorAction SilentlyContinue
+if ($wg) {
+  & $wg install --id GitHub.cli                 -e --silent --accept-package-agreements --accept-source-agreements 2>$null
+  & $wg install --id Microsoft.DotNet.SDK.8     -e --silent --accept-package-agreements --accept-source-agreements 2>$null
+  & $wg install --id EpicGames.EpicGamesLauncher -e --silent --accept-package-agreements --accept-source-agreements 2>$null
+}
+exit 0`;
+
+  // Unity Hub — the small launcher that lets users download and manage Unity
+  // editor versions. Unity Editor itself (3–5 GB) is user-initiated from
+  // within the Hub after setup.
+  const unityHubScript = String.raw`$ErrorActionPreference='SilentlyContinue'
+$ProgressPreference='SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+$u='https://public-cdn.cloud.unity3d.com/hub/prod/UnityHubSetup.exe'
+$o=Join-Path $env:TEMP 'UnityHubSetup.exe'
+try { Invoke-WebRequest -Uri $u -OutFile $o -UseBasicParsing } catch {}
+if (Test-Path $o) { Start-Process $o -ArgumentList '--silent' -Wait }
+exit 0`;
+
+  const devToolsCommands =
+    sync(9,  psEncoded(gitInstallScript)) +
+    sync(10, psEncoded(vscodeInstallScript)) +
+    sync(11, psEncoded(devInfraScript)) +
+    sync(12, psEncoded(unityHubScript));
+
   return `<?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
   <settings pass="windowsPE">
@@ -708,10 +793,103 @@ ${keyCommand}        <SynchronousCommand wcm:action="add">
           <Order>4</Order>
           <CommandLine>netsh advfirewall firewall set rule group="remote desktop" new enable=Yes</CommandLine>
         </SynchronousCommand>
-${browserAutomationCommands}      </FirstLogonCommands>
+${browserAutomationCommands}${devToolsCommands}      </FirstLogonCommands>
     </component>
   </settings>
 </unattend>
+`;
+}
+
+// Standalone PowerShell script that installs the same developer tools the
+// autounattend FirstLogonCommands install on new VMs — for use on existing
+// Windows guests that were provisioned before dev tools were added.
+// Served by GET /api/vm/:id/dev-setup as a .ps1 download.
+export function buildWindowsDevSetupScript(): string {
+  return String.raw`#Requires -RunAsAdministrator
+<#
+  FoulFox Windows Developer Setup
+  --------------------------------
+  Installs: Git for Windows, VS Code + dev extensions, GitHub CLI,
+  .NET 8 SDK, Epic Games Launcher (for Unreal Engine), Unity Hub.
+
+  Run inside the Windows VM as Administrator:
+    Set-ExecutionPolicy Bypass -Scope Process -Force
+    irm http://<foulfox-host>/api/vm/default/dev-setup | iex
+#>
+$ErrorActionPreference = 'SilentlyContinue'
+$ProgressPreference    = 'SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+function Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
+
+# ── Git for Windows ────────────────────────────────────────────────────────────
+Step 'Installing Git for Windows'
+$wg = Get-Command winget -ErrorAction SilentlyContinue
+if ($wg) {
+  & $wg install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements 2>$null
+} else {
+  $u = 'https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe'
+  $o = Join-Path $env:TEMP 'git-win-setup.exe'
+  try { Invoke-WebRequest -Uri $u -OutFile $o -UseBasicParsing } catch {}
+  if (Test-Path $o) { Start-Process $o -ArgumentList '/VERYSILENT','/NORESTART','/COMPONENTS=icons,ext\reg\shellhere,assoc,assoc_sh' -Wait }
+}
+
+# ── VS Code + extensions ───────────────────────────────────────────────────────
+Step 'Installing VS Code'
+$u = 'https://update.code.visualstudio.com/latest/win32-x64-user/stable'
+$o = Join-Path $env:TEMP 'vscode-user-setup.exe'
+try { Invoke-WebRequest -Uri $u -OutFile $o -UseBasicParsing } catch {}
+if (Test-Path $o) {
+  Start-Process $o -ArgumentList '/VERYSILENT','/NORESTART','/MERGETASKS=!runcode,addcontextmenufiles,addcontextmenufolders,associatewithfiles,addtopath' -Wait
+}
+$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+$code = @(
+  "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin\code.cmd",
+  'C:\Program Files\Microsoft VS Code\bin\code.cmd'
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($code) {
+  Step 'Installing VS Code extensions'
+  $exts = @(
+    'ms-python.python',
+    'ms-dotnettools.csharp',
+    'ms-dotnettools.vscode-dotnet-runtime',
+    'dbaeumer.vscode-eslint',
+    'esbenp.prettier-vscode',
+    'eamodio.gitlens',
+    'github.vscode-pull-request-github',
+    'ms-vscode-remote.remote-ssh',
+    'unity.com-unity-technologies-vscode-unity',
+    'ms-vscode.live-server',
+    'visualstudioexptteam.vscodeintellicode'
+  )
+  foreach ($e in $exts) {
+    Write-Host "  + $e"
+    & $code --install-extension $e --force 2>$null
+  }
+}
+
+# ── GitHub CLI + .NET 8 SDK + Epic Games Launcher ─────────────────────────────
+Step 'Installing GitHub CLI, .NET 8 SDK, Epic Games Launcher (winget)'
+if ($wg) {
+  & $wg install --id GitHub.cli                  -e --silent --accept-package-agreements --accept-source-agreements 2>$null
+  & $wg install --id Microsoft.DotNet.SDK.8      -e --silent --accept-package-agreements --accept-source-agreements 2>$null
+  & $wg install --id EpicGames.EpicGamesLauncher -e --silent --accept-package-agreements --accept-source-agreements 2>$null
+} else {
+  Write-Host '  winget not available — skipping GitHub CLI / .NET SDK / Epic Launcher'
+}
+
+# ── Unity Hub ─────────────────────────────────────────────────────────────────
+Step 'Installing Unity Hub'
+$u = 'https://public-cdn.cloud.unity3d.com/hub/prod/UnityHubSetup.exe'
+$o = Join-Path $env:TEMP 'UnityHubSetup.exe'
+try { Invoke-WebRequest -Uri $u -OutFile $o -UseBasicParsing } catch {}
+if (Test-Path $o) { Start-Process $o -ArgumentList '--silent' -Wait }
+
+Write-Host ''
+Write-Host '==> FoulFox dev setup complete.' -ForegroundColor Green
+Write-Host '    Git, VS Code, GitHub CLI, .NET 8 SDK, Epic Games Launcher, Unity Hub'
+Write-Host '    Open Unity Hub to download a Unity editor version.'
+Write-Host '    Open Epic Games Launcher to install Unreal Engine.'
 `;
 }
 

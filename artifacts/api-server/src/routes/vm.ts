@@ -35,7 +35,7 @@ import {
   isOsKind,
   type OsKind,
 } from "../lib/vm-capabilities";
-import { startProvisioning, startCloneProvisioning, subscribeProvisioning } from "../lib/vm-provision";
+import { startProvisioning, startCloneProvisioning, subscribeProvisioning, buildWindowsDevSetupScript } from "../lib/vm-provision";
 import { authMode, checkAgentHealth } from "../lib/vm-ssh";
 import { OS_IMAGES, toPublic, getOsImage, isOsImageId } from "../lib/os-catalog";
 import { logger } from "../lib/logger";
@@ -520,6 +520,20 @@ router.post("/vm/:id/provision", (req: Request, res: Response) => {
   const vm = requireVm(req, res); if (!vm) return;
   startProvisioning(vm.id).catch((err) => logger.error({ err, vm: vm.id }, "Provisioning failed"));
   res.json({ success: true });
+});
+
+// GET /vm/:id/dev-setup — download a PowerShell script that installs the full
+// developer toolchain (Git, VS Code + extensions, GitHub CLI, .NET 8 SDK,
+// Unity Hub, Epic Games Launcher) on an EXISTING Windows VM.
+// Run inside the VM as Administrator:
+//   Set-ExecutionPolicy Bypass -Scope Process -Force
+//   irm http://<foulfox-host>/api/vm/default/dev-setup | iex
+router.get("/vm/:id/dev-setup", (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  const script = buildWindowsDevSetupScript();
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="foulfox-dev-setup-${vm.id}.ps1"`);
+  res.send(script);
 });
 
 // ── Capabilities (honest, multi-OS) ────────────────────────────────────────────
