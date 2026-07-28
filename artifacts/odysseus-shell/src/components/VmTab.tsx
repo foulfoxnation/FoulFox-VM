@@ -27,8 +27,9 @@ import {
   Maximize2,
   Minimize2,
   Copy,
+  XCircle,
 } from "lucide-react";
-import { useVmLifecycle, useDeleteVm, useRetryProvision, useCloneVm } from "@/hooks/use-vms";
+import { useVmLifecycle, useDeleteVm, useRetryProvision, useCancelProvision, useCloneVm } from "@/hooks/use-vms";
 import { useToast } from "@/hooks/use-toast";
 import { checkAgentHealth, type AgentHealth, type VmSummary, type VmLifecycleAction } from "@/lib/vm-api";
 
@@ -52,6 +53,7 @@ export function VmTab({
   const lifecycle = useVmLifecycle();
   const del = useDeleteVm();
   const retry = useRetryProvision();
+  const cancel = useCancelProvision();
   const clone = useCloneVm();
   const { toast } = useToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -402,6 +404,30 @@ export function VmTab({
             <p className="truncate text-xs">{provFailed ? p.error || "Provisioning failed" : p.message}</p>
             {!provFailed && <Progress value={p.progress} className="mt-1 h-1" />}
           </div>
+          {provBusy && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-muted-foreground hover:text-destructive hover:border-destructive"
+              disabled={cancel.isPending}
+              onClick={() =>
+                cancel.mutate(vm.id, {
+                  onSuccess: () =>
+                    toast({ title: "Download cancelled", description: "Click Start to try again." }),
+                  onError: (e: Error) =>
+                    toast({ title: "Cancel failed", description: e.message, variant: "destructive" }),
+                })
+              }
+              data-testid={`button-cancel-provision-${vm.id}`}
+            >
+              {cancel.isPending ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <XCircle className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              Cancel
+            </Button>
+          )}
           {provFailed && (
             <Button
               size="sm"

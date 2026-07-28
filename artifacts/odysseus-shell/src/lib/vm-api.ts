@@ -381,6 +381,14 @@ export async function retryProvision(id: string): Promise<void> {
   if (!res.ok) throw new Error(await parseError(res));
 }
 
+export async function cancelProvision(id: string): Promise<void> {
+  const res = await authedFetch(`/api/vm/${encodeURIComponent(id)}/provision/cancel`, {
+    method: "POST",
+    headers: jsonHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+}
+
 // Probe whether the agent can run a command inside the guest with no human
 // input (key-based SSH). Surfaced as a connection-health indicator in the UI.
 export async function checkAgentHealth(id: string): Promise<AgentHealth> {

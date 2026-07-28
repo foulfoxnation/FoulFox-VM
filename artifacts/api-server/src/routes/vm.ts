@@ -35,7 +35,7 @@ import {
   isOsKind,
   type OsKind,
 } from "../lib/vm-capabilities";
-import { startProvisioning, startCloneProvisioning, subscribeProvisioning, buildWindowsDevSetupScript } from "../lib/vm-provision";
+import { startProvisioning, startCloneProvisioning, subscribeProvisioning, cancelProvisioning, buildWindowsDevSetupScript } from "../lib/vm-provision";
 import { authMode, checkAgentHealth } from "../lib/vm-ssh";
 import { OS_IMAGES, toPublic, getOsImage, isOsImageId } from "../lib/os-catalog";
 import { logger } from "../lib/logger";
@@ -519,6 +519,15 @@ router.get("/vm/:id/provision/stream", (req: Request, res: Response) => {
 router.post("/vm/:id/provision", (req: Request, res: Response) => {
   const vm = requireVm(req, res); if (!vm) return;
   startProvisioning(vm.id).catch((err) => logger.error({ err, vm: vm.id }, "Provisioning failed"));
+  res.json({ success: true });
+});
+
+// POST /vm/:id/provision/cancel — cancel an in-flight provisioning pass (e.g.
+// a stuck download). Aborts the HTTP request, deletes the partial file, and
+// resets the provisioning state to "none" so the user can retry immediately.
+router.post("/vm/:id/provision/cancel", (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  cancelProvisioning(vm.id);
   res.json({ success: true });
 });
 

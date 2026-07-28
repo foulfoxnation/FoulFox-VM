@@ -11,6 +11,7 @@ import {
   vmLifecycle,
   deleteVm,
   retryProvision,
+  cancelProvision,
   fetchAppUpdateInfo,
   fetchUpdateStatus,
   applyAppUpdate,
@@ -133,6 +134,14 @@ export function useRetryProvision() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => retryProvision(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: VM_LIST_KEY }),
+  });
+}
+
+export function useCancelProvision() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => cancelProvision(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: VM_LIST_KEY }),
   });
 }

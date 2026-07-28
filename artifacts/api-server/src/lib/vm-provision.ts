@@ -55,16 +55,20 @@ const CACHE_DIR = path.join(VM_DATA_DIR, "_image-cache");
 // Cached/frontloaded media never waits — only actual network fetches do. The
 // countdown is surfaced through the VM's provisioning banner so the user sees
 // WHY nothing is downloading yet. Dev workspaces are never quiet.
-async function waitForNetQuiet(vmId: string, what: string): Promise<void> {
+async function waitForNetQuiet(vmId: string, what: string, signal?: AbortSignal): Promise<void> {
   let remaining = netQuietRemaining();
   while (remaining > 0) {
+    if (signal?.aborted) throw new CancelledError();
     emit(vmId, {
       status: "downloading",
       progress: 0,
       error: null,
       message: `Waiting for the network to settle after boot — ${what} starts in ~${remaining}s. Connect to WiFi now if you haven't.`,
     });
-    await new Promise((r) => setTimeout(r, Math.min(remaining, 10) * 1000));
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(resolve, Math.min(remaining, 10) * 1000);
+      signal?.addEventListener("abort", () => { clearTimeout(t); reject(new CancelledError()); }, { once: true });
+    });
     remaining = netQuietRemaining();
   }
 }
@@ -75,18 +79,51 @@ async function waitForNetQuiet(vmId: string, what: string): Promise<void> {
 // would race on the shared disk/unattend/config artifacts. Callers awaiting a
 // duplicate request simply join the in-flight pass.
 const inFlight = new Map<string, Promise<void>>();
+// Per-VM AbortControllers so cancelProvisioning() can kill an active download.
+const inFlightAbort = new Map<string, AbortController>();
+
+// Sentinel error thrown when a download is intentionally cancelled.
+class CancelledError extends Error {
+  constructor() { super("download cancelled by user"); this.name = "CancelledError"; }
+}
 
 export async function startProvisioning(vmId: string): Promise<void> {
   const existing = inFlight.get(vmId);
   if (existing) return existing;
-  const run = doStartProvisioning(vmId).finally(() => inFlight.delete(vmId));
+  const run = doStartProvisioning(vmId).finally(() => {
+    inFlight.delete(vmId);
+    inFlightAbort.delete(vmId);
+  });
   inFlight.set(vmId, run);
   return run;
+}
+
+// Cancel an active provisioning pass (e.g. a stuck download). Aborts the
+// in-flight HTTP request, cleans up the partial file, and resets provisioning
+// state to "none" so the Start button re-enables immediately.
+export function cancelProvisioning(vmId: string): void {
+  const ctrl = inFlightAbort.get(vmId);
+  if (ctrl) {
+    ctrl.abort();
+  }
+  // Remove any stale .part files in the cache dir so a retry starts fresh.
+  try {
+    const entries = fs.readdirSync(CACHE_DIR);
+    for (const f of entries) {
+      if (f.endsWith(".part")) fs.rmSync(path.join(CACHE_DIR, f), { force: true });
+    }
+  } catch { /* cache dir may not exist yet */ }
+  emit(vmId, { status: "none", progress: 0, error: null, message: "" });
 }
 
 async function doStartProvisioning(vmId: string): Promise<void> {
   const vm = getVm(vmId);
   if (!vm) return;
+
+  // Create a fresh abort controller for this provisioning pass so
+  // cancelProvisioning() can kill the in-flight download at any point.
+  const ctrl = new AbortController();
+  inFlightAbort.set(vmId, ctrl);
 
   // Already has explicit media (manual disk/iso) and marked ready — usually
   // nothing to auto-provision. EXCEPTION: a Windows guest still needs its
@@ -103,14 +140,21 @@ async function doStartProvisioning(vmId: string): Promise<void> {
     fs.mkdirSync(vmDiskDir(vmId), { recursive: true });
     fs.mkdirSync(CACHE_DIR, { recursive: true });
 
+    const { signal } = ctrl;
     if (vm.osKind === "linux") {
-      await provisionLinux(vmId);
+      await provisionLinux(vmId, signal);
     } else if (vm.osKind === "windows") {
-      await provisionWindows(vmId);
+      await provisionWindows(vmId, signal);
     } else if (vm.osKind === "macos") {
       await provisionMacOs(vmId);
     }
   } catch (err) {
+    if (err instanceof CancelledError) {
+      // User cancelled — state was already reset to "none" by cancelProvisioning();
+      // don't overwrite it with "failed" so the Start button stays enabled.
+      logger.info({ vm: vmId }, "Provisioning cancelled by user");
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     logger.error({ err, vm: vmId }, "Provisioning failed");
     emit(vmId, { status: "failed", error: msg, message: `Provisioning failed: ${msg}` });
@@ -118,7 +162,7 @@ async function doStartProvisioning(vmId: string): Promise<void> {
 }
 
 // ── Linux: cloud image + cloud-init first-boot config (hands-off) ─────────────────
-async function provisionLinux(vmId: string): Promise<void> {
+async function provisionLinux(vmId: string, signal?: AbortSignal): Promise<void> {
   const spec = getOsImage(getVm(vmId)?.imageId) ?? defaultImageForOs("linux");
   if (!spec || spec.resolver !== "cloud-image" || !spec.imageUrl || !spec.imageFilename) {
     throw new Error("No cloud image is configured for this Linux selection.");
@@ -127,8 +171,8 @@ async function provisionLinux(vmId: string): Promise<void> {
 
   emit(vmId, { status: "downloading", progress: 0, error: null, message: `Downloading ${spec.label} cloud image…`, imageUrl: spec.imageUrl });
   if (!fs.existsSync(cached)) {
-    await waitForNetQuiet(vmId, `the ${spec.label} download`);
-    await download(spec.imageUrl, cached, (pct) => emit(vmId, { status: "downloading", progress: pct, message: `Downloading ${spec.label} cloud image… ${pct}%` }));
+    await waitForNetQuiet(vmId, `the ${spec.label} download`, signal);
+    await download(spec.imageUrl, cached, (pct) => emit(vmId, { status: "downloading", progress: pct, message: `Downloading ${spec.label} cloud image… ${pct}%` }), signal);
   } else {
     emit(vmId, { progress: 100, message: `Using cached ${spec.label} cloud image.` });
   }
@@ -224,7 +268,7 @@ async function buildCloudInitSeed(vmId: string, password: string, pubKey: string
 }
 
 // ── Windows: auto-download the official ISO + virtio drivers (hands-off) ───────────
-async function provisionWindows(vmId: string): Promise<void> {
+async function provisionWindows(vmId: string, signal?: AbortSignal): Promise<void> {
   const vm = getVm(vmId)!;
   const spec = getOsImage(vm.imageId);
   const label = spec?.label ?? "Windows";
@@ -243,12 +287,13 @@ async function provisionWindows(vmId: string): Promise<void> {
       emit(vmId, { status: "downloading", progress: 100, error: null, message: `Using cached ${label} ISO.` });
     } else {
       try {
-        await waitForNetQuiet(vmId, `the ${label} download`);
+        await waitForNetQuiet(vmId, `the ${label} download`, signal);
         emit(vmId, { status: "downloading", progress: 0, error: null, message: `Locating the latest ${label} ISO from Microsoft…`, imageUrl: null });
         const url = await resolveWindowsIso(spec.productEditionId);
-        await download(url, cachedIso, (pct) => emit(vmId, { status: "downloading", progress: pct, message: `Downloading ${label} from Microsoft… ${pct}%` }));
+        await download(url, cachedIso, (pct) => emit(vmId, { status: "downloading", progress: pct, message: `Downloading ${label} from Microsoft… ${pct}%` }), signal);
         isoPath = cachedIso;
       } catch (err) {
+        if (err instanceof CancelledError) throw err;
         const msg = err instanceof Error ? err.message : String(err);
         logger.warn({ err, vm: vmId }, "Windows auto-download failed; continuing without installer ISO");
         // Don't surface a hard failure: the disk and unattend CD are still built
@@ -269,11 +314,12 @@ async function provisionWindows(vmId: string): Promise<void> {
       virtioPath = virtioCached;
     } else {
       try {
-        await waitForNetQuiet(vmId, "the virtio drivers download");
+        await waitForNetQuiet(vmId, "the virtio drivers download", signal);
         emit(vmId, { status: "downloading", progress: 0, message: "Downloading virtio drivers…" });
-        await download(VIRTIO_WIN_URL, virtioCached, (pct) => emit(vmId, { status: "downloading", progress: pct, message: `Downloading virtio drivers… ${pct}%` }));
+        await download(VIRTIO_WIN_URL, virtioCached, (pct) => emit(vmId, { status: "downloading", progress: pct, message: `Downloading virtio drivers… ${pct}%` }), signal);
         virtioPath = virtioCached;
       } catch (err) {
+        if (err instanceof CancelledError) throw err;
         logger.warn({ err, vm: vmId }, "virtio-win download failed (continuing without it)");
       }
     }
@@ -351,22 +397,29 @@ async function provisionMacOs(vmId: string): Promise<void> {
   });
 }
 
-// ── Download with progress + integrity ────────────────────────────────────────────
-function download(url: string, dest: string, onProgress: (pct: number) => void): Promise<void> {
+// ── Download with progress + abort support ────────────────────────────────────────
+function download(url: string, dest: string, onProgress: (pct: number) => void, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new CancelledError()); return; }
     const tmp = dest + ".part";
     const client = url.startsWith("https") ? https : http;
     const file = fs.createWriteStream(tmp);
+
+    const cleanup = () => { try { file.close(); } catch { /**/ } fs.rmSync(tmp, { force: true }); };
+    const onAbort = () => { req.destroy(); cleanup(); reject(new CancelledError()); };
+    signal?.addEventListener("abort", onAbort, { once: true });
+
     const req = client.get(url, (res) => {
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        signal?.removeEventListener("abort", onAbort);
         file.close();
         fs.rmSync(tmp, { force: true });
-        download(res.headers.location, dest, onProgress).then(resolve, reject);
+        download(res.headers.location, dest, onProgress, signal).then(resolve, reject);
         return;
       }
       if (res.statusCode !== 200) {
-        file.close();
-        fs.rmSync(tmp, { force: true });
+        signal?.removeEventListener("abort", onAbort);
+        cleanup();
         reject(new Error(`download failed: HTTP ${res.statusCode}`));
         return;
       }
@@ -382,12 +435,19 @@ function download(url: string, dest: string, onProgress: (pct: number) => void):
       });
       res.pipe(file);
       file.on("finish", () => file.close(() => {
+        signal?.removeEventListener("abort", onAbort);
         fs.renameSync(tmp, dest);
         onProgress(100);
         resolve();
       }));
     });
-    req.on("error", (err) => { file.close(); fs.rmSync(tmp, { force: true }); reject(err); });
+    req.on("error", (err) => {
+      signal?.removeEventListener("abort", onAbort);
+      cleanup();
+      // req.destroy() raises an ECONNRESET — don't double-reject with it when
+      // we've already rejected with CancelledError from the abort listener.
+      if (!signal?.aborted) reject(err);
+    });
   });
 }
 
