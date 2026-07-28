@@ -50,6 +50,8 @@
 - [FoulFox update mirror](foulfox-update-mirror.md) — OTA: GitHub primary, published site mirror (public by design, sha256 = integrity); mirror routes dead until user republishes; never silently fall back to legacy git-sync.
 - [Appliance GitHub rate limit](appliance-github-rate-limit.md) — device has no token: budget ALL api.github.com calls under 60/hr, long caches + serve stale on 403; release downloads are exempt.
 - [Patcher persistence gate](foulfox-live-updater.md) — persistent = foulfox-persist label OR root FSTYPE not overlay/tmpfs (disk installs have no label); patcher lives in /usr/local/sbin so its own bugs need an ISO reinstall, not a bundle.
+- [Appliance env parity](appliance-env-parity.md) — envs the dev lifecycle injects (e.g. AUTH_ENABLED=false) don't exist on-device; mirror defaults in start.sh's packaged branch.
+- [workflow_dispatch sha race](workflow-dispatch-sha-race.md) — dispatch right after push can pin the previous sha; verify the run's head_sha, re-dispatch if stale.
 - [FoulFox app runtime](foulfox-app-runtime.md) — app UIs must live on a separate loopback origin (:8081, appliance) or opaque iframe (dev); never same-origin with shell API; runner start-dedupe + enforced health budget.
 - [FoulFox app-runtime security](foulfox-app-runtime-security.md) — app procs never get the shell token (/proc peer check), Origin:null dev-only, ports 27000-27199, e2e-dummy-app.sh guards it all.
 - [systemd EnvironmentFile beats Environment=](foulfox-desktop-apps.md) — see also start.sh: unit Environment=PORT can NEVER override foulfox.env; services must read their own var (ODYSSEUS_PORT).
