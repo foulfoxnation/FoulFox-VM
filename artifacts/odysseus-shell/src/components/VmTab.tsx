@@ -70,15 +70,33 @@ export function VmTab({
     p.status === "downloading" || p.status === "creating-disk" || p.status === "installing";
   const provFailed = p.status === "failed";
 
-  // Exit fullscreen on Escape
+  // Exit fullscreen on Escape or F11.
+  // IMPORTANT: use capture phase (third arg = true) so the event fires BEFORE
+  // the noVNC canvas absorbs it — without capture, noVNC swallows the key and
+  // the React handler never runs. stopPropagation() also prevents the key from
+  // being forwarded into the VM guest.
   useEffect(() => {
     if (!fullscreen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFullscreen(false);
+      if (e.key === "Escape" || e.key === "F11") {
+        e.stopPropagation();
+        setFullscreen(false);
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
   }, [fullscreen]);
+
+  // Sync React state when the browser exits real fullscreen via any means
+  // (e.g. the OS-level Escape on macOS, or Chromium's built-in F11 handler).
+  useEffect(() => {
+    const onFsChange = () => {
+      if (!document.fullscreenElement) setFullscreen(false);
+    };
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
 
   const act = (action: VmLifecycleAction) =>
     lifecycle.mutate(
@@ -175,7 +193,7 @@ export function VmTab({
               variant="ghost"
               className="text-zinc-300 hover:text-white"
               onClick={() => setFullscreen(false)}
-              title="Exit fullscreen (Esc)"
+              title="Exit fullscreen (Esc or F11)"
               data-testid={`button-exit-fullscreen-${vm.id}`}
             >
               <Minimize2 className="mr-1.5 h-3.5 w-3.5" /> Exit fullscreen

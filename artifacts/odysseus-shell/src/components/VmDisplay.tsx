@@ -12,6 +12,33 @@ export function VmDisplay({ vm }: { vm: VmSummary }) {
 
   const running = vm.state === "running";
 
+  // Block double-click on the VNC canvas from triggering browser requestFullscreen.
+  // noVNC itself doesn't call requestFullscreen, but Chromium kiosk + pointer-lock
+  // interactions can accidentally enter true fullscreen and trap the user with no
+  // visible way out. We also need to handle the case where document.fullscreenElement
+  // is set by some other code path.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const blockFs = (e: Event) => e.preventDefault();
+    el.addEventListener("dblclick", blockFs);
+    return () => el.removeEventListener("dblclick", blockFs);
+  }, []);
+
+  // Global capture-phase F11 handler — exits browser fullscreen even when noVNC
+  // has keyboard focus and the parent component's React-fullscreen state is false.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "F11" && document.fullscreenElement) {
+        e.preventDefault();
+        e.stopPropagation();
+        document.exitFullscreen().catch(() => {});
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, []);
+
   useEffect(() => {
     if (!running || !containerRef.current) return;
     setStatus("connecting");
