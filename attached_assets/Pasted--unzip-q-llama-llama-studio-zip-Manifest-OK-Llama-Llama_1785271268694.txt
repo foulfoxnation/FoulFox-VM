@@ -1,0 +1,29 @@
+$ unzip -q llama-llama-studio.zip
+
+Manifest OK: Llama Llama Studio v1.0.2 (id: llama-llama-studio, runtime: node)
+
+$ npm install --omit=dev --no-audit --no-fund --no-package-lock
+npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+
+added 45 packages in 4s
+
+$ node -e var fs=require("fs");var d="node_modules/@electric-sql/pglite";var pj=d+"/package.json";if(fs.existsSync(pj)){  var pkg=JSON.parse(fs.readFileSync(pj,"utf8"));  var mainCjs=fs.existsSync(d+"/dist/index.cjs");  var mainJs=fs.existsSync(d+"/dist/index.js");  if(mainCjs&&(!pkg.main||pkg.main==="index.js")){    pkg.main="dist/index.cjs";    fs.writeFileSync(pj,JSON.stringify(pkg,null,2));    console.log("pglite: patched main -> dist/index.cjs");  }  if(mainJs&&!fs.existsSync(d+"/index.js")){    var shim="export * from "./dist/index.js";
+export {default} from "./dist/index.js";
+";    fs.writeFileSync(d+"/index.js",shim);    console.log("pglite: created index.js ESM shim");  }}
+[eval]:1
+var fs=require("fs");var d="node_modules/@electric-sql/pglite";var pj=d+"/package.json";if(fs.existsSync(pj)){  var pkg=JSON.parse(fs.readFileSync(pj,"utf8"));  var mainCjs=fs.existsSync(d+"/dist/index.cjs");  var mainJs=fs.existsSync(d+"/dist/index.js");  if(mainCjs&&(!pkg.main||pkg.main==="index.js")){    pkg.main="dist/index.cjs";    fs.writeFileSync(pj,JSON.stringify(pkg,null,2));    console.log("pglite: patched main -> dist/index.cjs");  }  if(mainJs&&!fs.existsSync(d+"/index.js")){    var shim="export * from "./dist/index.js";
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          ^
+
+SyntaxError: Unexpected token '/'
+    at makeContextifyScript (node:internal/vm:185:14)
+    at node:internal/process/execution:107:22
+    at [eval]-wrapper:6:24
+    at runScript (node:internal/process/execution:101:62)
+    at evalScript (node:internal/process/execution:133:3)
+    at node:internal/main/eval_string:51:3
+
+Node.js v20.20.2
+
+ERROR: Command failed (exit 1): node -e var fs=require("fs");var d="node_modules/@electric-sql/pglite";var pj=d+"/package.json";if(fs.existsSync(pj)){  var pkg=JSON.parse(fs.readFileSync(pj,"utf8"));  var mainCjs=fs.existsSync(d+"/dist/index.cjs");  var mainJs=fs.existsSync(d+"/dist/index.js");  if(mainCjs&&(!pkg.main||pkg.main==="index.js")){    pkg.main="dist/index.cjs";    fs.writeFileSync(pj,JSON.stringify(pkg,null,2));    console.log("pglite: patched main -> dist/index.cjs");  }  if(mainJs&&!fs.existsSync(d+"/index.js")){    var shim="export * from "./dist/index.js";
+export {default} from "./dist/index.js";
+";    fs.writeFileSync(d+"/index.js",shim);    console.log("pglite: created index.js ESM shim");  }}
