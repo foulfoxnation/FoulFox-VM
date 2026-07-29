@@ -17,7 +17,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { logger } from "./logger";
-import { STAGING_DIR, APPS_DIR, getApp } from "./app-registry";
+import { STAGING_DIR, APPS_DIR, getApp, listApps, appRepoDir } from "./app-registry";
 import { startInstallFromZip, getJob } from "./app-installer";
 import { startApp } from "./app-runner";
 
@@ -164,9 +164,27 @@ async function seedOne(zipPath: string): Promise<void> {
   }
 }
 
+// One-time permission repair: zips extracted by old versions of the installer
+// (before the chmod -R a+rX step was added) may have left app repo files with
+// restrictive modes — causing express.static to return 403 for JS/CSS assets.
+// Run at every server start; chmod is fast and idempotent so the cost is tiny.
+function repairAppPermissions(): void {
+  for (const app of listApps()) {
+    const repo = appRepoDir(app.id);
+    try {
+      if (!fs.existsSync(repo)) continue;
+      // Fire-and-forget: chmod finishes before the app's health-check deadline.
+      execFile("chmod", ["-R", "a+rX", repo], { timeout: 10_000 }, () => {});
+    } catch {
+      /* best-effort — never crash boot */
+    }
+  }
+}
+
 // Fire-and-forget from server boot; installs run sequentially so two heavy
 // first-boot installs (npm + pip/torch) don't compete for CPU/network.
 export async function seedDefaultApps(): Promise<void> {
+  repairAppPermissions();
   const dir = process.env["FOULFOX_DEFAULT_APPS_DIR"] || DEFAULT_DIR;
   // Bundle-shipped copies (vendored into the app tree by the app-bundle CI)
   // take priority over the read-only squashfs copies from the ISO: devices

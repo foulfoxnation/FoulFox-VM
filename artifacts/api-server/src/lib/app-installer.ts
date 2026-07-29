@@ -362,6 +362,15 @@ async function runInstall(
         log,
         UNZIP_TIMEOUT_MS,
       );
+      // Fix permissions: zips from macOS/Windows often store files with
+      // restrictive modes (e.g. assets/ dir as 0700) that prevent the web
+      // server from reading them — express.static returns 403 on EACCES.
+      // Make every file world-readable and every directory world-traversable.
+      try {
+        await runStep(["chmod", "-R", "a+rX", staging], STAGING_DIR, cloneEnv(), log, 30_000);
+      } catch {
+        /* best-effort — non-fatal */
+      }
       try {
         fs.rmSync(source.zipPath, { force: true });
       } catch {
