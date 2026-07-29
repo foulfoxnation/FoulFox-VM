@@ -5,6 +5,7 @@
 - [Vite keep-awake](vite-keep-awake.md) — Replit Vite preview white-pages on long/idle sessions (HMR WS dies under throttling); fix = worker heartbeat + wake lock, no reload.
 - [FoulFox OS ISO build](foulfox-os-iso-build.md) — pin pnpm in CI (`@latest` drifts → frozen-lockfile fails); @workspace libs export src (dist = `.d.ts` only); verify heavy builds on CI not this repl; running failure-mode log lives at `os/docs/failed_builds.md` (consult/append before debugging a build break).
 - [Odysseus sub-agents & self-repair](odysseus-subagents.md) — spawn_subagents/self_repair: depth-1 recursion lock, inherit parent agent_ctx, self-repair double-gated + never self-kills uvicorn.
+- [Odysseus Multi-Task Memory (MTM)](odysseus-mtm.md) — process-global coordination: task registry + shared KV + SSE bus; discover/read_mtm tools always-available; TaskScheduler now Semaphore(4).
 - [Odysseus service tests](odysseus-service-tests.md) — run pytest from artifacts/odysseus-service with DATABASE_URL=sqlite:///:memory: (workspace Postgres has no psycopg2); needs pytest-asyncio.
 - [Static-testing odysseus tools](odysseus-static-tool-tests.md) — stub sys.modules['core'] + monkeypatch VM bridges to exercise do_* fns without booting the service (no KVM).
 - [api-server typecheck](api-server-typecheck.md) — cold `tsc -p` times out building project refs; build `@workspace/db`+`@workspace/api-zod` with `tsc -b` first.
