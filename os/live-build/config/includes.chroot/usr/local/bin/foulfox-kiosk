@@ -57,6 +57,19 @@ while ! curl -sf -o /dev/null "$url"; do
 done
 [ -n "$splash_pid" ] && kill "$splash_pid" 2>/dev/null
 
+# ── PulseAudio (required for Voice Forge mic + speaker access) ───────────────
+# Start PulseAudio as a user-mode daemon for the foulfox kiosk session.
+# Chromium uses PulseAudio for getUserMedia (microphone) and audio output
+# (speaker). Without it, all MediaDevices calls return empty device lists and
+# TTS playback is silent.
+# --exit-idle-time=-1: never auto-exit on idle — this is an always-on appliance.
+# --log-target=syslog: keeps the kiosk console clean; use journalctl to debug.
+# The `|| true` prevents the kiosk from aborting if pulseaudio is already up.
+pulseaudio --start --exit-idle-time=-1 --log-target=syslog 2>/dev/null || true
+
+# Give PulseAudio a moment to detect ALSA sound cards before Chromium opens.
+sleep 1
+
 # Hands-free voice apps: no gesture requirement for audio playback. The mic
 # grant itself comes from the managed policy in
 # /etc/chromium/policies/managed/foulfox-media.json (AudioCaptureAllowedUrls),

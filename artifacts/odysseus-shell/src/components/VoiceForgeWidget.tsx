@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Mic, MicOff, Volume2, Loader2, X, MessageSquare, Radio } from "lucide-react";
+import { Mic, MicOff, Volume2, Loader2, X, Radio, Settings, RefreshCw } from "lucide-react";
 import { authedFetch } from "@/lib/shell-token";
 import { cn } from "@/lib/utils";
+import { useAudioDevices } from "@/hooks/use-audio-devices";
 
 type VoiceState = "idle" | "recording" | "processing" | "speaking" | "error";
 
@@ -29,12 +30,26 @@ export function VoiceForgeWidget({ onAgentResponse }: VoiceForgeWidgetProps) {
   const [agentText, setAgentText] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [panelOpen, setPanelOpen] = useState(false);
+  const [deviceSectionOpen, setDeviceSectionOpen] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const autoCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  const {
+    micDevices,
+    speakerDevices,
+    selectedMic,
+    setSelectedMic,
+    selectedSpeaker,
+    setSelectedSpeaker,
+    labelsAvailable,
+    requestPermission,
+    refresh: refreshDevices,
+    outputSelectionSupported,
+  } = useAudioDevices();
 
   const clearAutoClose = () => {
     if (autoCloseRef.current) {
@@ -67,6 +82,7 @@ export function VoiceForgeWidget({ onAgentResponse }: VoiceForgeWidgetProps) {
     }
     clearAutoClose();
     setPanelOpen(false);
+    setDeviceSectionOpen(false);
     setVoiceState("idle");
     setUserText("");
     setAgentText("");
@@ -114,6 +130,16 @@ export function VoiceForgeWidget({ onAgentResponse }: VoiceForgeWidgetProps) {
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audioRef.current = audio;
+
+      // Route output to the user-selected speaker device if supported.
+      if (outputSelectionSupported && selectedSpeaker && selectedSpeaker !== "default") {
+        try {
+          await (audio as HTMLAudioElement & { setSinkId(id: string): Promise<void> }).setSinkId(selectedSpeaker);
+        } catch {
+          // setSinkId failed (e.g. device unplugged) — fall through to default output.
+        }
+      }
+
       audio.onended = () => {
         URL.revokeObjectURL(url);
         audioRef.current = null;
@@ -128,7 +154,7 @@ export function VoiceForgeWidget({ onAgentResponse }: VoiceForgeWidgetProps) {
     } catch {
       fallbackTTS(text);
     }
-  }, [fallbackTTS, scheduleAutoClose]);
+  }, [fallbackTTS, scheduleAutoClose, selectedSpeaker, outputSelectionSupported]);
 
   const sendToAgent = useCallback(async (text: string) => {
     if (!text.trim()) {
@@ -165,9 +191,17 @@ export function VoiceForgeWidget({ onAgentResponse }: VoiceForgeWidgetProps) {
   }, [playTTS, onAgentResponse, scheduleAutoClose]);
 
   const startBrowserSTT = useCallback(() => {
-    const SR =
-      (window as { SpeechRecognition?: typeof SpeechRecognition }).SpeechRecognition ??
-      (window as { webkitSpeechRecognition?: typeof SpeechRecognition }).webkitSpeechRecognition;
+    type SpeechRecognitionCtor = new () => {
+      continuous: boolean;
+      interimResults: boolean;
+      lang: string;
+      onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+      onerror: (() => void) | null;
+      start(): void;
+    };
+    const SR: SpeechRecognitionCtor | undefined =
+      (window as { SpeechRecognition?: SpeechRecognitionCtor }).SpeechRecognition ??
+      (window as { webkitSpeechRecognition?: SpeechRecognitionCtor }).webkitSpeechRecognition;
     if (!SR) {
       setVoiceState("error");
       setErrorMsg("Microphone not available. Check browser permissions.");
@@ -226,7 +260,20 @@ export function VoiceForgeWidget({ onAgentResponse }: VoiceForgeWidgetProps) {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      // Use the selected mic device if one is set; fall back to browser default.
+      const audioConstraint: MediaTrackConstraints =
+        selectedMic && selectedMic !== "default"
+          ? { deviceId: { exact: selectedMic } }
+          : true as unknown as MediaTrackConstraints;
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraint,
+        video: false,
+      });
+
+      // Enumerate devices now that permission is granted (labels become available).
+      void refreshDevices();
+
       const mimeType = getSupportedMimeType();
       const mr = new MediaRecorder(stream, mimeType ? { mimeType } : {});
       chunksRef.current = [];
@@ -246,7 +293,7 @@ export function VoiceForgeWidget({ onAgentResponse }: VoiceForgeWidgetProps) {
     } catch {
       startBrowserSTT();
     }
-  }, [transcribeBlob, startBrowserSTT, stopAllAudio]);
+  }, [transcribeBlob, startBrowserSTT, stopAllAudio, selectedMic, refreshDevices]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current?.state === "recording") {
@@ -343,14 +390,85 @@ export function VoiceForgeWidget({ onAgentResponse }: VoiceForgeWidgetProps) {
                 </span>
               )}
             </div>
-            <button
-              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-              onClick={handleClose}
-              data-testid="voice-forge-close"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                className={cn(
+                  "rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors",
+                  deviceSectionOpen && "bg-muted text-foreground",
+                )}
+                onClick={() => setDeviceSectionOpen((v) => !v)}
+                title="Audio device settings"
+                data-testid="voice-forge-device-settings"
+              >
+                <Settings className="h-3.5 w-3.5" />
+              </button>
+              <button
+                className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={handleClose}
+                data-testid="voice-forge-close"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
+
+          {deviceSectionOpen && (
+            <div className="border-b bg-muted/30 px-3 py-2.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground">Audio Devices</p>
+                <button
+                  className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+                  onClick={() => void (labelsAvailable ? refreshDevices() : requestPermission())}
+                  title={labelsAvailable ? "Refresh device list" : "Grant mic permission to see device names"}
+                >
+                  <RefreshCw className="h-2.5 w-2.5" />
+                  {labelsAvailable ? "Refresh" : "Grant access"}
+                </button>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground flex items-center gap-1">
+                  <Mic className="h-2.5 w-2.5" /> Microphone
+                </label>
+                <select
+                  value={selectedMic}
+                  onChange={(e) => setSelectedMic(e.target.value)}
+                  className="w-full rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                  data-testid="voice-forge-mic-select"
+                >
+                  <option value="default">System default</option>
+                  {micDevices.filter((d) => d.deviceId !== "default").map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {outputSelectionSupported && (
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground flex items-center gap-1">
+                    <Volume2 className="h-2.5 w-2.5" /> Speaker / Output
+                  </label>
+                  <select
+                    value={selectedSpeaker}
+                    onChange={(e) => setSelectedSpeaker(e.target.value)}
+                    className="w-full rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                    data-testid="voice-forge-speaker-select"
+                  >
+                    <option value="default">System default</option>
+                    {speakerDevices.filter((d) => d.deviceId !== "default").map((d) => (
+                      <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {!labelsAvailable && (
+                <p className="text-[10px] text-muted-foreground">
+                  Device names are hidden until mic permission is granted. Click "Grant access" or tap the mic to speak.
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2 p-3">
             {!userText && !errorMsg && (

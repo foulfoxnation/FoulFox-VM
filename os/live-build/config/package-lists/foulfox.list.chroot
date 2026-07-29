@@ -41,6 +41,17 @@ systemd-resolved
 # BT controller firmware rides in the firmware-* bundles above (incl. brcm80211).
 bluez
 
+# ── Audio (PulseAudio + ALSA — mic/speaker support for Voice Forge) ──────────
+# pulseaudio: user-mode audio daemon that Chromium talks to for mic input and
+# speaker output. Required for Voice Forge (getUserMedia / setSinkId) to work.
+# pulseaudio-utils: pactl/paplay CLI — used by the kiosk session to verify the
+# daemon is up and to list/set the default sink/source from shell scripts.
+# alsa-utils: low-level ALSA tools (aplay/arecord/amixer) that detect sound
+# cards and load firmware; PulseAudio sits on top of ALSA.
+pulseaudio
+pulseaudio-utils
+alsa-utils
+
 # ── Storage / removable media (USB frontload + NTFS/exFAT/FAT drives) ────────
 udisks2
 ntfs-3g
