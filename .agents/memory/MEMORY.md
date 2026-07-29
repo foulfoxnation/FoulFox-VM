@@ -56,3 +56,4 @@
 - [FoulFox app-runtime security](foulfox-app-runtime-security.md) — app procs never get the shell token (/proc peer check), Origin:null dev-only, ports 27000-27199, e2e-dummy-app.sh guards it all.
 - [systemd EnvironmentFile beats Environment=](foulfox-desktop-apps.md) — see also start.sh: unit Environment=PORT can NEVER override foulfox.env; services must read their own var (ODYSSEUS_PORT).
 - [FoulFox desktop apps](foulfox-desktop-apps.md) — launch path for Firefox/Chromium/Discord over the kiosk; chromium needs --disable-gpu-compositing everywhere; rc.xml rules must ban fullscreen traps.
+- [App UI proxy Origin 403](app-ui-origin-403.md) — Vite crossorigin module scripts send shell's Origin; app AUTH_MODE=local guard rejects it → 403 on all assets; fix = delete fwdHeaders["origin"] in app-ui.ts.
