@@ -1,0 +1,55 @@
+[foulfox] starting: node fox-entry.mjs (port 27106)
+{"level":30,"time":1785275653616,"pid":67353,"hostname":"foulfox","msg":"Database migrations applied"}
+{"level":30,"time":1785275653621,"pid":67353,"hostname":"foulfox","port":27106,"msg":"FoulFox app ready on 127.0.0.1"}
+[foulfox] healthy on 127.0.0.1:27106
+{"level":30,"time":1785275655379,"pid":67353,"hostname":"foulfox","req":{"id":1,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":10,"msg":"request completed"}
+{"level":30,"time":1785275657365,"pid":67353,"hostname":"foulfox","req":{"id":2,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":3,"msg":"request completed"}
+{"level":30,"time":1785275658314,"pid":67353,"hostname":"foulfox","req":{"id":3,"method":"GET","url":"/"},"res":{"statusCode":200},"responseTime":10,"msg":"request completed"}
+{"level":30,"time":1785275658334,"pid":67353,"hostname":"foulfox","req":{"id":4,"method":"GET","url":"/assets/index-DimJ7dtl.js"},"res":{"statusCode":403},"responseTime":2,"msg":"request completed"}
+{"level":30,"time":1785275658336,"pid":67353,"hostname":"foulfox","req":{"id":5,"method":"GET","url":"/assets/index-D0RiYOF4.css"},"res":{"statusCode":403},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275659364,"pid":67353,"hostname":"foulfox","req":{"id":6,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":2,"msg":"request completed"}
+{"level":30,"time":1785275661364,"pid":67353,"hostname":"foulfox","req":{"id":7,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":2,"msg":"request completed"}
+{"level":30,"time":1785275663364,"pid":67353,"hostname":"foulfox","req":{"id":8,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":2,"msg":"request completed"}
+{"level":30,"time":1785275665365,"pid":67353,"hostname":"foulfox","req":{"id":9,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":2,"msg":"request completed"}
+{"level":30,"time":1785275667365,"pid":67353,"hostname":"foulfox","req":{"id":10,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":2,"msg":"request completed"}
+{"level":30,"time":1785275669365,"pid":67353,"hostname":"foulfox","req":{"id":11,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":2,"msg":"request completed"}
+{"level":30,"time":1785275671364,"pid":67353,"hostname":"foulfox","req":{"id":12,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":2,"msg":"request completed"}
+{"level":30,"time":1785275673365,"pid":67353,"hostname":"foulfox","req":{"id":13,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":2,"msg":"request completed"}
+{"level":30,"time":1785275675364,"pid":67353,"hostname":"foulfox","req":{"id":14,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275677363,"pid":67353,"hostname":"foulfox","req":{"id":15,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275679364,"pid":67353,"hostname":"foulfox","req":{"id":16,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":2,"msg":"request completed"}
+{"level":30,"time":1785275681364,"pid":67353,"hostname":"foulfox","req":{"id":17,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275683364,"pid":67353,"hostname":"foulfox","req":{"id":18,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":2,"msg":"request completed"}
+{"level":30,"time":1785275685364,"pid":67353,"hostname":"foulfox","req":{"id":19,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275687364,"pid":67353,"hostname":"foulfox","req":{"id":20,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275689364,"pid":67353,"hostname":"foulfox","req":{"id":21,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":2,"msg":"request completed"}
+{"level":30,"time":1785275691363,"pid":67353,"hostname":"foulfox","req":{"id":22,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275693364,"pid":67353,"hostname":"foulfox","req":{"id":23,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":2,"msg":"request completed"}
+{"level":30,"time":1785275695364,"pid":67353,"hostname":"foulfox","req":{"id":24,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":2,"msg":"request completed"}
+{"level":30,"time":1785275697364,"pid":67353,"hostname":"foulfox","req":{"id":25,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":2,"msg":"request completed"}
+{"level":30,"time":1785275699362,"pid":67353,"hostname":"foulfox","req":{"id":26,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":0,"msg":"request completed"}
+{"level":30,"time":1785275701363,"pid":67353,"hostname":"foulfox","req":{"id":27,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275703364,"pid":67353,"hostname":"foulfox","req":{"id":28,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275705363,"pid":67353,"hostname":"foulfox","req":{"id":29,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275707363,"pid":67353,"hostname":"foulfox","req":{"id":30,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275709363,"pid":67353,"hostname":"foulfox","req":{"id":31,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275711363,"pid":67353,"hostname":"foulfox","req":{"id":32,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275713363,"pid":67353,"hostname":"foulfox","req":{"id":33,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275715363,"pid":67353,"hostname":"foulfox","req":{"id":34,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275717363,"pid":67353,"hostname":"foulfox","req":{"id":35,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275719363,"pid":67353,"hostname":"foulfox","req":{"id":36,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275721363,"pid":67353,"hostname":"foulfox","req":{"id":37,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275723363,"pid":67353,"hostname":"foulfox","req":{"id":38,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275725363,"pid":67353,"hostname":"foulfox","req":{"id":39,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275727363,"pid":67353,"hostname":"foulfox","req":{"id":40,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275729363,"pid":67353,"hostname":"foulfox","req":{"id":41,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275731363,"pid":67353,"hostname":"foulfox","req":{"id":42,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275733363,"pid":67353,"hostname":"foulfox","req":{"id":43,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275735363,"pid":67353,"hostname":"foulfox","req":{"id":44,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275737363,"pid":67353,"hostname":"foulfox","req":{"id":45,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275739363,"pid":67353,"hostname":"foulfox","req":{"id":46,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275741363,"pid":67353,"hostname":"foulfox","req":{"id":47,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275743364,"pid":67353,"hostname":"foulfox","req":{"id":48,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275745364,"pid":67353,"hostname":"foulfox","req":{"id":49,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275747364,"pid":67353,"hostname":"foulfox","req":{"id":50,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}
+{"level":30,"time":1785275749363,"pid":67353,"hostname":"foulfox","req":{"id":51,"method":"GET","url":"/healthz"},"res":{"statusCode":200},"responseTime":1,"msg":"request completed"}

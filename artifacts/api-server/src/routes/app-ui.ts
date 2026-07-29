@@ -212,6 +212,13 @@ router.all("/:id/ui{/*path}", (req: Request, res: Response) => {
   // losing conditional GETs there is harmless.)
   delete fwdHeaders["if-none-match"];
   delete fwdHeaders["if-modified-since"];
+  // Strip the browser's Origin header before forwarding to the app process.
+  // The browser sends the shell's origin (e.g. http://localhost:8080) when
+  // loading <script type="module" crossorigin> assets; app servers running in
+  // AUTH_MODE=local reject any origin not on their own loopback port (→ 403).
+  // CSRF protection for writes is already enforced above by originAllowed(),
+  // so removing Origin from the upstream request is safe.
+  delete fwdHeaders["origin"];
 
   const proxyReq = http.request(
     { hostname: "127.0.0.1", port, path: targetPath, method: req.method, headers: fwdHeaders },
