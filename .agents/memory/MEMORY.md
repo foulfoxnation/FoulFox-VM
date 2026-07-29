@@ -7,6 +7,7 @@
 - [Odysseus sub-agents & self-repair](odysseus-subagents.md) — spawn_subagents/self_repair: depth-1 recursion lock, inherit parent agent_ctx, self-repair double-gated + never self-kills uvicorn.
 - [Odysseus Multi-Task Memory (MTM)](odysseus-mtm.md) — process-global coordination: task registry + shared KV + SSE bus; discover/read_mtm tools always-available; TaskScheduler now Semaphore(4).
 - [VoiceForge system-wide widget](voiceforge-widget.md) — VoiceForgeWidget.tsx in shell header; MediaRecorder→STT→chat→TTS loop; dual fallback chain; ChatPaneHandle.refresh() reloads iframe after voice exchange.
+- [FoulFox audio stack](foulfox-audio-stack.md) — OS ISO was missing ALL audio packages; add pulseaudio+pulseaudio-utils+alsa-utils to foulfox.list.chroot; start PulseAudio in foulfox-kiosk before Chromium (--exit-idle-time=-1).
 - [Odysseus service tests](odysseus-service-tests.md) — run pytest from artifacts/odysseus-service with DATABASE_URL=sqlite:///:memory: (workspace Postgres has no psycopg2); needs pytest-asyncio.
 - [Static-testing odysseus tools](odysseus-static-tool-tests.md) — stub sys.modules['core'] + monkeypatch VM bridges to exercise do_* fns without booting the service (no KVM).
 - [api-server typecheck](api-server-typecheck.md) — cold `tsc -p` times out building project refs; build `@workspace/db`+`@workspace/api-zod` with `tsc -b` first.
