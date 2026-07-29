@@ -420,6 +420,9 @@ router.post("/vm/:id/clone", async (req: Request, res: Response) => {
 // POST /vm/:id/stop
 router.post("/vm/:id/stop", (req: Request, res: Response) => {
   const vm = requireVm(req, res); if (!vm) return;
+  // Cancel any active download/provisioning first so the Stop button always
+  // works even when the VM is stopped mid-download (QEMU never launched yet).
+  cancelProvisioning(vm.id);
   const r = stopVm(vm);
   res.json({ success: r.ok, message: r.message, state: r.state });
 });
@@ -427,6 +430,7 @@ router.post("/vm/:id/stop", (req: Request, res: Response) => {
 // POST /vm/:id/restart
 router.post("/vm/:id/restart", (req: Request, res: Response) => {
   const vm = requireVm(req, res); if (!vm) return;
+  cancelProvisioning(vm.id);
   stopVm(vm);
   setTimeout(() => {
     const fresh = getVm(vm.id);
@@ -622,6 +626,7 @@ router.post("/vm/start", (_req: Request, res: Response) => {
 router.post("/vm/stop", (_req: Request, res: Response) => {
   const vm = getVm(DEFAULT_VM_ID);
   if (!vm) { res.json(StopVmResponse.parse({ success: false, message: "Default VM not initialized", state: "error" })); return; }
+  cancelProvisioning(vm.id);
   const r = stopVm(vm);
   res.json(StopVmResponse.parse({ success: r.ok, message: r.message, state: r.state }));
 });
@@ -629,6 +634,7 @@ router.post("/vm/stop", (_req: Request, res: Response) => {
 router.post("/vm/restart", (_req: Request, res: Response) => {
   const vm = getVm(DEFAULT_VM_ID);
   if (!vm) { res.json(RestartVmResponse.parse({ success: false, message: "Default VM not initialized", state: "error" })); return; }
+  cancelProvisioning(vm.id);
   stopVm(vm);
   res.json(RestartVmResponse.parse({ success: true, message: "VM stopped. Restarting...", state: "stopped" }));
   setTimeout(() => {

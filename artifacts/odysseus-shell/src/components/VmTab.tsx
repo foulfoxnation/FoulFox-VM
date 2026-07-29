@@ -228,11 +228,20 @@ export function VmTab({
           <Button
             size="sm"
             variant="outline"
-            disabled={isStopped || isTransitioning || lifecycle.isPending}
-            onClick={() => act("stop")}
+            disabled={(isStopped && !provBusy) || isTransitioning || lifecycle.isPending}
+            onClick={() =>
+              provBusy
+                ? cancel.mutate(vm.id, {
+                    onSuccess: () =>
+                      toast({ title: "Download cancelled", description: "Click Start to try again." }),
+                    onError: (e: Error) =>
+                      toast({ title: "Cancel failed", description: e.message, variant: "destructive" }),
+                  })
+                : act("stop")
+            }
             data-testid={`button-stop-${vm.id}`}
           >
-            <Square className="mr-1.5 h-3.5 w-3.5" /> Stop
+            <Square className="mr-1.5 h-3.5 w-3.5" /> {provBusy ? "Stop Download" : "Stop"}
           </Button>
           <Button
             size="sm"
