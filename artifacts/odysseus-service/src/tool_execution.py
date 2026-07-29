@@ -927,6 +927,16 @@ async def _execute_tool_block_impl(
     elif tool == "vault_unlock":
         desc = "vault_unlock"
         result = await do_vault_unlock(content, owner=owner)
+    elif tool == "discover":
+        from src.tool_implementations import do_discover
+        desc = "discover"
+        result = await do_discover(
+            content, owner=owner, agent_ctx=agent_ctx, progress_cb=progress_cb,
+        )
+    elif tool == "read_mtm":
+        from src.tool_implementations import do_read_mtm
+        desc = "read_mtm"
+        result = await do_read_mtm(content, owner=owner, agent_ctx=agent_ctx)
     elif tool == "spawn_subagents":
         # Fan out read-only explorer / worker sub-agents from the current turn.
         # subagents.py inherits endpoint/model from agent_ctx and enforces the

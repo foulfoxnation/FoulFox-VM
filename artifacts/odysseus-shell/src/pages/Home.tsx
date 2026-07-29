@@ -16,6 +16,7 @@ import { BrowserTab } from "@/components/BrowserTab";
 import { WindowTray } from "@/components/WindowTray";
 import { DevicesTab } from "@/components/DevicesTab";
 import { AppsTab } from "@/components/AppsTab";
+import { AgentTasksPanel } from "@/components/AgentTasksPanel";
 import foxLogo from "@assets/FoxQuest_Logo_1781378611335.png";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { useShellToken } from "@/hooks/use-shell-token";
@@ -34,6 +35,7 @@ import {
   PanelLeft,
   Mic,
   Sparkles,
+  Activity,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -231,6 +233,9 @@ export default function Home() {
           <Body show={activeTab === "apps"}>
             <AppsTab focusAppId={activeTab === "apps" ? focusAppId : null} />
           </Body>
+          <Body show={activeTab === "agents"}>
+            <AgentTasksPanel />
+          </Body>
           {vms.map((vm) => (
             <Body key={vm.id} show={activeTab === `vm:${vm.id}`}>
               <VmTab vm={vm} isDefault={vm.id === DEFAULT_VM_ID} onDeleted={() => setActiveTab("odysseus")} />
@@ -277,6 +282,14 @@ export default function Home() {
           label="Apps"
           onClick={() => setActiveTab("apps")}
           testId="tab-apps"
+        />
+        <TaskbarButton
+          id="agents"
+          active={activeTab === "agents"}
+          icon={<Activity className="h-4 w-4" />}
+          label="Agents"
+          onClick={() => setActiveTab("agents")}
+          testId="tab-agents"
         />
 
         {/* VM buttons — one per running/stopped VM */}

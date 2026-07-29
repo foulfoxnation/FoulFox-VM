@@ -711,6 +711,9 @@ app.include_router(setup_font_routes())
 from routes.foulfox_app_routes import setup_foulfox_app_routes
 app.include_router(setup_foulfox_app_routes())
 
+from routes.mtm_routes import router as mtm_router
+app.include_router(mtm_router)
+
 
 # MCP (Model Context Protocol)
 from src.mcp_manager import McpManager
@@ -960,6 +963,13 @@ async def _startup_event():
         upload_cleanup_task = asyncio.create_task(upload_cleanup_func())
     # Always-on monitor that auto-continues the agent when a background bash
     # job (#!bg) finishes — re-invokes the turn with the job output.
+    # Load Multi-Task Memory (MTM) state from disk. Non-blocking; any running
+    # tasks from a previous session are marked error so the UI shows them correctly.
+    try:
+        from src.mtm import mtm as _mtm
+        await _mtm.load()
+    except Exception as _e:
+        logger.warning("MTM load failed (non-critical): %s", _e)
     try:
         from src.bg_monitor import start_bg_monitor
         _startup_tasks.append(start_bg_monitor())

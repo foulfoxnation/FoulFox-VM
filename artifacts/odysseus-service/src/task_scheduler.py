@@ -250,12 +250,12 @@ class TaskScheduler:
         self._executing_lock = asyncio.Lock()
         self._pending_notifications = []  # completed task notifications
         self._task_defer_counts = {}
-        # Strict serial execution — exactly one task runs at a time. Anything
-        # else (manual trigger, scheduled dispatch, task chain) waits behind
-        # the semaphore as "queued" and starts when the current run finishes.
-        # This is a hard guarantee, not configurable.
-        self._run_semaphore = asyncio.Semaphore(1)
-        self._concurrency_cap = 1
+        # Parallel execution — up to 4 background tasks can run concurrently.
+        # Each task gets its own session and LLM context, so they don't
+        # interfere. The _executing set + _executing_lock prevent the same
+        # task from being double-dispatched regardless of concurrency.
+        self._run_semaphore = asyncio.Semaphore(4)
+        self._concurrency_cap = 4
         self._task_handles = {}
 
     def _set_run_progress(self, run_id: str, message: str):

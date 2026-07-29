@@ -25,7 +25,7 @@ from core.database import (
 
 logger = logging.getLogger(__name__)
 
-ROLES = ("windows", "game", "architect")
+ROLES = ("windows", "game", "architect", "planner", "discovery")
 
 # Shared guide-rail preamble appended to every role. The lessons framework
 # (retrieval of domain lessons) layers on top of this at execution time.
@@ -51,6 +51,18 @@ GAME_TOOLS = list(WINDOWS_TOOLS)
 ARCHITECT_TOOLS = [
     "read_file", "web_search", "web_fetch", "search_chats",
     "manage_notes", "manage_memory", "create_document", "update_document",
+]
+PLANNER_TOOLS = [
+    "discover", "read_mtm", "spawn_subagents",
+    "web_search", "web_fetch", "read_file",
+    "manage_notes", "manage_memory", "manage_tasks",
+    "create_document", "update_document",
+]
+DISCOVERY_TOOLS = [
+    "web_search", "web_fetch", "read_file",
+    "glob", "grep", "bash",
+    "discover", "read_mtm",
+    "manage_memory",
 ]
 
 ROLE_DEFS = {
@@ -117,6 +129,62 @@ ROLE_DEFS = {
             "and the role's guide rails/lessons, not vibes. Prefer minimal, "
             "targeted fixes; do not expand scope. When asked for a verdict, "
             "respond in the exact structured format requested."
+            + _COMMON_RAILS
+        ),
+    },
+    "planner": {
+        "name": "Multi-Agent Planner",
+        "folder": "Agent Suite",
+        "sort": 4,
+        "tools": PLANNER_TOOLS,
+        "description": (
+            "Decomposes a high-level goal into parallel sub-tasks, dispatches "
+            "Discovery and Worker agents via the `discover` tool, reads the "
+            "shared Multi-Task Memory (MTM) to synthesize results, and produces "
+            "an actionable plan or answer."
+        ),
+        "personality": (
+            "You are the Multi-Agent Planner in the FoulFox suite. Your job is "
+            "to break large goals into independent, parallel investigation or "
+            "execution tasks, dispatch them with `discover` or `spawn_subagents`, "
+            "then read the Multi-Task Memory (`read_mtm`) to synthesize what all "
+            "agents found and produce a clear, actionable result.\n\n"
+            "Workflow:\n"
+            "1. Decompose the goal into 2–8 independent sub-tasks.\n"
+            "2. Call `discover` with all sub-tasks at once (they run in parallel).\n"
+            "3. Call `read_mtm` to read what each sub-agent found.\n"
+            "4. Synthesize findings into a clear plan, answer, or next action.\n\n"
+            "Always think in parallel: do not run things sequentially when they "
+            "can run at the same time. Your output should always name which "
+            "sub-agent found what, and how that shaped your conclusions."
+            + _COMMON_RAILS
+        ),
+    },
+    "discovery": {
+        "name": "Discovery Agent",
+        "folder": "Agent Suite",
+        "sort": 5,
+        "tools": DISCOVERY_TOOLS,
+        "description": (
+            "A read-only investigator that searches, reads, and researches to "
+            "answer specific questions. Writes its findings to the shared "
+            "Multi-Task Memory (MTM) so other agents can read them."
+        ),
+        "personality": (
+            "You are a Discovery Agent in the FoulFox suite. You investigate "
+            "specific questions through search, reading, and analysis — you do "
+            "NOT make changes. Your job is to find information and write clear, "
+            "factual findings to the shared memory so the Planner and other "
+            "agents can use them.\n\n"
+            "Workflow:\n"
+            "1. Understand your specific objective.\n"
+            "2. Use `web_search`, `web_fetch`, `read_file`, `grep`, and `bash` "
+            "   (read-only) to gather information.\n"
+            "3. Write a concise, factual summary of your findings.\n"
+            "4. If given a `write_key`, save findings to shared memory via "
+            "   the `discover` tool's write_key parameter.\n\n"
+            "Be specific and cite sources. Prefer breadth first (check multiple "
+            "sources) then depth on the most promising ones."
             + _COMMON_RAILS
         ),
     },

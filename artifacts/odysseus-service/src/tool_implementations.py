@@ -5027,3 +5027,171 @@ async def do_vault_unlock(content: str, owner: Optional[str] = None) -> Dict:
         pass
 
     return {"output": "Vault unlocked. Session saved.", "exit_code": 0}
+
+
+# ---------------------------------------------------------------------------
+# discover — parallel MTM-tracked discovery sub-agents
+# ---------------------------------------------------------------------------
+
+async def do_discover(content, *, owner=None, agent_ctx=None, progress_cb=None, **kwargs):
+    """Fan out named read-only Discovery sub-agents, tracked in the MTM."""
+    from src.mtm import mtm
+    from src.subagents import fan_out
+
+    try:
+        args = _parse_tool_args(content)
+    except ValueError as e:
+        return {"error": f"discover: bad args: {e}", "exit_code": 1}
+
+    goal = str(args.get("goal") or args.get("objective") or "Investigation").strip()[:200]
+    tasks_raw = args.get("tasks") or args.get("subtasks") or []
+    write_key = str(args.get("write_key") or "").strip() or None
+
+    if not tasks_raw:
+        tasks_raw = [{"title": goal, "objective": goal}]
+
+    # Create parent MTM task
+    parent = await mtm.create_task(
+        title=goal, kind="discover",
+        agent_role=str((agent_ctx or {}).get("parent_role", "shared")),
+    )
+    await mtm.update_task(parent.id, status="running")
+
+    # Build sub-task list + per-task MTM children
+    subtasks = []
+    mtm_children = []
+    for item in tasks_raw[:12]:
+        if isinstance(item, str):
+            item = {"title": item, "objective": item}
+        title = str(item.get("title") or item.get("objective") or "Discovery")[:200]
+        objective = str(item.get("objective") or item.get("task") or title)
+        child = await mtm.create_task(
+            title=title, kind="discover",
+            agent_role="explorer", parent_id=parent.id,
+        )
+        mtm_children.append(child)
+        subtasks.append({
+            "kind": "explorer",
+            "objective": objective,
+            "role": item.get("role"),
+        })
+
+    # Progress callback that mirrors events into MTM task state
+    idx_map = {i: c for i, c in enumerate(mtm_children)}
+
+    async def _mtm_progress(event):
+        if progress_cb:
+            try:
+                await progress_cb(event)
+            except Exception:
+                pass
+        idx = event.get("index")
+        child = idx_map.get(idx)
+        if not child:
+            return
+        ev = event.get("event")
+        if ev == "start":
+            await mtm.update_task(child.id, status="running")
+        elif ev == "tool":
+            await mtm.update_task(child.id, tool_calls=child.tool_calls + 1)
+        elif ev == "round":
+            await mtm.update_task(child.id, rounds=child.rounds + 1)
+        elif ev in ("done", "empty"):
+            await mtm.update_task(child.id, status="done")
+        elif ev == "error":
+            await mtm.update_task(child.id, status="error", error=str(event.get("error") or "")[:300])
+
+    results = await fan_out(subtasks, ctx=agent_ctx, owner=owner, progress_cb=_mtm_progress)
+
+    # Write findings back to MTM children
+    for i, result in enumerate(results):
+        child = idx_map.get(i)
+        if child:
+            new_status = "done" if result.get("status") == "ok" else (
+                "error" if result.get("status") == "error" else "done"
+            )
+            await mtm.update_task(
+                child.id, status=new_status,
+                findings=str(result.get("summary") or "")[:6000],
+                tool_calls=int(result.get("tool_calls") or child.tool_calls),
+                rounds=int(result.get("rounds") or child.rounds),
+                error=str(result.get("error") or "")[:300] or None,
+            )
+
+    # Aggregate all findings
+    parts = []
+    for i, r in enumerate(results):
+        child = idx_map.get(i)
+        label = child.title if child else f"Task {i}"
+        summary = str(r.get("summary") or "").strip()
+        if summary:
+            parts.append(f"[{label}]:\n{summary}")
+
+    all_findings = "\n\n".join(parts)
+    ok_count = sum(1 for r in results if r.get("status") == "ok")
+
+    await mtm.update_task(parent.id, status="done", findings=all_findings)
+
+    if write_key:
+        written_by = str((agent_ctx or {}).get("parent_role", "agent"))
+        await mtm.write_memory(write_key, all_findings, written_by=written_by)
+
+    output = (
+        f"Discovery complete: {ok_count}/{len(results)} tasks succeeded. "
+        f"MTM task ID: {parent.id}\n\n"
+        + (all_findings[:5000] if all_findings else "(no findings)")
+    )
+    return {"output": output, "exit_code": 0, "task_id": parent.id}
+
+
+# ---------------------------------------------------------------------------
+# read_mtm — read the shared Multi-Task Memory
+# ---------------------------------------------------------------------------
+
+async def do_read_mtm(content, *, owner=None, agent_ctx=None, **kwargs):
+    """Read the shared Multi-Task Memory (task list + scratchpad)."""
+    from src.mtm import mtm
+
+    try:
+        args = _parse_tool_args(content) if (content and content.strip()) else {}
+    except ValueError:
+        args = {}
+
+    prefix = str(args.get("prefix") or "").strip() or None
+    include_tasks = bool(args.get("include_tasks", True))
+
+    lines = []
+
+    if include_tasks:
+        tasks = await mtm.list_tasks(limit=20)
+        if tasks:
+            active = [t for t in tasks if t.status in ("running", "pending")]
+            recent = [t for t in tasks if t.status not in ("running", "pending")][:6]
+            if active:
+                lines.append(f"=== Active Agent Tasks ({len(active)}) ===")
+                for t in active:
+                    lines.append(f"  [{t.status.upper()}] {t.kind}/{t.agent_role}: {t.title}")
+                    if t.findings:
+                        lines.append(f"    → {t.findings[:200]}")
+            if recent:
+                lines.append("=== Recently Completed Tasks ===")
+                for t in recent:
+                    icon = "✓" if t.status == "done" else "✗"
+                    lines.append(f"  {icon} [{t.kind}] {t.title} (tools: {t.tool_calls})")
+                    if t.findings:
+                        lines.append(f"    → {t.findings[:200]}")
+
+    mem = await mtm.read_memory(prefix=prefix)
+    if mem:
+        lines.append("\n=== Shared Memory ===")
+        for k, v in sorted(mem.items(), key=lambda kv: kv[1].get("updated_at", ""), reverse=True)[:20]:
+            val = v.get("value", "")
+            by = v.get("written_by", "?")
+            ts = v.get("updated_at", "")
+            snippet = val[:500] if isinstance(val, str) else str(val)[:500]
+            lines.append(f"[{k}] (by {by} at {ts}):\n  {snippet}")
+
+    if not lines:
+        return {"output": "Multi-Task Memory is empty — no active tasks or shared memory entries.", "exit_code": 0}
+
+    return {"output": "\n".join(lines)[:7000], "exit_code": 0}

@@ -1330,6 +1330,73 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "discover",
+            "description": (
+                "Fan out 1-12 named Discovery sub-agents in PARALLEL to investigate "
+                "independent questions, then return their aggregated findings. Each "
+                "sub-agent is read-only (search, fetch, read files, grep, bash) and "
+                "writes its findings to the shared Multi-Task Memory (MTM) where all "
+                "agents can see them. Use `read_mtm` afterwards to query the results. "
+                "Ideal for: researching multiple topics at once, scanning different "
+                "parts of a codebase, or collecting information before planning action."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal": {
+                        "type": "string",
+                        "description": "The overall investigation goal (used as the parent task title in MTM).",
+                    },
+                    "tasks": {
+                        "type": "array",
+                        "description": "1-12 independent sub-investigations to run concurrently.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string", "description": "Short label shown in the agent activity panel."},
+                                "objective": {"type": "string", "description": "Full instruction for the discovery sub-agent."},
+                            },
+                            "required": ["objective"],
+                        },
+                    },
+                    "write_key": {
+                        "type": "string",
+                        "description": "Optional MTM shared-memory key to save aggregated findings under (e.g. 'project:arch_findings').",
+                    },
+                },
+                "required": ["goal", "tasks"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_mtm",
+            "description": (
+                "Read the shared Multi-Task Memory (MTM): live agent task list and "
+                "the key-value scratchpad written by all agents. Use this after "
+                "calling `discover` to see what sub-agents found, or to check "
+                "whether other concurrent background tasks are working on related "
+                "things before starting duplicate work."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prefix": {
+                        "type": "string",
+                        "description": "Optional key prefix filter (e.g. 'project:' to see only project-scoped entries).",
+                    },
+                    "include_tasks": {
+                        "type": "boolean",
+                        "description": "Include the active/recent task list (default: true).",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "self_repair",
             "description": (
                 "USER-INITIATED repair of FoulFox's OWN source code. Spawns a "

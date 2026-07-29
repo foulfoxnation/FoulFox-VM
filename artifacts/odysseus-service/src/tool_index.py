@@ -51,6 +51,11 @@ ALWAYS_AVAILABLE = frozenset({
     # Install + operate apps/engines inside the selected VM (winget installs,
     # launch, processes, per-engine playbooks, secret-assisted activation).
     "vm_app",
+    # Multi-agent coordination: fan-out parallel discovery + read shared memory.
+    # Always available so any agent can delegate sub-investigations or read
+    # what other concurrent agents have already found.
+    "discover",
+    "read_mtm",
 })
 
 # Tools that the Personal Assistant always has access to during scheduled
