@@ -160,13 +160,18 @@ export function initSidebarLayout(Storage, opts) {
         if (iconRail) { iconRail.classList.remove('mobile-mini'); iconRail.style.cssText = ''; }
 
         if (isSidebarVisible) {
-          // Closing sidebar
+          // Closing sidebar — clear _wasAutoCollapsed so the resize handler
+          // does not immediately reopen it after the user explicitly closed it.
+          _wasAutoCollapsed = false;
           sidebar.classList.add('hidden');
           if (backdrop) backdrop.classList.remove('visible');
         } else {
-          // Mobile: the hamburger always opens the sidebar from the RIGHT.
-          // (Not persisted — keeps the desktop side preference untouched.)
-          if (!sidebar.classList.contains('right-side')) {
+          // Mobile: the hamburger opens from the RIGHT — but ONLY when this
+          // page is the top-level window. When embedded in a narrow iframe
+          // (the FoulFox split-panel shell) the narrow width comes from the
+          // parent layout, not a phone screen; respect whatever side was chosen.
+          const _isEmbedded = window !== window.top;
+          if (!_isEmbedded && !sidebar.classList.contains('right-side')) {
             sidebar.classList.add('right-side');
             if (documentModule && documentModule.swapSide) { try { documentModule.swapSide(); } catch (_) {} }
           }
@@ -223,45 +228,63 @@ export function initSidebarLayout(Storage, opts) {
   const AUTO_COLLAPSE_WIDTH = 700;
   const MIN_CHAT_WIDTH = 380; // collapse sidebar if chat gets narrower than this
 
+  // Re-entry guard: syncRailSide() changes body classes, which would fire the
+  // MutationObserver below and call checkSidebarAutoCollapse again before the
+  // first call returns — creating an infinite loop. This flag breaks that cycle.
+  let _checkingAutoCollapse = false;
+
   function checkSidebarAutoCollapse() {
-    if (_userToggledSidebar) return;
-    const sidebar = document.getElementById('sidebar');
-    if (!sidebar) return;
-    const isHidden = sidebar.classList.contains('hidden');
+    if (_userToggledSidebar || _checkingAutoCollapse) return;
+    _checkingAutoCollapse = true;
+    try {
+      const sidebar = document.getElementById('sidebar');
+      if (!sidebar) return;
+      const isHidden = sidebar.classList.contains('hidden');
 
-    // Check if chat area is too narrow (e.g. sidebar + doc panel both open).
-    // BUT — if a tile-snapped modal exists, IT is what's making chat narrow,
-    // and that's the user's explicit choice. Don't auto-collapse the sidebar
-    // in response, or we get a reactive loop: snap → narrow chat → hide
-    // sidebar → safe-rect changes → reclamp modal → new chat width → ...
-    const chatContainer = document.querySelector('.chat-container');
-    const hasTileSnapped = document.querySelector('.modal-content[data-_tile-zone], .research-pane[data-_tile-zone]');
-    const chatTooNarrow = chatContainer && chatContainer.offsetWidth < MIN_CHAT_WIDTH && !isHidden && !hasTileSnapped;
+      // Check if chat area is too narrow (e.g. sidebar + doc panel both open).
+      // BUT — if a tile-snapped modal exists, IT is what's making chat narrow,
+      // and that's the user's explicit choice. Don't auto-collapse the sidebar
+      // in response, or we get a reactive loop: snap → narrow chat → hide
+      // sidebar → safe-rect changes → reclamp modal → new chat width → ...
+      const chatContainer = document.querySelector('.chat-container');
+      const hasTileSnapped = document.querySelector('.modal-content[data-_tile-zone], .research-pane[data-_tile-zone]');
+      const chatTooNarrow = chatContainer && chatContainer.offsetWidth < MIN_CHAT_WIDTH && !isHidden && !hasTileSnapped;
 
-    if ((window.innerWidth < AUTO_COLLAPSE_WIDTH || chatTooNarrow) && !isHidden) {
-      sidebar.classList.add('hidden');
-      _wasAutoCollapsed = true;
-      syncRailSide();
-    } else if (window.innerWidth >= AUTO_COLLAPSE_WIDTH && isHidden && _wasAutoCollapsed) {
-      // Only restore if chat won't be too narrow
-      sidebar.classList.remove('hidden');
-      void document.body.offsetWidth; // reflow
-      if (chatContainer && chatContainer.offsetWidth < MIN_CHAT_WIDTH) {
+      if ((window.innerWidth < AUTO_COLLAPSE_WIDTH || chatTooNarrow) && !isHidden) {
         sidebar.classList.add('hidden');
-      } else {
-        _wasAutoCollapsed = false;
+        _wasAutoCollapsed = true;
+        syncRailSide();
+      } else if (window.innerWidth >= AUTO_COLLAPSE_WIDTH && isHidden && _wasAutoCollapsed) {
+        // Only restore if chat won't be too narrow
+        sidebar.classList.remove('hidden');
+        void document.body.offsetWidth; // reflow
+        if (chatContainer && chatContainer.offsetWidth < MIN_CHAT_WIDTH) {
+          sidebar.classList.add('hidden');
+        } else {
+          _wasAutoCollapsed = false;
+        }
+        syncRailSide();
       }
-      syncRailSide();
+    } finally {
+      _checkingAutoCollapse = false;
     }
   }
 
+  // Debounce resize events: rapid iframe resizes (e.g. parent split-panel drag)
+  // previously caused the sidebar to blink at the auto-collapse threshold.
+  // Settling for 120 ms before acting makes the decision on a stable width.
+  let _resizeDebounce = null;
   window.addEventListener('resize', () => {
     _userToggledSidebar = false; // allow auto-collapse on actual resize
-    requestAnimationFrame(checkSidebarAutoCollapse);
+    clearTimeout(_resizeDebounce);
+    _resizeDebounce = setTimeout(() => requestAnimationFrame(checkSidebarAutoCollapse), 120);
   });
-  // Also re-check when doc panel toggles
-  new MutationObserver(() => requestAnimationFrame(checkSidebarAutoCollapse))
-    .observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  // Also re-check when doc panel toggles (debounced for the same reason)
+  let _mutDebounce = null;
+  new MutationObserver(() => {
+    clearTimeout(_mutDebounce);
+    _mutDebounce = setTimeout(() => requestAnimationFrame(checkSidebarAutoCollapse), 80);
+  }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
   // Auto-collapse on initial load if window is small
   if (window.innerWidth < AUTO_COLLAPSE_WIDTH) {
