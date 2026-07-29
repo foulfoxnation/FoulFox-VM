@@ -53,6 +53,8 @@ export interface VmSummary {
   displayToken: string;
   // Why the last launch attempt failed (QEMU stderr tail), null when healthy.
   lastError: string | null;
+  // Path on the guest where the user's coding project lives.
+  projectPath: string | null;
 }
 
 // How the agent authenticates to the guest over SSH. "key" = per-VM keypair was
@@ -387,6 +389,76 @@ export async function cancelProvision(id: string): Promise<void> {
     headers: jsonHeaders(),
   });
   if (!res.ok) throw new Error(await parseError(res));
+}
+
+// ── Project path ───────────────────────────────────────────────────────────────
+
+export async function getProjectPath(id: string): Promise<string | null> {
+  const res = await fetch(apiUrl(`/api/vm/${encodeURIComponent(id)}/project-path`));
+  if (!res.ok) throw new Error(await parseError(res));
+  const j = await res.json();
+  return (j.projectPath as string | null) ?? null;
+}
+
+export async function setProjectPath(id: string, projectPath: string | null): Promise<void> {
+  const res = await authedFetch(`/api/vm/${encodeURIComponent(id)}/project-path`, {
+    method: "PUT",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ projectPath }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+}
+
+// ── Project backup ─────────────────────────────────────────────────────────────
+
+export interface BackupInfo {
+  backupId: string;
+  vmId: string;
+  vmName: string;
+  projectPath: string;
+  backedUpAt: string;
+  sizeBytes: number;
+  filename: string;
+}
+
+export interface BackupResult {
+  ok: boolean;
+  backupId: string;
+  filename: string;
+  sizeBytes: number;
+  backedUpAt: string;
+}
+
+export async function backupProject(
+  id: string,
+  projectPath?: string,
+): Promise<BackupResult> {
+  const res = await authedFetch(`/api/vm/${encodeURIComponent(id)}/project-backup`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(projectPath ? { projectPath } : {}),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function listBackups(id: string): Promise<BackupInfo[]> {
+  const res = await fetch(apiUrl(`/api/vm/${encodeURIComponent(id)}/project-backups`));
+  if (!res.ok) throw new Error(await parseError(res));
+  const j = await res.json();
+  return (j.backups ?? []) as BackupInfo[];
+}
+
+export async function restoreBackup(
+  id: string,
+  backupId: string,
+): Promise<{ ok: boolean; projectPath: string; backedUpAt: string }> {
+  const res = await authedFetch(
+    `/api/vm/${encodeURIComponent(id)}/project-restore/${encodeURIComponent(backupId)}`,
+    { method: "POST", headers: jsonHeaders() },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
 }
 
 // Probe whether the agent can run a command inside the guest with no human

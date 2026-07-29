@@ -77,6 +77,163 @@ export function buildSshArgs(auth: SshAuth, opts?: { batch?: boolean }): string[
   return args;
 }
 
+// Run a single shell command on a VM guest over SSH and capture its output.
+// For Windows guests the caller is responsible for constructing a PowerShell
+// command (see _ps_encoded in tool_implementations.py). Returns stdout, stderr,
+// and whether the process exited cleanly (code 0).
+export function runSshCommand(
+  vm: VmRecord,
+  command: string,
+  timeoutMs = 60000,
+): Promise<{ ok: boolean; stdout: string; stderr: string; code: number | null }> {
+  const mode = authMode(vm);
+  const rt = getRuntime(vm.id);
+  if (rt.state !== "running") {
+    return Promise.resolve({ ok: false, stdout: "", stderr: "VM is not running.", code: null });
+  }
+  if (mode !== "key") {
+    return Promise.resolve({ ok: false, stdout: "", stderr: "No per-VM SSH key (re-provision to generate one).", code: null });
+  }
+
+  let args: string[];
+  try {
+    args = [...buildSshArgs(authFor(vm), { batch: true }), command];
+  } catch (err) {
+    return Promise.resolve({ ok: false, stdout: "", stderr: (err as Error).message, code: null });
+  }
+
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let done = false;
+    const finish = (r: { ok: boolean; stdout: string; stderr: string; code: number | null }) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
+    const child = spawn("ssh", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* ignore */ }
+      finish({ ok: false, stdout, stderr: stderr || "SSH command timed out.", code: null });
+    }, timeoutMs);
+    child.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
+    child.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
+    child.on("error", (err) => finish({ ok: false, stdout, stderr: err.message, code: null }));
+    child.on("close", (code) => finish({ ok: code === 0, stdout, stderr, code }));
+  });
+}
+
+// Pull a single file (or a zip archive created server-side) from a VM guest
+// to the local host filesystem using scp. The remotePath must already be a
+// single file path on the guest (not a directory) — compress first for dirs.
+export function runScpPull(
+  vm: VmRecord,
+  remotePath: string,
+  localPath: string,
+  timeoutMs = 300000,
+): Promise<{ ok: boolean; stderr: string }> {
+  const mode = authMode(vm);
+  const rt = getRuntime(vm.id);
+  if (rt.state !== "running") {
+    return Promise.resolve({ ok: false, stderr: "VM is not running." });
+  }
+  if (mode !== "key") {
+    return Promise.resolve({ ok: false, stderr: "No per-VM SSH key (re-provision to generate one)." });
+  }
+
+  const auth = authFor(vm);
+  const port = Number(auth.sshPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return Promise.resolve({ ok: false, stderr: `Invalid SSH port: ${String(auth.sshPort)}` });
+  }
+
+  const user = sanitizeSshUser(auth.sshUser);
+  const src = user ? `${user}@localhost:${remotePath}` : `localhost:${remotePath}`;
+
+  const scpArgs = [
+    "-o", "StrictHostKeyChecking=no",
+    "-o", "UserKnownHostsFile=/dev/null",
+    "-o", "ConnectTimeout=5",
+  ];
+  if (auth.sshKeyPath) scpArgs.push("-i", auth.sshKeyPath, "-o", "IdentitiesOnly=yes");
+  scpArgs.push("-P", String(port));
+  scpArgs.push(src, localPath);
+
+  return new Promise((resolve) => {
+    let stderr = "";
+    let done = false;
+    const finish = (r: { ok: boolean; stderr: string }) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
+    const child = spawn("scp", scpArgs, { stdio: ["ignore", "ignore", "pipe"] });
+    const timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* ignore */ }
+      finish({ ok: false, stderr: `scp timed out after ${timeoutMs}ms` });
+    }, timeoutMs);
+    child.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
+    child.on("error", (err) => finish({ ok: false, stderr: err.message }));
+    child.on("close", (code) => finish({ ok: code === 0, stderr }));
+  });
+}
+
+// Push a single local file to the VM guest using scp.
+export function runScpPush(
+  vm: VmRecord,
+  localPath: string,
+  remotePath: string,
+  timeoutMs = 300000,
+): Promise<{ ok: boolean; stderr: string }> {
+  const mode = authMode(vm);
+  const rt = getRuntime(vm.id);
+  if (rt.state !== "running") {
+    return Promise.resolve({ ok: false, stderr: "VM is not running." });
+  }
+  if (mode !== "key") {
+    return Promise.resolve({ ok: false, stderr: "No per-VM SSH key (re-provision to generate one)." });
+  }
+
+  const auth = authFor(vm);
+  const port = Number(auth.sshPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return Promise.resolve({ ok: false, stderr: `Invalid SSH port: ${String(auth.sshPort)}` });
+  }
+
+  const user = sanitizeSshUser(auth.sshUser);
+  const dst = user ? `${user}@localhost:${remotePath}` : `localhost:${remotePath}`;
+
+  const scpArgs = [
+    "-o", "StrictHostKeyChecking=no",
+    "-o", "UserKnownHostsFile=/dev/null",
+    "-o", "ConnectTimeout=5",
+  ];
+  if (auth.sshKeyPath) scpArgs.push("-i", auth.sshKeyPath, "-o", "IdentitiesOnly=yes");
+  scpArgs.push("-P", String(port));
+  scpArgs.push(localPath, dst);
+
+  return new Promise((resolve) => {
+    let stderr = "";
+    let done = false;
+    const finish = (r: { ok: boolean; stderr: string }) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
+    const child = spawn("scp", scpArgs, { stdio: ["ignore", "ignore", "pipe"] });
+    const timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* ignore */ }
+      finish({ ok: false, stderr: `scp timed out after ${timeoutMs}ms` });
+    }, timeoutMs);
+    child.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
+    child.on("error", (err) => finish({ ok: false, stderr: err.message }));
+    child.on("close", (code) => finish({ ok: code === 0, stderr }));
+  });
+}
+
 export interface AgentHealth {
   ok: boolean;          // a command ran and returned the expected marker
   reachable: boolean;   // the SSH port answered (auth may still have failed)

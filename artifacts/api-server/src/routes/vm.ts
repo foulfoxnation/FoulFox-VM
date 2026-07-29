@@ -36,7 +36,7 @@ import {
   type OsKind,
 } from "../lib/vm-capabilities";
 import { startProvisioning, startCloneProvisioning, subscribeProvisioning, cancelProvisioning, buildWindowsDevSetupScript } from "../lib/vm-provision";
-import { authMode, checkAgentHealth } from "../lib/vm-ssh";
+import { authMode, checkAgentHealth, runSshCommand, runScpPull, runScpPush } from "../lib/vm-ssh";
 import { OS_IMAGES, toPublic, getOsImage, isOsImageId } from "../lib/os-catalog";
 import { logger } from "../lib/logger";
 
@@ -66,6 +66,7 @@ function statusPayload(vm: VmRecord) {
     provisioning: vm.provisioning,
     displayToken: vm.displayToken,
     lastError: rt.lastError,
+    projectPath: vm.config.projectPath ?? null,
   };
 }
 
@@ -696,6 +697,224 @@ router.put("/vm/config", (req: Request, res: Response) => {
   const updated = updateVmConfig(DEFAULT_VM_ID, parsed.data);
   if (!updated) { res.status(503).json({ error: "Default VM not initialized" }); return; }
   res.json(GetVmConfigResponse.parse(updated.config));
+});
+
+// ── Project path ──────────────────────────────────────────────────────────────
+
+router.get("/:id/project-path", (req: Request, res: Response) => {
+  const { id } = req.params as { id: string };
+  const vm = getVm(Array.isArray(id) ? id[0] : id);
+  if (!vm) return res.status(404).json({ error: "VM not found" });
+  return res.json({ projectPath: vm.config.projectPath ?? null });
+});
+
+router.put("/:id/project-path", (req: Request, res: Response) => {
+  const { id } = req.params as { id: string };
+  const vmId = Array.isArray(id) ? id[0] : id;
+  const vm = getVm(vmId);
+  if (!vm) return res.status(404).json({ error: "VM not found" });
+  const { projectPath } = req.body as { projectPath?: unknown };
+  const p = typeof projectPath === "string" ? projectPath.trim() || null : null;
+  const updated = updateVmConfig(vmId, { projectPath: p });
+  if (!updated) return res.status(500).json({ error: "Failed to save project path" });
+  return res.json({ ok: true, projectPath: p });
+});
+
+// ── Project backup ─────────────────────────────────────────────────────────────
+
+const DATA_DIR_BACKUP = path.join(
+  process.env["ODYSSEUS_DATA_DIR"] || process.env.HOME || "/tmp",
+  ".odysseus-vm-backups",
+);
+
+interface BackupMeta {
+  backupId: string;
+  vmId: string;
+  vmName: string;
+  projectPath: string;
+  backedUpAt: string;
+  sizeBytes: number;
+  filename: string;
+}
+
+function listBackupFiles(vmId: string): BackupMeta[] {
+  const vmDir = path.join(DATA_DIR_BACKUP, vmId);
+  try {
+    if (!fs.existsSync(vmDir)) return [];
+    return fs
+      .readdirSync(vmDir)
+      .map((name) => {
+        const metaPath = path.join(vmDir, name, "meta.json");
+        try {
+          const raw = fs.readFileSync(metaPath, "utf8");
+          return JSON.parse(raw) as BackupMeta;
+        } catch {
+          return null;
+        }
+      })
+      .filter((m): m is BackupMeta => m !== null)
+      .sort((a, b) => b.backedUpAt.localeCompare(a.backedUpAt));
+  } catch {
+    return [];
+  }
+}
+
+// Build the PowerShell command to compress a project dir to a zip on Windows.
+function psCompress(srcPath: string, zipPath: string): string {
+  const src = srcPath.replace(/'/g, "''");
+  const dst = zipPath.replace(/'/g, "''");
+  return (
+    `powershell -NoProfile -NonInteractive -Command ` +
+    `"Compress-Archive -LiteralPath '${src}' -DestinationPath '${dst}' -Force"`
+  );
+}
+
+// Build the shell command to compress a project dir to a tar.gz on Linux.
+function shCompress(srcPath: string, tarPath: string): string {
+  const parent = path.posix.dirname(srcPath);
+  const base = path.posix.basename(srcPath);
+  return `tar czf '${tarPath.replace(/'/g, "'\\''")}' -C '${parent.replace(/'/g, "'\\''")}' '${base.replace(/'/g, "'\\''")}'`;
+}
+
+router.post("/:id/project-backup", async (req: Request, res: Response) => {
+  const { id } = req.params as { id: string };
+  const vmId = Array.isArray(id) ? id[0] : id;
+  const vm = getVm(vmId);
+  if (!vm) return res.status(404).json({ error: "VM not found" });
+
+  const projectPath = (req.body as { projectPath?: string }).projectPath?.trim()
+    || vm.config.projectPath?.trim();
+  if (!projectPath) {
+    return res.status(400).json({
+      error: "No project path configured. Set one in VM settings or pass projectPath in the request body.",
+    });
+  }
+
+  const isWindows = vm.osKind === "windows";
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const backupId = timestamp;
+  const filename = `backup_${backupId}.zip`;
+  const vmBackupDir = path.join(DATA_DIR_BACKUP, vmId, backupId);
+  const localZipPath = path.join(vmBackupDir, filename);
+
+  // 1. Create the local backup directory.
+  fs.mkdirSync(vmBackupDir, { recursive: true });
+
+  // 2. Compress the project on the guest.
+  const tempZipOnGuest = isWindows ? "C:\\Temp\\ff_backup_tmp.zip" : "/tmp/ff_backup_tmp.tar.gz";
+  const compressCmd = isWindows
+    ? psCompress(projectPath, tempZipOnGuest)
+    : shCompress(projectPath, tempZipOnGuest);
+
+  const compResult = await runSshCommand(vm, compressCmd, 120_000);
+  if (!compResult.ok) {
+    fs.rmSync(vmBackupDir, { recursive: true, force: true });
+    return res.status(500).json({
+      error: `Failed to compress project on guest: ${compResult.stderr || compResult.stdout || "(no output)"}`,
+    });
+  }
+
+  // 3. SCP the archive from the guest to the host.
+  // On Windows OpenSSH, the SCP remote path uses forward slashes. Drive letters
+  // need the form: C:/Temp/file.zip (no leading slash — some implementations
+  // need the drive letter as-is for the guest root).
+  const guestScpPath = isWindows
+    ? tempZipOnGuest.replace(/\\/g, "/")
+    : tempZipOnGuest;
+
+  const pullResult = await runScpPull(vm, guestScpPath, localZipPath, 300_000);
+  if (!pullResult.ok) {
+    fs.rmSync(vmBackupDir, { recursive: true, force: true });
+    return res.status(500).json({
+      error: `Failed to copy backup from guest: ${pullResult.stderr || "(no output)"}`,
+    });
+  }
+
+  // 4. Clean up the temp archive on the guest.
+  const cleanCmd = isWindows
+    ? `powershell -NoProfile -NonInteractive -Command "Remove-Item -LiteralPath '${tempZipOnGuest.replace(/'/g, "''")}' -Force -ErrorAction SilentlyContinue"`
+    : `rm -f '${tempZipOnGuest.replace(/'/g, "\\'")}'`;
+  // Fire-and-forget — backup already succeeded.
+  runSshCommand(vm, cleanCmd, 15_000).catch(() => {});
+
+  // 5. Measure the zip and write metadata.
+  let sizeBytes = 0;
+  try { sizeBytes = fs.statSync(localZipPath).size; } catch { /* ignore */ }
+
+  const meta: BackupMeta = {
+    backupId,
+    vmId,
+    vmName: vm.name,
+    projectPath,
+    backedUpAt: new Date().toISOString(),
+    sizeBytes,
+    filename,
+  };
+  fs.writeFileSync(path.join(vmBackupDir, "meta.json"), JSON.stringify(meta, null, 2));
+
+  // 6. Save project path back to config if it wasn't already set.
+  if (!vm.config.projectPath) updateVmConfig(vmId, { projectPath });
+
+  logger.info({ vmId, projectPath, sizeBytes }, "Project backup completed");
+  return res.json({ ok: true, backupId, filename, sizeBytes, backedUpAt: meta.backedUpAt });
+});
+
+router.get("/:id/project-backups", (req: Request, res: Response) => {
+  const { id } = req.params as { id: string };
+  const vmId = Array.isArray(id) ? id[0] : id;
+  const vm = getVm(vmId);
+  if (!vm) return res.status(404).json({ error: "VM not found" });
+  const backups = listBackupFiles(vmId);
+  return res.json({ backups });
+});
+
+router.post("/:id/project-restore/:backupId", async (req: Request, res: Response) => {
+  const { id, backupId } = req.params as { id: string; backupId: string };
+  const vmId = Array.isArray(id) ? id[0] : id;
+  const vm = getVm(vmId);
+  if (!vm) return res.status(404).json({ error: "VM not found" });
+
+  const meta = listBackupFiles(vmId).find((b) => b.backupId === backupId);
+  if (!meta) return res.status(404).json({ error: "Backup not found" });
+
+  const localZipPath = path.join(DATA_DIR_BACKUP, vmId, backupId, meta.filename);
+  if (!fs.existsSync(localZipPath)) {
+    return res.status(404).json({ error: "Backup archive file is missing from host" });
+  }
+
+  const isWindows = vm.osKind === "windows";
+  const tempZipOnGuest = isWindows ? "C:\\Temp\\ff_restore_tmp.zip" : "/tmp/ff_restore_tmp.tar.gz";
+  const guestScpDst = isWindows ? tempZipOnGuest.replace(/\\/g, "/") : tempZipOnGuest;
+
+  // 1. Push the archive to the guest.
+  const pushResult = await runScpPush(vm, localZipPath, guestScpDst, 300_000);
+  if (!pushResult.ok) {
+    return res.status(500).json({ error: `Failed to upload backup to guest: ${pushResult.stderr}` });
+  }
+
+  // 2. Expand on the guest.
+  const projectParent = isWindows
+    ? path.win32.dirname(meta.projectPath)
+    : path.posix.dirname(meta.projectPath);
+
+  const expandCmd = isWindows
+    ? `powershell -NoProfile -NonInteractive -Command "Expand-Archive -LiteralPath '${tempZipOnGuest.replace(/'/g, "''")}' -DestinationPath '${projectParent.replace(/'/g, "''")}' -Force"`
+    : `tar xzf '${tempZipOnGuest.replace(/'/g, "\\'")}' -C '${projectParent.replace(/'/g, "\\'")}'`;
+
+  const expResult = await runSshCommand(vm, expandCmd, 120_000);
+
+  // 3. Cleanup temp archive on guest.
+  const cleanCmd = isWindows
+    ? `powershell -NoProfile -NonInteractive -Command "Remove-Item -LiteralPath '${tempZipOnGuest.replace(/'/g, "''")}' -Force -ErrorAction SilentlyContinue"`
+    : `rm -f '${tempZipOnGuest.replace(/'/g, "\\'")}'`;
+  runSshCommand(vm, cleanCmd, 15_000).catch(() => {});
+
+  if (!expResult.ok) {
+    return res.status(500).json({ error: `Failed to extract backup on guest: ${expResult.stderr || expResult.stdout}` });
+  }
+
+  logger.info({ vmId, backupId, projectPath: meta.projectPath }, "Project restore completed");
+  return res.json({ ok: true, projectPath: meta.projectPath, backedUpAt: meta.backedUpAt });
 });
 
 // ── Shared offline-image helpers ───────────────────────────────────────────────

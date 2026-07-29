@@ -2127,10 +2127,16 @@ async def do_select_vm(content: str = "", owner: Optional[str] = None) -> Dict[s
         if osk == "windows"
         else ""
     )
+    project_path = str(match.get("projectPath") or "").strip()
+    project_note = (
+        f" The user's project is at: {project_path}."
+        if project_path
+        else " No project path is set yet — ask the user where their project lives (e.g. C:\\Projects\\MyApp) or check VM settings."
+    )
     return {
         "output": (
             f"Target set to '{match.get('id')}' ({match.get('name')}, {match.get('osKind')}){note}. "
-            "Shell and file tools now run on this VM." + shell_note
+            "Shell and file tools now run on this VM." + shell_note + project_note
         ),
         "exit_code": 0,
     }

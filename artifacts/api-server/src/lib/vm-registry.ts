@@ -37,6 +37,9 @@ export interface VmConfigData {
   spicePort: number;
   vncDisplay: number;
   usbPassthrough: string[];
+  // Path on the guest where the user's coding project lives (e.g. C:\Projects\MyApp).
+  // Stored here so the agent and backup system always agree on what to protect.
+  projectPath: string | null;
 }
 
 export interface ProvisioningState {
@@ -120,6 +123,7 @@ function defaultConfig(): VmConfigData {
     spicePort: 5930,
     vncDisplay: 1,
     usbPassthrough: [],
+    projectPath: null,
   };
 }
 

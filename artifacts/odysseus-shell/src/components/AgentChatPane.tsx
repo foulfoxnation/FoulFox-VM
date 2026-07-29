@@ -13,7 +13,7 @@ export interface ChatPaneHandle {
 /** Which machine the agent's shell + file tools should act on. */
 export type ChatTarget =
   | { kind: "host"; label?: string }
-  | { kind: "vm"; vmId: string; label?: string };
+  | { kind: "vm"; vmId: string; label?: string; osKind?: string; projectPath?: string | null };
 
 export interface AgentChatPaneProps {
   /** Terminal output to send to the agent chat as a new message. */

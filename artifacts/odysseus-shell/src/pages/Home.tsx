@@ -83,7 +83,7 @@ export default function Home() {
   const rightVisible = activeTab !== "odysseus";
   const chatTarget: ChatTarget =
     isVm && activeVm
-      ? { kind: "vm", vmId: activeVm.id, label: activeVm.name }
+      ? { kind: "vm", vmId: activeVm.id, label: activeVm.name, osKind: activeVm.osKind, projectPath: activeVm.projectPath }
       : { kind: "host", label: "Host system" };
 
   const startChatResize = (e: React.PointerEvent) => {

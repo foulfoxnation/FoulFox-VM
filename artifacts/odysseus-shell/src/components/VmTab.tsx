@@ -28,10 +28,18 @@ import {
   Minimize2,
   Copy,
   XCircle,
+  Archive,
+  FolderArchive,
+  ChevronDown,
+  RotateCw,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { useVmLifecycle, useDeleteVm, useRetryProvision, useCancelProvision, useCloneVm } from "@/hooks/use-vms";
 import { useToast } from "@/hooks/use-toast";
-import { checkAgentHealth, type AgentHealth, type VmSummary, type VmLifecycleAction } from "@/lib/vm-api";
+import {
+  checkAgentHealth, backupProject, listBackups, restoreBackup, setProjectPath as apiSetProjectPath,
+  type AgentHealth, type VmSummary, type VmLifecycleAction, type BackupInfo,
+} from "@/lib/vm-api";
 
 function formatUptime(seconds: number | null) {
   if (seconds == null) return "00:00:00";
@@ -60,6 +68,67 @@ export function VmTab({
   const [health, setHealth] = useState<AgentHealth | null>(null);
   const [checking, setChecking] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+
+  // ── Project backup state ──────────────────────────────────────────────────
+  const [projectPath, setProjectPath] = useState<string>(vm.projectPath ?? "");
+  const [backupPanelOpen, setBackupPanelOpen] = useState(false);
+  const [savingPath, setSavingPath] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [restoreBusy, setRestoreBusy] = useState<string | null>(null);
+  const [backups, setBackups] = useState<BackupInfo[] | null>(null);
+  const [backupsLoading, setBackupsLoading] = useState(false);
+
+  // Keep local project path input in sync with the vm prop.
+  useEffect(() => { setProjectPath(vm.projectPath ?? ""); }, [vm.projectPath]);
+
+  // Load backup list whenever the panel is opened or the vm changes.
+  useEffect(() => {
+    if (!backupPanelOpen) return;
+    setBackupsLoading(true);
+    listBackups(vm.id)
+      .then(setBackups)
+      .catch(() => setBackups([]))
+      .finally(() => setBackupsLoading(false));
+  }, [backupPanelOpen, vm.id]);
+
+  const handleSavePath = async () => {
+    setSavingPath(true);
+    try {
+      await apiSetProjectPath(vm.id, projectPath.trim() || null);
+      toast({ title: "Project path saved" });
+    } catch (e) {
+      toast({ title: "Failed to save path", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setSavingPath(false);
+    }
+  };
+
+  const handleBackup = async () => {
+    setBackupBusy(true);
+    try {
+      const result = await backupProject(vm.id, projectPath.trim() || undefined);
+      const mb = (result.sizeBytes / 1024 / 1024).toFixed(1);
+      toast({ title: "Backup complete", description: `${mb} MB saved to host` });
+      const fresh = await listBackups(vm.id);
+      setBackups(fresh);
+    } catch (e) {
+      toast({ title: "Backup failed", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const handleRestore = async (backupId: string) => {
+    setRestoreBusy(backupId);
+    try {
+      await restoreBackup(vm.id, backupId);
+      toast({ title: "Restore complete", description: "Project files restored to VM" });
+    } catch (e) {
+      toast({ title: "Restore failed", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setRestoreBusy(null);
+    }
+  };
 
   const isRunning = vm.state === "running";
   const isTransitioning = vm.state === "starting" || vm.state === "stopping";
@@ -469,6 +538,111 @@ export function VmTab({
           )}
         </div>
       )}
+
+      {/* Project backup panel */}
+      <div className="border-b bg-muted/10">
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 px-4 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => setBackupPanelOpen((o) => !o)}
+        >
+          <FolderArchive className="h-3.5 w-3.5 shrink-0" />
+          <span className="font-medium">Project Backup</span>
+          {vm.projectPath && (
+            <span className="ml-1 truncate font-mono text-[10px] text-muted-foreground/70">
+              {vm.projectPath}
+            </span>
+          )}
+          <ChevronDown
+            className={`ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${backupPanelOpen ? "rotate-180" : ""}`}
+          />
+        </button>
+
+        {backupPanelOpen && (
+          <div className="border-t px-4 pb-3 pt-2 space-y-2">
+            {/* Project path input row */}
+            <div className="flex items-center gap-2">
+              <Input
+                placeholder={vm.osKind === "windows" ? "C:\\Projects\\MyApp" : "/home/user/myapp"}
+                value={projectPath}
+                onChange={(e) => setProjectPath(e.target.value)}
+                className="h-7 flex-1 font-mono text-xs"
+                onKeyDown={(e) => { if (e.key === "Enter") void handleSavePath(); }}
+              />
+              <Button size="sm" className="h-7 shrink-0" disabled={savingPath} onClick={() => void handleSavePath()}>
+                {savingPath ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save path"}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-7 shrink-0"
+                disabled={!isRunning || backupBusy || !projectPath.trim()}
+                title={
+                  !isRunning
+                    ? "Start the VM to take a backup"
+                    : !projectPath.trim()
+                    ? "Set a project path first"
+                    : "Compress and copy the project folder to the host"
+                }
+                onClick={() => void handleBackup()}
+              >
+                {backupBusy ? (
+                  <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Backing up…</>
+                ) : (
+                  <><Archive className="mr-1.5 h-3.5 w-3.5" />Backup now</>
+                )}
+              </Button>
+            </div>
+
+            {/* Backup list */}
+            {backupsLoading && (
+              <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" /> Loading backups…
+              </p>
+            )}
+            {!backupsLoading && backups !== null && backups.length === 0 && (
+              <p className="text-[11px] text-muted-foreground">No backups yet. Click "Backup now" above to create one.</p>
+            )}
+            {!backupsLoading && backups !== null && backups.length > 0 && (
+              <div className="max-h-44 overflow-auto rounded-md border text-xs">
+                {backups.map((b) => (
+                  <div
+                    key={b.backupId}
+                    className="flex items-center justify-between gap-3 border-b px-3 py-2 last:border-b-0"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium">
+                        {new Date(b.backedUpAt).toLocaleString(undefined, {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        })}
+                        <span className="ml-2 font-normal text-muted-foreground">
+                          {(b.sizeBytes / 1024 / 1024).toFixed(1)} MB
+                        </span>
+                      </p>
+                      <p className="truncate font-mono text-[10px] text-muted-foreground">{b.projectPath}</p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 shrink-0 text-[10px]"
+                      disabled={!isRunning || restoreBusy === b.backupId}
+                      title={!isRunning ? "Start the VM to restore" : "Restore this snapshot to the VM"}
+                      onClick={() => void handleRestore(b.backupId)}
+                    >
+                      {restoreBusy === b.backupId ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <><RotateCw className="mr-1 h-3 w-3" />Restore</>
+                      )}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Display (top) + per-VM terminal (bottom) */}
       <ResizablePanelGroup direction="vertical" className="flex-1">
