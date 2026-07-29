@@ -17,6 +17,7 @@ import { WindowTray } from "@/components/WindowTray";
 import { DevicesTab } from "@/components/DevicesTab";
 import { AppsTab } from "@/components/AppsTab";
 import { AgentTasksPanel } from "@/components/AgentTasksPanel";
+import { VoiceForgeWidget } from "@/components/VoiceForgeWidget";
 import foxLogo from "@assets/FoxQuest_Logo_1781378611335.png";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { useShellToken } from "@/hooks/use-shell-token";
@@ -33,7 +34,6 @@ import {
   Boxes,
   Wifi,
   PanelLeft,
-  Mic,
   Sparkles,
   Activity,
 } from "lucide-react";
@@ -137,17 +137,9 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-3 shrink-0 flex-wrap">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
-            onClick={() => openDefaultApp("foulfox-voice")}
-            title="Voice Forge — talk to the agent (TTS/STT)"
-            data-testid="button-app-voice-forge"
-          >
-            <Mic className="h-4 w-4" />
-            <span className="hidden sm:inline text-xs">Voice Forge</span>
-          </Button>
+          <VoiceForgeWidget
+            onAgentResponse={() => chatPaneRef.current?.refresh()}
+          />
           <Button
             variant="ghost"
             size="sm"

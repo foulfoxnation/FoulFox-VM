@@ -8,6 +8,8 @@ import { authedFetch } from "@/lib/shell-token";
 export interface ChatPaneHandle {
   /** Force the Odysseus sidebar to become visible (restores it if hidden). */
   showSidebar(): void;
+  /** Reload the Odysseus iframe to surface new messages (e.g. after a voice exchange). */
+  refresh(): void;
 }
 
 /** Which machine the agent's shell + file tools should act on. */
@@ -74,6 +76,13 @@ function AgentChatPane({
         }
       } catch {
         // cross-origin guard — safe to ignore
+      }
+    },
+    refresh() {
+      // Reload the Odysseus iframe so new messages (e.g. from a voice exchange)
+      // appear without the user having to switch tabs manually.
+      if (iframeRef.current) {
+        iframeRef.current.src = ODYSSEUS_SRC;
       }
     },
   }));
