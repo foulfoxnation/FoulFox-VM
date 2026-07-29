@@ -230,7 +230,12 @@ export default function Home() {
           </Body>
           {vms.map((vm) => (
             <Body key={vm.id} show={activeTab === `vm:${vm.id}`}>
-              <VmTab vm={vm} isDefault={vm.id === DEFAULT_VM_ID} onDeleted={() => setActiveTab("odysseus")} />
+              <VmTab
+                vm={vm}
+                isDefault={vm.id === DEFAULT_VM_ID}
+                onDeleted={() => setActiveTab("odysseus")}
+                onMinimize={() => setActiveTab("odysseus")}
+              />
             </Body>
           ))}
         </div>

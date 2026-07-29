@@ -53,10 +53,12 @@ export function VmTab({
   vm,
   isDefault,
   onDeleted,
+  onMinimize,
 }: {
   vm: VmSummary;
   isDefault: boolean;
   onDeleted: () => void;
+  onMinimize?: () => void;
 }) {
   const lifecycle = useVmLifecycle();
   const del = useDeleteVm();
@@ -156,6 +158,25 @@ export function VmTab({
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
   }, [fullscreen]);
+
+  // Ctrl+M to minimize (switch back to Workspace) from anywhere in the VM tab.
+  // Uses capture phase so it fires before the noVNC canvas can absorb it.
+  useEffect(() => {
+    if (!onMinimize) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "m" && e.ctrlKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (fullscreen) {
+          setFullscreen(false);
+          if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+        }
+        onMinimize();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [onMinimize, fullscreen]);
 
   // Sync React state when the browser exits real fullscreen via any means
   // (e.g. the OS-level Escape on macOS, or Chromium's built-in F11 handler).
@@ -425,12 +446,29 @@ export function VmTab({
             {vm.cpuCores}C
           </span>
 
+          {/* Minimize — go back to Workspace (Ctrl+M) */}
+          {onMinimize && (
+            <button
+              type="button"
+              className="flex items-center hover:text-foreground"
+              onClick={onMinimize}
+              title="Minimize VM — go back to Workspace (Ctrl+M)"
+              data-testid={`button-minimize-vm-${vm.id}`}
+            >
+              <Minimize2 className="mr-1 h-3 w-3" />
+              Minimize
+              <kbd className="ml-1 rounded bg-muted px-1 py-0 font-mono text-[9px] leading-3 text-muted-foreground">
+                Ctrl+M
+              </kbd>
+            </button>
+          )}
+
           {/* Fullscreen toggle */}
           <button
             type="button"
             className="flex items-center hover:text-foreground"
             onClick={() => setFullscreen(true)}
-            title="Enter fullscreen"
+            title="Enter fullscreen (F11)"
             data-testid={`button-fullscreen-${vm.id}`}
           >
             <Maximize2 className="mr-1 h-3 w-3" />
