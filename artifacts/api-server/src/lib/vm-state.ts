@@ -37,6 +37,8 @@ const DEFAULT_CONFIG: VmConfigData = {
   spicePort: 5930,
   vncDisplay: 1,
   usbPassthrough: [],
+  projectPath: null,
+  ovmfVarsPath: null,
 };
 
 export function loadVmConfig(): VmConfigData {

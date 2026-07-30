@@ -325,7 +325,33 @@ async function provisionWindows(vmId: string, signal?: AbortSignal): Promise<voi
     }
   }
 
-  // 4. Create the disk + unattended answer file (auto-enables SSH + RDP).
+  // 4. Create the UEFI NVRAM copy (OVMF_VARS) for this VM so EFI boot entries
+  //    persist across reboots. Without it QEMU uses the system template as
+  //    read-only and loses boot entries on every restart.
+  const OVMF_VARS_SOURCES = [
+    "/usr/share/OVMF/OVMF_VARS.fd",     // Debian/Ubuntu (ovmf package)
+    "/usr/share/edk2/x64/OVMF_VARS.fd", // Fedora/RHEL
+  ];
+  const ovmfVarsTemplate = OVMF_VARS_SOURCES.find(fs.existsSync);
+  let ovmfVarsPath: string | null = null;
+  if (ovmfVarsTemplate) {
+    const varsDir = vmDiskDir(vmId);
+    fs.mkdirSync(varsDir, { recursive: true });
+    const destVars = path.join(varsDir, "OVMF_VARS.fd");
+    if (!fs.existsSync(destVars)) {
+      try {
+        fs.copyFileSync(ovmfVarsTemplate, destVars);
+        ovmfVarsPath = destVars;
+        logger.info({ vm: vmId, destVars }, "OVMF_VARS.fd copied for per-VM UEFI NVRAM");
+      } catch (err) {
+        logger.warn({ err, vm: vmId }, "Could not copy OVMF_VARS.fd (UEFI boot entries won't persist)");
+      }
+    } else {
+      ovmfVarsPath = destVars; // already exists from a previous provision pass
+    }
+  }
+
+  // 5. Create the disk + unattended answer file (auto-enables SSH + RDP).
   emit(vmId, { status: "creating-disk", progress: 0, message: "Creating Windows VM disk…" });
   // Honor an existing disk path. The flashed appliance's foulfox-first-run
   // pre-creates the guest disk and writes it into the VM config; reusing it (vs.
@@ -354,6 +380,7 @@ async function provisionWindows(vmId: string, signal?: AbortSignal): Promise<voi
     isoPath,
     virtioIsoPath: virtioPath,
     unattendIsoPath,
+    ovmfVarsPath,
     connectionMode: "ssh",
     sshUser: adminUser,
     sshPassword: adminPassword,

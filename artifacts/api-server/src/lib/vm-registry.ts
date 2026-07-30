@@ -40,6 +40,10 @@ export interface VmConfigData {
   // Path on the guest where the user's coding project lives (e.g. C:\Projects\MyApp).
   // Stored here so the agent and backup system always agree on what to protect.
   projectPath: string | null;
+  // Per-VM UEFI variable store (writeable OVMF NVRAM copy). Created during Windows
+  // provisioning by copying the OVMF_VARS.fd template; allows EFI boot entries and
+  // SecureBoot state to persist across reboots. null = UEFI not yet set up (rare).
+  ovmfVarsPath: string | null;
 }
 
 export interface ProvisioningState {
@@ -124,6 +128,7 @@ function defaultConfig(): VmConfigData {
     vncDisplay: 1,
     usbPassthrough: [],
     projectPath: null,
+    ovmfVarsPath: null,
   };
 }
 

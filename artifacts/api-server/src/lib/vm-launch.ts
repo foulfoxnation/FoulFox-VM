@@ -90,6 +90,41 @@ export function buildQemuArgs(vm: VmRecord, accel: AcceleratorInfo): string[] {
   // the virtio-win and autounattend ISOs ride along as extra CDs (drivers to
   // install plus the answer file Windows Setup auto-detects on attached media).
   if (vm.osKind === "windows") {
+    // UEFI firmware (OVMF) — mandatory for Windows 11. Without it QEMU falls
+    // back to SeaBIOS, which cannot boot a UEFI-only Windows installation ISO
+    // and reports "no bootable device" at startup.
+    //
+    // The pflash layout requires TWO drives in order:
+    //   slot 0: OVMF_CODE.fd — read-only EFI code (from the OS ovmf package)
+    //   slot 1: OVMF_VARS.fd — writeable NVRAM (per-VM copy so EFI boot entries
+    //           persist across reboots; copied during provisioning)
+    //
+    // Common paths by distro (first match wins):
+    const OVMF_CODE_CANDIDATES = [
+      "/usr/share/OVMF/OVMF_CODE.fd",           // Debian/Ubuntu (ovmf package)
+      "/usr/share/edk2/x64/OVMF_CODE.fd",       // Fedora/RHEL
+      "/usr/share/OVMF/OVMF.fd",                // some distros (combined)
+    ];
+    const OVMF_VARS_CANDIDATES = [
+      "/usr/share/OVMF/OVMF_VARS.fd",           // Debian/Ubuntu
+      "/usr/share/edk2/x64/OVMF_VARS.fd",       // Fedora/RHEL
+    ];
+    const ovmfCodePath = OVMF_CODE_CANDIDATES.find((p) => fs.existsSync(p));
+    if (ovmfCodePath) {
+      // Slot 0: read-only EFI code.
+      args.push("-drive", `if=pflash,format=raw,readonly=on,file=${ovmfCodePath}`);
+      // Slot 1: writeable per-VM NVRAM. Fall back to the template (read-only)
+      // if provisioning hasn't created the per-VM copy yet — the installer will
+      // still boot; EFI vars just won't persist until the copy exists.
+      const perVmVars = c.ovmfVarsPath && fs.existsSync(c.ovmfVarsPath) ? c.ovmfVarsPath : null;
+      const fallbackVars = OVMF_VARS_CANDIDATES.find((p) => fs.existsSync(p));
+      if (perVmVars) {
+        args.push("-drive", `if=pflash,format=raw,file=${perVmVars}`);
+      } else if (fallbackVars) {
+        args.push("-drive", `if=pflash,format=raw,readonly=on,file=${fallbackVars}`);
+      }
+    }
+
     args.push("-device", "ich9-ahci,id=ahci");
     let ahciPort = 0;
     if (c.diskPath) {
