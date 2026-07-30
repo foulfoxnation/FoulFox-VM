@@ -55,11 +55,13 @@ export type InstallPhase =
   | "done"
   | "error";
 
-// Where an install job's source tree comes from: a GitHub clone or an uploaded
-// zip archive already sitting on local disk (the route streams it there).
+// Where an install job's source tree comes from: a GitHub clone, an uploaded
+// zip archive already sitting on local disk, or a reinstall that skips fetch
+// and re-runs the install/build steps from the already-present repo dir.
 export type InstallSource =
   | { kind: "git"; repoUrl: string }
-  | { kind: "zip"; zipPath: string; fileName: string };
+  | { kind: "zip"; zipPath: string; fileName: string }
+  | { kind: "reinstall"; appId: string };
 
 export interface InstallJob {
   jobId: string;
@@ -290,6 +292,18 @@ export function startInstallFromZip(
   return startInstallJob({ kind: "zip", zipPath, fileName }, approvedCaps);
 }
 
+export function startReinstall(appId: string, approvedCaps: AppCapability[]): InstallJob {
+  const existing = getApp(appId);
+  if (!existing) throw new Error(`No app with id "${appId}" is installed.`);
+  const repoDir = appRepoDir(appId);
+  if (!fs.existsSync(repoDir)) {
+    throw new Error(
+      "The app's repo directory is missing — uninstall and reinstall the app instead.",
+    );
+  }
+  return startInstallJob({ kind: "reinstall", appId }, approvedCaps);
+}
+
 function startInstallJob(source: InstallSource, approvedCaps: AppCapability[]): InstallJob {
   pruneJobs();
   if (active >= MAX_CONCURRENT) {
@@ -298,8 +312,13 @@ function startInstallJob(source: InstallSource, approvedCaps: AppCapability[]): 
   const jobId = crypto.randomBytes(8).toString("hex");
   const job: InstallJob = {
     jobId,
-    repoUrl: source.kind === "git" ? source.repoUrl : `upload:${source.fileName}`,
-    phase: source.kind === "git" ? "cloning" : "extracting",
+    repoUrl:
+      source.kind === "git"
+        ? source.repoUrl
+        : source.kind === "zip"
+          ? `upload:${source.fileName}`
+          : `reinstall:${source.appId}`,
+    phase: source.kind === "git" ? "cloning" : source.kind === "zip" ? "extracting" : "parsing",
     appId: null,
     appName: null,
     error: null,
@@ -334,10 +353,16 @@ async function runInstall(
       /* ignore */
     }
 
-    // ── fetch: clone the repo, or extract the uploaded zip ────────────────────
+    // ── fetch: clone the repo, extract zip, or skip (reinstall) ──────────────
     let sourceLabel: string;
     let srcRoot = staging; // dir that must contain foxapp.json
-    if (source.kind === "git") {
+    if (source.kind === "reinstall") {
+      // Re-use the existing repo directory verbatim — no clone or extract.
+      // The staging dir is not needed; jump straight to parsing.
+      srcRoot = appRepoDir(source.appId);
+      sourceLabel = `reinstall:${source.appId}`;
+      log.write(`Rerunning setup for ${source.appId} (using existing repo)…\n`);
+    } else if (source.kind === "git") {
       job.phase = "cloning";
       const { cloneUrl } = normalizeGithubUrl(source.repoUrl);
       sourceLabel = cloneUrl;
@@ -436,18 +461,22 @@ async function runInstall(
     const dataDir = appDataDir(id);
     fs.mkdirSync(appDir(id), { recursive: true });
     fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-    try {
-      fs.rmSync(repoDir, { recursive: true, force: true });
-    } catch {
-      /* ignore */
-    }
-    try {
-      fs.renameSync(srcRoot, repoDir);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "EXDEV") {
-        fs.cpSync(srcRoot, repoDir, { recursive: true });
-      } else {
-        throw err;
+    if (source.kind !== "reinstall") {
+      // For clone/zip installs: replace the existing repo dir with the freshly
+      // fetched source. For reinstalls the repo dir IS srcRoot, so skip rm+rename.
+      try {
+        fs.rmSync(repoDir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+      try {
+        fs.renameSync(srcRoot, repoDir);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "EXDEV") {
+          fs.cpSync(srcRoot, repoDir, { recursive: true });
+        } else {
+          throw err;
+        }
       }
     }
     // Drop whatever is left of staging (e.g. the emptied zip wrapper dir).
@@ -462,13 +491,16 @@ async function runInstall(
 
     const existing = getApp(id);
     const now = Date.now();
+    // On reinstall keep the original repoUrl so the UI still shows the source.
+    const recordRepoUrl =
+      source.kind === "reinstall" ? (existing?.repoUrl ?? sourceLabel) : sourceLabel;
     saveApp({
       id,
       name: manifest.name,
       version: manifest.version,
       description: manifest.description,
       icon: manifest.icon,
-      repoUrl: sourceLabel,
+      repoUrl: recordRepoUrl,
       runtime: manifest.runtime,
       capabilities: manifest.capabilities,
       grantedCapabilities: granted,

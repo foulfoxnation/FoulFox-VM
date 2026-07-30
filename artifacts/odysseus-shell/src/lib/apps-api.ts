@@ -241,6 +241,17 @@ export async function fetchAppUiBase(): Promise<string | null> {
   }
 }
 
+export async function reinstallApp(
+  id: string,
+): Promise<{ jobId: string; status: string }> {
+  const res = await authedFetch(`/api/apps/${encodeURIComponent(id)}/reinstall`, {
+    method: "POST",
+    headers: jsonHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export async function fetchAppLogs(id: string): Promise<string> {
   const res = await fetch(apiUrl(`/api/apps/${encodeURIComponent(id)}/logs`));
   if (!res.ok) throw new Error(await parseError(res));

@@ -11,6 +11,7 @@ import {
   useUninstallApp,
   useStartApp,
   useStopApp,
+  useReinstallApp,
   APPS_KEY,
 } from "@/hooks/use-apps";
 import {
@@ -479,8 +480,35 @@ function AppCard({ app, token }: { app: InstalledApp; token?: string | null }) {
   const uninstall = useUninstallApp();
   const start = useStartApp();
   const stop = useStopApp();
+  const reinstall = useReinstallApp();
+  const [reinstallJobId, setReinstallJobId] = useState<string | null>(null);
+  const { data: reinstallJob } = useInstallJob(reinstallJobId);
+  const reinstallLogRef = useRef<HTMLPreElement>(null);
   const [logs, setLogs] = useState<string | null>(null);
   const [loadingLogs, setLoadingLogs] = useState(false);
+
+  // Auto-scroll reinstall log tail.
+  useEffect(() => {
+    if (reinstallLogRef.current) {
+      reinstallLogRef.current.scrollTop = reinstallLogRef.current.scrollHeight;
+    }
+  }, [reinstallJob?.log]);
+
+  // Clear the reinstall job panel once it finishes (after a short delay so the
+  // user can see the final status).
+  useEffect(() => {
+    if (reinstallJob?.phase === "done" || reinstallJob?.phase === "error") {
+      const t = setTimeout(() => setReinstallJobId(null), 4000);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [reinstallJob?.phase]);
+
+  const onReinstall = () => {
+    reinstall.mutate(app.id, {
+      onSuccess: (r) => setReinstallJobId(r.jobId),
+    });
+  };
   const [windowOpen, setWindowOpen] = useState(true);
   // Where to embed the app UI from: a dedicated loopback origin on the
   // appliance (privilege separation), null in dev (same-origin, opaque sandbox).
@@ -610,6 +638,23 @@ function AppCard({ app, token }: { app: InstalledApp; token?: string | null }) {
                 <FileText className="h-3.5 w-3.5" />
               )}
             </Button>
+            {app.status !== "installing" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-xs"
+                onClick={onReinstall}
+                disabled={reinstall.isPending || !!reinstallJobId || !token}
+                title="Restart setup (re-run install & build steps)"
+                data-testid={`button-reinstall-${app.id}`}
+              >
+                {reinstall.isPending || (reinstallJobId && reinstallJob?.phase !== "done" && reinstallJob?.phase !== "error") ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            )}
             {!app.isDefault && (
               <Button
                 variant="ghost"
@@ -667,6 +712,44 @@ function AppCard({ app, token }: { app: InstalledApp; token?: string | null }) {
 
         {runError && (
           <p className="text-xs text-destructive">{runError.message}</p>
+        )}
+
+        {reinstallJobId && reinstallJob && (
+          <div className="rounded-md border bg-muted/30 p-3">
+            <div className="mb-1.5 flex items-center gap-2 text-xs">
+              {reinstallJob.phase === "done" ? (
+                <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+              ) : reinstallJob.phase === "error" ? (
+                <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+              ) : (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+              )}
+              <span className="font-medium">
+                {reinstallJob.phase === "done"
+                  ? "Setup complete"
+                  : reinstallJob.phase === "error"
+                    ? "Setup failed"
+                    : PHASE_LABEL[reinstallJob.phase] ?? "Running…"}
+              </span>
+              {(reinstallJob.phase === "done" || reinstallJob.phase === "error") && (
+                <button
+                  className="ml-auto text-muted-foreground hover:text-foreground"
+                  onClick={() => setReinstallJobId(null)}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+            {reinstallJob.error && (
+              <p className="mb-1 whitespace-pre-wrap text-xs text-destructive">{reinstallJob.error}</p>
+            )}
+            <pre
+              ref={reinstallLogRef}
+              className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-2 font-mono text-[11px] leading-snug text-zinc-200"
+            >
+              {reinstallJob.log || "…"}
+            </pre>
+          </div>
         )}
 
         {app.status === "error" && app.error && (

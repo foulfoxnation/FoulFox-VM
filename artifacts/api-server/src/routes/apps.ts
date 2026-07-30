@@ -18,7 +18,7 @@ import {
   STAGING_DIR,
   type AppRecord,
 } from "../lib/app-registry";
-import { startInstall, startInstallFromZip, getJob } from "../lib/app-installer";
+import { startInstall, startInstallFromZip, startReinstall, getJob } from "../lib/app-installer";
 import { ALLOWED_CAPABILITIES, type AppCapability } from "../lib/app-manifest";
 import {
   startApp,
@@ -231,6 +231,31 @@ router.post("/apps/install-file", (req: Request, res: Response) => {
     res
       .status(503)
       .json({ error: err instanceof Error ? err.message : "Could not start install." });
+  }
+});
+
+// POST /apps/:id/reinstall — re-run the install + build steps for an already-
+// installed (or errored) app using the existing cloned repo directory. Useful
+// when an install timed out, hit a transient network error, or the app is
+// stuck in a dependency-collection loop. Stops any running process first.
+router.post("/apps/:id/reinstall", (req: Request, res: Response) => {
+  const id = pathParam(req.params.id);
+  if (!getApp(id)) {
+    res.status(404).json({ error: "No such app." });
+    return;
+  }
+  // Stop the app if it is currently running so the process doesn't hold file
+  // locks while the installer re-runs the build steps.
+  try {
+    stopApp(id);
+  } catch {
+    /* ignore — may not be running */
+  }
+  try {
+    const job = startReinstall(id, [...ALLOWED_CAPABILITIES]);
+    res.status(202).json({ jobId: job.jobId, status: "installing" });
+  } catch (err) {
+    res.status(503).json({ error: err instanceof Error ? err.message : "Could not start reinstall." });
   }
 });
 

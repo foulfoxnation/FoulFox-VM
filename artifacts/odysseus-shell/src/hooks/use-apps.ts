@@ -4,6 +4,7 @@ import {
   startAppInstall,
   startAppZipUpload,
   startAppFileInstall,
+  reinstallApp,
   uninstallApp,
   fetchInstallJob,
   startAppRun,
@@ -119,6 +120,14 @@ export function useUninstallApp() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => uninstallApp(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: APPS_KEY }),
+  });
+}
+
+export function useReinstallApp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => reinstallApp(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: APPS_KEY }),
   });
 }
