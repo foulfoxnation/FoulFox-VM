@@ -293,7 +293,7 @@ export function VmTab({
 
         {/* Full-viewport VNC display */}
         <div className="flex-1 overflow-hidden">
-          <VmDisplay vm={vm} />
+          <VmDisplay vm={vm} onEscape={onMinimize ?? (() => setFullscreen(false))} />
         </div>
       </div>
     );
@@ -685,7 +685,7 @@ export function VmTab({
       {/* Display (top) + per-VM terminal (bottom) */}
       <ResizablePanelGroup direction="vertical" className="flex-1">
         <ResizablePanel defaultSize={65} minSize={25}>
-          <VmDisplay vm={vm} />
+          <VmDisplay vm={vm} onEscape={onMinimize} />
         </ResizablePanel>
         <ResizableHandle withHandle />
         <ResizablePanel defaultSize={35} minSize={15}>
