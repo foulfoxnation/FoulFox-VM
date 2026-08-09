@@ -1,6 +1,6 @@
 import { useRef, useCallback, useEffect, useState, forwardRef, useImperativeHandle, type ForwardedRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, ServerOff, Monitor, MonitorDot } from "lucide-react";
+import { Loader2, ServerOff, Monitor, MonitorDot, Tv2, Server } from "lucide-react";
 import { apiUrl } from "@/lib/api-url";
 import { authedFetch } from "@/lib/shell-token";
 
@@ -34,7 +34,25 @@ export interface AgentChatPaneProps {
   showTargetBadge?: boolean;
 }
 
+type WorkspaceMode = "windows" | "host";
+
 const ODYSSEUS_SRC = apiUrl("/api/odysseus/");
+const CHAT_MODE_KEY = "foulfox-chat-mode";
+
+function loadSavedMode(): WorkspaceMode {
+  try {
+    const saved = localStorage.getItem(CHAT_MODE_KEY);
+    if (saved === "host" || saved === "windows") return saved;
+  } catch { /* ignore */ }
+  return "windows"; // default: Windows VM
+}
+
+interface VmEntry {
+  id: string;
+  name: string;
+  status: string;
+  osKind?: string;
+}
 
 export const AgentChatPane = forwardRef(
 function AgentChatPane({
@@ -86,12 +104,24 @@ function AgentChatPane({
       }
     },
   }));
+
   const loadedRef = useRef(false);
+
   // Label of the target the agent is *confirmed* bound to (updated only on a
   // successful vm-target POST). `bindError` is set when a bind attempt fails so
   // the badge can warn instead of falsely claiming the new target is active.
   const [boundLabel, setBoundLabel] = useState<string | null>(null);
   const [bindError, setBindError] = useState(false);
+
+  // ── Workspace mode toggle ───────────────────────────────────────────────────
+  // "windows" = agent works in the Windows VM by default (stored in localStorage).
+  // "host"    = agent works on the FoulFox OS host.
+  const [chatMode, setChatMode] = useState<WorkspaceMode>(loadSavedMode);
+
+  const handleModeToggle = useCallback((mode: WorkspaceMode) => {
+    setChatMode(mode);
+    try { localStorage.setItem(CHAT_MODE_KEY, mode); } catch { /* ignore */ }
+  }, []);
 
   // ── Offline pane: Retry Setup + on-screen diagnostics ──────────────────────
   const [retrying, setRetrying] = useState(false);
@@ -156,34 +186,66 @@ function AgentChatPane({
 
   const isAlive = status?.alive === true;
 
-  // Identity of the current target, used as the effect key so a re-render with
-  // an equivalent target object does not re-POST.
+  // Fetch running VMs so we can find the Windows VM id for the toggle.
+  const { data: vms } = useQuery<VmEntry[]>({
+    queryKey: ["vms-for-workspace-toggle"],
+    queryFn: async () => {
+      const res = await authedFetch("/api/vms");
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: isAlive,
+    refetchInterval: 30_000,
+    staleTime: 20_000,
+  });
+
+  // Find the first running Windows VM (or any Windows VM if none are running).
+  const windowsVm = vms?.find(v => v.osKind === "windows" && v.status === "running")
+    ?? vms?.find(v => v.osKind === "windows");
+
+  // Identity of the current target (used as the effect key so a re-render with
+  // an equivalent target object does not re-POST).
   const targetKind = target?.kind ?? "host";
   const targetVmId = target?.kind === "vm" ? target.vmId : "";
   const targetLabel =
     target?.label ?? (target?.kind === "vm" ? target.vmId : "Host system");
 
-  // Bind the agent's shell + file tools to whatever workspace the user views.
-  // The selection is process-global in Odysseus, so a single POST per change
-  // keeps the one shared conversation pointed at the right machine.
+  // Resolve which vm-target to bind based on chat mode:
+  //   • "windows" + a Windows VM exists → use that VM
+  //   • "windows" + no Windows VM       → fall back to whatever tab the user is on
+  //   • "host"                          → use the current tab target
+  const resolvedVm = chatMode === "windows" && windowsVm
+    ? windowsVm.id
+    : (targetKind === "vm" ? targetVmId : "host");
+  const resolvedLabel = chatMode === "windows" && windowsVm
+    ? (windowsVm.name ?? windowsVm.id)
+    : targetLabel;
+
+  // Bind the agent's shell + file tools to the resolved workspace and update
+  // the Odysseus backend's workspace-mode context for the chat processor.
   useEffect(() => {
     if (!isAlive) return;
-    const vm = targetKind === "vm" ? targetVmId : "host";
     let cancelled = false;
-    authedFetch("/api/odysseus/api/vm-target", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ vm }),
-    })
-      .then((r) => (r.ok ? r.json() : null))
+
+    Promise.all([
+      authedFetch("/api/odysseus/api/vm-target", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vm: resolvedVm }),
+      }),
+      authedFetch("/api/odysseus/api/workspace-mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: chatMode, vmLabel: resolvedLabel }),
+      }),
+    ])
+      .then(([vmTargetRes]) => vmTargetRes.ok ? vmTargetRes.json() : null)
       .then((data) => {
         if (cancelled) return;
         if (data && data.ok) {
-          setBoundLabel(targetLabel);
+          setBoundLabel(resolvedLabel);
           setBindError(false);
         } else {
-          // Bind failed: keep showing the last confirmed target and warn, since
-          // the agent's tools are still pointed at the previous machine.
           setBindError(true);
         }
       })
@@ -191,10 +253,9 @@ function AgentChatPane({
         if (cancelled) return;
         setBindError(true);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [targetKind, targetVmId, targetLabel, isAlive, shellToken]);
+
+    return () => { cancelled = true; };
+  }, [chatMode, resolvedVm, resolvedLabel, isAlive, shellToken]);
 
   // Deliver pending terminal context to Odysseus's native /api/chat endpoint.
   // This creates a real chat session, then reloads the iframe so the new
@@ -289,12 +350,67 @@ function AgentChatPane({
 
   return (
     <div className="flex h-full w-full flex-col" data-testid="agent-chat-container">
+
+      {/* ── Workspace toggle ─────────────────────────────────────────────────── */}
+      <div
+        className="flex items-center gap-2 border-b bg-muted/30 px-3 py-1.5"
+        data-testid="workspace-toggle-bar"
+      >
+        {/* Pill toggle */}
+        <div className="flex items-center rounded-full border bg-background p-0.5 shadow-sm">
+          <button
+            onClick={() => handleModeToggle("host")}
+            data-testid="workspace-toggle-host"
+            title="Agent works on FoulFox OS (the host)"
+            className={[
+              "flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all",
+              chatMode === "host"
+                ? "bg-primary text-primary-foreground shadow"
+                : "text-muted-foreground hover:text-foreground",
+            ].join(" ")}
+          >
+            <Server className="h-3 w-3" />
+            FoulFox OS
+          </button>
+          <button
+            onClick={() => handleModeToggle("windows")}
+            data-testid="workspace-toggle-windows"
+            title="Agent works inside the Windows VM by default"
+            className={[
+              "flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all",
+              chatMode === "windows"
+                ? "bg-primary text-primary-foreground shadow"
+                : "text-muted-foreground hover:text-foreground",
+            ].join(" ")}
+          >
+            <Tv2 className="h-3 w-3" />
+            Windows VM
+          </button>
+        </div>
+
+        {/* Bound-to indicator */}
+        <span className="text-[10px] text-muted-foreground">
+          {chatMode === "windows" && windowsVm
+            ? <>Agent → <span className="font-medium text-foreground">{windowsVm.name ?? windowsVm.id}</span></>
+            : chatMode === "windows" && !windowsVm
+            ? <span className="text-amber-500">No Windows VM running</span>
+            : <>Agent → <span className="font-medium text-foreground">FoulFox OS</span></>
+          }
+          {bindError && (
+            <span className="ml-1.5 text-destructive" data-testid="agent-chat-bind-error">
+              · bind failed
+            </span>
+          )}
+        </span>
+      </div>
+
+      {/* ── Optional "acting on" badge (side-panel mode) ────────────────────── */}
       {showTargetBadge && (
         <div
           className="flex items-center gap-1.5 border-b bg-muted/40 px-3 py-1 text-[11px] text-muted-foreground"
           data-testid="agent-chat-target"
         >
-          {targetKind === "vm" ? (
+          {chatMode === "windows" && windowsVm ? (
             <MonitorDot className="h-3.5 w-3.5 text-primary" />
           ) : (
             <Monitor className="h-3.5 w-3.5" />
@@ -302,12 +418,13 @@ function AgentChatPane({
           <span className="text-muted-foreground">Agent acting on:</span>
           <span className="font-medium text-foreground">{boundLabel ?? "binding…"}</span>
           {bindError && (
-            <span className="text-destructive" data-testid="agent-chat-bind-error">
-              · couldn't switch to {targetLabel}
+            <span className="text-destructive" data-testid="agent-chat-bind-error-badge">
+              · couldn't switch to {resolvedLabel}
             </span>
           )}
         </div>
       )}
+
       <iframe
         ref={iframeRef}
         src={ODYSSEUS_SRC}

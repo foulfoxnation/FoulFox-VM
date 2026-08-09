@@ -199,6 +199,34 @@ class ChatProcessor:
                 "content": preset_system_prompt
             })
 
+        # Workspace mode: when the user has toggled "Windows VM" in the shell,
+        # prepend a trusted system context so the agent knows to work in the VM
+        # by default without needing to be told every turn. This is static for
+        # the duration of the mode setting so it is safe in a system message
+        # (does not pollute the KV-cache per-turn).
+        try:
+            from src.vm_target import get_workspace_mode, get_workspace_vm_label
+            _wmode = get_workspace_mode()
+            if _wmode == "windows":
+                _vm_label = get_workspace_vm_label() or "the Windows VM"
+                preface.append({
+                    "role": "system",
+                    "content": (
+                        f"WORKSPACE: Windows VM mode is active. {_vm_label} is pre-selected "
+                        f"as your working environment.\n"
+                        "• When the user asks you to build, code, install, run, test, or work on "
+                        "ANYTHING, do it inside the Windows VM by default — not on the FoulFox OS host.\n"
+                        "• bash / python / write_file / read_file / edit_file / ls / grep are already "
+                        "routed to PowerShell on the Windows guest — use them directly.\n"
+                        "• Use vm_computer (screenshot → click/type/key) to drive the Windows GUI when needed.\n"
+                        "• You do NOT need to call select_vm — the VM is pre-selected.\n"
+                        "• If you need to check the Windows desktop state first, call "
+                        "vm_app with action='playbook' and engine='windows' for a full navigation guide."
+                    ),
+                })
+        except Exception as _e:  # noqa: BLE001
+            logger.debug("workspace mode injection skipped: %s", _e)
+
         # 3-agent-suite guide rails + scoped lessons (P4). When this session
         # belongs to a suite member (Windows / Game / Architect), inject the
         # role's guide rails (its persona) — only when no preset already

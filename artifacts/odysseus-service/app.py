@@ -900,6 +900,32 @@ async def set_vm_target(request: Request) -> JSONResponse:
     )
 
 
+@app.get("/api/workspace-mode")
+async def get_workspace_mode_endpoint() -> Dict[str, object]:
+    """Return the current shell workspace mode ('windows' or 'host')."""
+    from src.vm_target import get_workspace_mode, get_workspace_vm_label
+    return {"mode": get_workspace_mode(), "vmLabel": get_workspace_vm_label()}
+
+
+@app.post("/api/workspace-mode")
+async def set_workspace_mode_endpoint(request: Request) -> JSONResponse:
+    """Set the workspace mode from the shell 'FoulFox OS / Windows VM' toggle.
+
+    Body: ``{"mode": "windows"|"host", "vmLabel": "<human name>"}``.
+    When mode is 'windows' the chat processor injects a system context message
+    that tells the agent to work in the Windows VM by default.
+    """
+    from src.vm_target import set_workspace_mode
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    mode = str(body.get("mode", "host")) if isinstance(body, dict) else "host"
+    vm_label = body.get("vmLabel") if isinstance(body, dict) else None
+    set_workspace_mode(mode, vm_label=vm_label)
+    return JSONResponse({"ok": True, "mode": mode})
+
+
 @app.get("/api/runtime")
 async def runtime_info() -> Dict[str, object]:
     in_docker = os.path.exists("/.dockerenv")
