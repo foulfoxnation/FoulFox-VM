@@ -180,9 +180,11 @@ FUNCTION_TOOL_SCHEMAS = [
                 "Use action='screenshot' to capture the screen — it is returned to you as an image. "
                 "ALWAYS screenshot before clicking/typing so you know the current layout and exact pixel "
                 "positions. Then act: move, click, double_click, right_click, middle_click, mouse_down, "
-                "mouse_up, drag, scroll, type (text), or key (a key/chord like ctrl+c). x,y are pixel "
-                "coordinates in the most recent screenshot, origin at the top-left. After an input action, "
-                "screenshot again to observe the result."
+                "mouse_up, drag, scroll (up/down/left/right), type (text, character-by-character), "
+                "paste (writes text to clipboard via SSH then Ctrl+V — USE THIS for multi-line code, "
+                "large blocks, or text with special/Unicode characters), or key (a key/chord like ctrl+c). "
+                "x,y are pixel coordinates in the most recent screenshot, origin at the top-left. "
+                "After an input action, screenshot again to observe the result."
             ),
             "parameters": {
                 "type": "object",
@@ -190,19 +192,24 @@ FUNCTION_TOOL_SCHEMAS = [
                     "action": {
                         "type": "string",
                         "enum": ["screenshot", "move", "click", "double_click", "right_click",
-                                 "middle_click", "mouse_down", "mouse_up", "drag", "scroll", "type", "key"],
-                        "description": "What to do. 'screenshot' returns an image; the rest are mouse/keyboard input."
+                                 "middle_click", "mouse_down", "mouse_up", "drag", "scroll",
+                                 "type", "paste", "key"],
+                        "description": (
+                            "What to do. 'screenshot' returns an image; the rest are mouse/keyboard input. "
+                            "'paste' sets the VM clipboard via SSH then sends Ctrl+V — preferred over 'type' "
+                            "for any text longer than a few words, multi-line content, or non-ASCII characters."
+                        )
                     },
                     "x": {"type": "integer", "description": "Target X pixel (move/click/drag start/scroll position)."},
                     "y": {"type": "integer", "description": "Target Y pixel (move/click/drag start/scroll position)."},
                     "x2": {"type": "integer", "description": "Drag END X pixel (action=drag)."},
                     "y2": {"type": "integer", "description": "Drag END Y pixel (action=drag)."},
                     "button": {"type": "string", "enum": ["left", "right", "middle"], "description": "Mouse button (default left)."},
-                    "text": {"type": "string", "description": "Text to type (action=type)."},
+                    "text": {"type": "string", "description": "Text to type character-by-character (action=type) OR text to paste via clipboard (action=paste)."},
                     "keys": {"type": "array", "items": {"type": "string"}, "description": "Key chord to press together, e.g. ['ctrl','c'] or ['alt','Tab'] (action=key)."},
                     "key": {"type": "string", "description": "A single key to press, e.g. 'Return', 'Escape', 'Tab' (action=key)."},
                     "amount": {"type": "integer", "description": "Scroll amount in wheel clicks (action=scroll, default 3)."},
-                    "direction": {"type": "string", "enum": ["up", "down"], "description": "Scroll direction (action=scroll, default down)."}
+                    "direction": {"type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction (action=scroll, default down)."}
                 },
                 "required": ["action"]
             }

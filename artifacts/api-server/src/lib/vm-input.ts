@@ -182,7 +182,11 @@ export function actionToEventBatches(
     }
     case "scroll": {
       const dir = (a.direction || "down").toLowerCase();
-      const wheel = dir === "up" ? "wheel-up" : "wheel-down";
+      const wheel =
+        dir === "up" ? "wheel-up" :
+        dir === "left" ? "wheel-left" :
+        dir === "right" ? "wheel-right" :
+        "wheel-down";
       const clicks = Math.max(1, Math.min(Math.floor(a.amount ?? 3), 30));
       const batches: unknown[][] = [];
       if (hasXY) batches.push(absEvents(a.x!, a.y!, screenW, screenH));

@@ -291,13 +291,47 @@ router.post("/vm/:id/input", async (req: Request, res: Response) => {
     return;
   }
   const body = (req.body ?? {}) as { actions?: InputAction[]; type?: string; screenW?: number; screenH?: number };
-  const actions: InputAction[] = Array.isArray(body.actions)
+  const rawActions: InputAction[] = Array.isArray(body.actions)
     ? body.actions
     : body.type
     ? [body as InputAction]
     : [];
-  if (actions.length === 0) {
+  if (rawActions.length === 0) {
     res.status(400).json({ error: "No actions provided" });
+    return;
+  }
+
+  // ── Paste pre-processing ────────────────────────────────────────────────────
+  // "paste" is a high-level action: write the text to the guest clipboard via
+  // SSH (PowerShell Set-Clipboard) then substitute a Ctrl+V QMP action. This
+  // lets the agent paste arbitrarily large / multi-line / Unicode text into
+  // any focused UI element without having to type every character individually.
+  const resolvedActions: InputAction[] = [];
+  for (const a of rawActions) {
+    if ((a.type || "").toLowerCase() === "paste") {
+      const text = String(a.text ?? "");
+      if (!text) continue; // skip empty paste silently
+      // Base64-encode the text so it passes safely through PowerShell quoting.
+      // The base64 alphabet (A-Z a-z 0-9 + / =) is safe inside PS single-quotes.
+      const b64 = Buffer.from(text, "utf-8").toString("base64");
+      const psCmd = `powershell -NoProfile -NonInteractive -Command "[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64}')) | Set-Clipboard"`;
+      const r = await runSshCommand(vm, psCmd, 15_000);
+      if (!r.ok) {
+        res.status(502).json({
+          error: `paste: could not set clipboard via SSH — ${r.stderr.trim() || "check that the VM is running and has an SSH key (re-provision if needed)"}`,
+        });
+        return;
+      }
+      // After setting the clipboard, inject a Ctrl+V to paste it into the focused element.
+      resolvedActions.push({ type: "key", keys: ["ctrl", "v"] });
+      continue;
+    }
+    resolvedActions.push(a);
+  }
+
+  const actions = resolvedActions;
+  if (actions.length === 0) {
+    res.json({ success: true, actions: 0, screenW: 0, screenH: 0 });
     return;
   }
 

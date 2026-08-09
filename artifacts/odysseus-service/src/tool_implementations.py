@@ -2223,6 +2223,10 @@ def _describe_vm_action(action: str, args: Dict[str, Any]) -> str:
         txt = str(args.get("text", ""))
         preview = txt if len(txt) <= 40 else txt[:40] + "…"
         return f"type {preview!r}"
+    if action == "paste":
+        txt = str(args.get("text", ""))
+        preview = txt if len(txt) <= 40 else txt[:40] + "…"
+        return f"paste (clipboard) {preview!r}"
     if action == "key":
         keys = args.get("keys") or ([args.get("key")] if args.get("key") else [])
         return f"key {'+'.join(str(k) for k in keys)}"
@@ -2249,7 +2253,7 @@ async def do_vm_computer(vm_id: str, content: str, owner: Optional[str] = None) 
     if not action:
         return {
             "error": "vm_computer requires an 'action' (screenshot, move, click, double_click, "
-                     "right_click, middle_click, mouse_down, mouse_up, drag, scroll, type, key).",
+                     "right_click, middle_click, mouse_down, mouse_up, drag, scroll, type, paste, key).",
             "exit_code": 1,
         }
 
