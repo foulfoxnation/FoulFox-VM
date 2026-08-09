@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { SettingsModal } from "@/components/SettingsModal";
-import { DiskInstallPanel } from "@/components/DiskInstallPanel";
+import { DiskSetupModal } from "@/components/DiskSetupModal";
 import { PowerMenu } from "@/components/PowerMenu";
 import { SetupWizard } from "@/components/SetupWizard";
 import { ConnectLlamaModal } from "@/components/ConnectLlamaModal";
@@ -179,7 +179,7 @@ export default function Home() {
           <OdysseusUpdateButton />
           <ConnectLlamaModal />
           <SnapshotModal />
-          <DiskInstallPanel />
+          <DiskSetupModal />
           <PowerMenu />
           <SettingsModal />
         </div>

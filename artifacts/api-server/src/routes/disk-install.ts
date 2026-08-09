@@ -178,11 +178,23 @@ router.post("/os/disk-install/start", (req: Request, res: Response) => {
     return;
   }
 
+  // Partition sizes (GiB). Validated: OS ≥ 60, data ≥ 20.
+  const osSizeGb   = typeof req.body?.osSizeGb   === "number" ? Math.round(req.body.osSizeGb)   : 150;
+  const dataSizeGb = typeof req.body?.dataSizeGb  === "number" ? Math.round(req.body.dataSizeGb) : 100;
+  if (osSizeGb < 60 || osSizeGb > 8000) {
+    res.status(400).json({ ok: false, error: `osSizeGb must be between 60 and 8000 (got ${osSizeGb}).` });
+    return;
+  }
+  if (dataSizeGb < 20 || dataSizeGb > 8000) {
+    res.status(400).json({ ok: false, error: `dataSizeGb must be between 20 and 8000 (got ${dataSizeGb}).` });
+    return;
+  }
+
   patch({
     status: "running",
     step: "starting",
     pct: 0,
-    msg: `Starting installation to ${targetDisk}…`,
+    msg: `Starting installation to ${targetDisk} (OS ${osSizeGb} GiB + VM data ${dataSizeGb} GiB)…`,
     targetDisk,
     startedAt: Date.now(),
     finishedAt: null,
@@ -190,6 +202,11 @@ router.post("/os/disk-install/start", (req: Request, res: Response) => {
 
   const proc = spawn("sudo", ["-n", INSTALL_HELPER, targetDisk, "--confirm"], {
     stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      OS_SIZE_GiB:   String(osSizeGb),
+      DATA_SIZE_GiB: String(dataSizeGb),
+    },
   });
 
   let stderrBuf = "";

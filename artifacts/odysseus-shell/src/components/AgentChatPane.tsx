@@ -190,9 +190,11 @@ function AgentChatPane({
   const { data: vms } = useQuery<VmEntry[]>({
     queryKey: ["vms-for-workspace-toggle"],
     queryFn: async () => {
-      const res = await authedFetch("/api/vms");
+      const res = await authedFetch("/api/vm/list");
       if (!res.ok) return [];
-      return res.json();
+      const data = await res.json() as { vms?: VmEntry[] } | VmEntry[];
+      // api-server returns { vms: [...] } shape
+      return Array.isArray(data) ? data : (data as { vms?: VmEntry[] }).vms ?? [];
     },
     enabled: isAlive,
     refetchInterval: 30_000,
