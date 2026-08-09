@@ -47,7 +47,7 @@ class LoopState:
         self.phase: str = "idle"
         self.last_report: Optional[dict] = None
         self.last_sent_at: Optional[float] = None
-        self.replit_url: str = "https://replit.com"
+        self.replit_url: str = "https://replit.com/@foulfoxnation/Odysseus-VM?settings.tab=usage"
         self.auto_send: bool = True
         self.all_passed: bool = False
         self.stopped_reason: Optional[str] = None
@@ -453,8 +453,11 @@ async def _run_loop(state: LoopState, max_iterations: int = 20) -> None:
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
+_REPLIT_URL = "https://replit.com/@foulfoxnation/Odysseus-VM?settings.tab=usage"
+
+
 def start_loop(
-    replit_url:     str  = "https://replit.com",
+    replit_url:     str  = _REPLIT_URL,
     auto_send:      bool = True,
     max_iterations: int  = 20,
 ) -> dict:
@@ -511,6 +514,6 @@ def auto_start_after_update() -> bool:
     sentinel = _read_sentinel()
     if not sentinel:
         return False
-    replit_url = sentinel.get("replit_url", "https://replit.com")
+    replit_url = sentinel.get("replit_url", _REPLIT_URL)
     result = start_loop(replit_url=replit_url, auto_send=True)
     return result.get("ok", False)

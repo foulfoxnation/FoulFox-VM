@@ -317,9 +317,12 @@ REPLIT_SUBMIT_SELECTORS = [
 ]
 
 
+_REPLIT_PROJECT_URL = "https://replit.com/@foulfoxnation/Odysseus-VM?settings.tab=usage"
+
+
 async def paste_report_to_replit(
     report_markdown: str,
-    replit_url: str = "https://replit.com",
+    replit_url: str = _REPLIT_PROJECT_URL,
     debug_port: int = 9222,
 ) -> dict:
     """
@@ -413,7 +416,7 @@ async def _wait_for_firefox_cdp(debug_port: int = FIREFOX_CDP_PORT, timeout: flo
 
 async def paste_report_via_firefox(
     report_markdown: str,
-    replit_url: str = "https://replit.com",
+    replit_url: str = _REPLIT_PROJECT_URL,
     expected_project: str = REPLIT_PROJECT_TITLE,
     debug_port: int = FIREFOX_CDP_PORT,
 ) -> dict:
