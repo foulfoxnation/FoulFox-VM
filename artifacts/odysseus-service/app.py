@@ -1214,6 +1214,20 @@ async def _startup_event():
     from src.cookbook_serve_lifecycle import cookbook_serve_lifecycle_loop
     _startup_tasks.append(asyncio.create_task(cookbook_serve_lifecycle_loop()))
 
+    # ── Post-update auto-resume ───────────────────────────────────────────────
+    # If the previous bug-fix loop triggered an update + reboot, a sentinel file
+    # survives on persistent storage. Detect it here and automatically resume the
+    # loop so the agent waits for services, generates a report, and pastes it to
+    # Replit via Firefox — no manual intervention needed.
+    try:
+        from src.bug_loop import auto_start_after_update
+        if auto_start_after_update():
+            logger.info("[startup] Post-reboot sentinel found — bug-fix loop auto-resumed.")
+        else:
+            logger.debug("[startup] No post-reboot sentinel — normal startup.")
+    except Exception as _e:
+        logger.warning(f"[startup] Post-reboot auto-start check failed (non-critical): {_e}")
+
     logger.info("Application startup complete")
 
 async def _shutdown_event():

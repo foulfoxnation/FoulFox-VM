@@ -57,6 +57,27 @@ while ! curl -sf -o /dev/null "$url"; do
 done
 [ -n "$splash_pid" ] && kill "$splash_pid" 2>/dev/null
 
+# ── Firefox (always-on, taskbar-visible, CDP-accessible for agent automation) ─
+# Firefox stays open as a regular window (not kiosk/fullscreen) so tint2 shows
+# it in the taskbar and the AI agent can navigate to Replit, confirm the project
+# name, and paste diagnostic reports via CDP on port 9223.
+# --remote-debugging-port=9223 keeps it separate from Chromium (port 9222).
+# --no-remote: prevents re-using an existing instance so the flag is honoured.
+# A short sleep gives the window manager time to place the window before Chromium
+# opens and takes focus.
+(
+  while true; do
+    firefox \
+      --no-remote \
+      --remote-debugging-port=9223 \
+      --remote-debugging-address=127.0.0.1 \
+      about:blank \
+      2>/dev/null || true
+    sleep 5
+  done
+) &
+sleep 2
+
 # ── PulseAudio (required for Voice Forge mic + speaker access) ───────────────
 # Start PulseAudio as a user-mode daemon for the foulfox kiosk session.
 # Chromium uses PulseAudio for getUserMedia (microphone) and audio output

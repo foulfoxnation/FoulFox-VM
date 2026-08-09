@@ -383,3 +383,129 @@ async def paste_report_to_replit(
 
     except Exception as exc:
         return {"ok": False, "detail": str(exc), "screenshot": None}
+
+
+# ── Firefox CDP helpers ────────────────────────────────────────────────────────
+
+FIREFOX_CDP_PORT = 9223   # Firefox is launched with --remote-debugging-port=9223
+
+# Replit project title must contain this string for the confirmation to pass.
+REPLIT_PROJECT_TITLE = "Odysseus VM"
+
+
+async def _wait_for_firefox_cdp(debug_port: int = FIREFOX_CDP_PORT, timeout: float = 30.0) -> bool:
+    """
+    Poll the Firefox CDP HTTP endpoint until it responds or timeout.
+    Firefox must already be running with --remote-debugging-port=<debug_port>.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            url = f"http://127.0.0.1:{debug_port}/json/version"
+            resp = urllib.request.urlopen(url, timeout=3)
+            if resp.status == 200:
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(2)
+    return False
+
+
+async def paste_report_via_firefox(
+    report_markdown: str,
+    replit_url: str = "https://replit.com",
+    expected_project: str = REPLIT_PROJECT_TITLE,
+    debug_port: int = FIREFOX_CDP_PORT,
+) -> dict:
+    """
+    Connect to the always-running Firefox instance via CDP on port 9223.
+    Navigate to the Replit project, confirm the page title contains
+    expected_project, then paste report_markdown into the AI chat input.
+
+    Firefox is launched at OS startup with --remote-debugging-port=9223 so it
+    is always available without needing to spawn a new process here.
+
+    Returns {"ok": bool, "detail": str, "screenshot": str|None}
+    """
+    # ── 1. Make sure Firefox CDP is up ────────────────────────────────────────
+    cdp_ready = await _wait_for_firefox_cdp(debug_port=debug_port, timeout=30)
+    if not cdp_ready:
+        return {
+            "ok":     False,
+            "detail": (
+                f"Firefox CDP not reachable on port {debug_port}. "
+                "Check that Firefox was launched with --remote-debugging-port=9223."
+            ),
+            "screenshot": None,
+        }
+
+    try:
+        async with HostBrowser(debug_port=debug_port) as browser:
+            # ── 2. Navigate to the Replit project ─────────────────────────────
+            current = await browser.get_url()
+            if replit_url not in current:
+                await browser.navigate(replit_url, wait_load=True, timeout=40)
+                await asyncio.sleep(4)   # give Replit SPA time to hydrate
+
+            # ── 3. Confirm project name ────────────────────────────────────────
+            title = await browser.get_title()
+            if expected_project and expected_project.lower() not in title.lower():
+                # Try once more after a short pause (SPAs update title lazily)
+                await asyncio.sleep(3)
+                title = await browser.get_title()
+
+            if expected_project and expected_project.lower() not in title.lower():
+                screenshot = await browser.screenshot()
+                return {
+                    "ok":     False,
+                    "detail": (
+                        f"Page title '{title}' does not contain '{expected_project}'. "
+                        "Are we on the right Replit project?"
+                    ),
+                    "screenshot": screenshot,
+                }
+
+            # ── 4. Find the chat input ─────────────────────────────────────────
+            input_sel = None
+            for sel in REPLIT_CHAT_SELECTORS:
+                if await browser.wait_for_selector(sel, timeout=6):
+                    input_sel = sel
+                    break
+
+            if input_sel is None:
+                screenshot = await browser.screenshot()
+                return {
+                    "ok":     False,
+                    "detail": "Could not find Replit chat input — is the AI chat panel open?",
+                    "screenshot": screenshot,
+                }
+
+            # ── 5. Paste the report ────────────────────────────────────────────
+            await browser.focus_selector(input_sel)
+            await asyncio.sleep(0.3)
+            await browser.insert_text(report_markdown)
+            await asyncio.sleep(0.5)
+
+            # Submit
+            submitted = False
+            for sel in REPLIT_SUBMIT_SELECTORS:
+                try:
+                    await browser.click_selector(sel)
+                    submitted = True
+                    break
+                except Exception:
+                    continue
+            if not submitted:
+                await browser.key("Enter")
+
+            await asyncio.sleep(1)
+            screenshot = await browser.screenshot()
+            final_url  = await browser.get_url()
+            return {
+                "ok":     True,
+                "detail": f"Report pasted to {final_url} (project: '{title}')",
+                "screenshot": screenshot,
+            }
+
+    except Exception as exc:
+        return {"ok": False, "detail": str(exc), "screenshot": None}
