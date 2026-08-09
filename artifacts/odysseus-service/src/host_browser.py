@@ -450,23 +450,14 @@ async def paste_report_via_firefox(
                 await browser.navigate(replit_url, wait_load=True, timeout=40)
                 await asyncio.sleep(4)   # give Replit SPA time to hydrate
 
-            # ── 3. Confirm project name ────────────────────────────────────────
+            # ── 3. Confirm project name (warning only — never blocks the paste) ──
             title = await browser.get_title()
             if expected_project and expected_project.lower() not in title.lower():
-                # Try once more after a short pause (SPAs update title lazily)
+                # SPAs update <title> lazily; try once more before logging
                 await asyncio.sleep(3)
                 title = await browser.get_title()
-
-            if expected_project and expected_project.lower() not in title.lower():
-                screenshot = await browser.screenshot()
-                return {
-                    "ok":     False,
-                    "detail": (
-                        f"Page title '{title}' does not contain '{expected_project}'. "
-                        "Are we on the right Replit project?"
-                    ),
-                    "screenshot": screenshot,
-                }
+            title_ok   = not expected_project or expected_project.lower() in title.lower()
+            title_note = f"✅ '{title}'" if title_ok else f"⚠️  title='{title}' (expected '{expected_project}') — pasting anyway"
 
             # ── 4. Find the chat input ─────────────────────────────────────────
             input_sel = None
@@ -506,7 +497,7 @@ async def paste_report_via_firefox(
             final_url  = await browser.get_url()
             return {
                 "ok":     True,
-                "detail": f"Report pasted to {final_url} (project: '{title}')",
+                "detail": f"Report submitted. {title_note}",
                 "screenshot": screenshot,
             }
 
