@@ -20,9 +20,9 @@ async def do_generate_system_report(
     content: str = "",
     owner: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Run all 15 system-health checks and return a structured + markdown report."""
+    """Run all capability checks and return a structured + markdown report."""
     try:
-        from src.diagnostics import build_report
+        from src.diagnostics import run_all_checks, build_report
     except ImportError as e:
         return {"error": f"diagnostics module unavailable: {e}", "exit_code": 1}
 
@@ -34,7 +34,8 @@ async def do_generate_system_report(
     include_markdown: bool = args.get("include_markdown", True)
 
     try:
-        report = await build_report()
+        all_checks = await run_all_checks()
+        report = build_report(all_checks)
         summary = report.get("summary", {})
         checks  = report.get("checks", [])
 
@@ -184,7 +185,9 @@ async def do_send_report_to_replit(
 
     # 1. Run diagnostics
     try:
-        report = await build_report()
+        from src.diagnostics import run_all_checks, build_report as _build
+        checks = await run_all_checks()
+        report = _build(checks)
     except Exception as exc:
         return {"error": f"Diagnostics failed: {exc}", "exit_code": 1}
 
