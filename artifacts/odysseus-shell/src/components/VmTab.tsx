@@ -38,7 +38,9 @@ import { useVmLifecycle, useDeleteVm, useRetryProvision, useCancelProvision, use
 import { useToast } from "@/hooks/use-toast";
 import {
   checkAgentHealth, backupProject, listBackups, restoreBackup, setProjectPath as apiSetProjectPath,
+  getWinBackupStatus, triggerWinBackup,
   type AgentHealth, type VmSummary, type VmLifecycleAction, type BackupInfo,
+  type WinBackupStatus, type WinBackupSnapshot,
 } from "@/lib/vm-api";
 
 function formatUptime(seconds: number | null) {
@@ -70,6 +72,44 @@ export function VmTab({
   const [health, setHealth] = useState<AgentHealth | null>(null);
   const [checking, setChecking] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+
+  // ── Windows backup state ──────────────────────────────────────────────────
+  const [winBackupOpen,   setWinBackupOpen]   = useState(false);
+  const [winBackupBusy,   setWinBackupBusy]   = useState(false);
+  const [winStatus,       setWinStatus]       = useState<WinBackupStatus | null>(null);
+  const [winSnapshots,    setWinSnapshots]     = useState<WinBackupSnapshot[]>([]);
+  const [winStatusLoading, setWinStatusLoading] = useState(false);
+
+  // Refresh Windows backup status whenever the panel opens.
+  useEffect(() => {
+    if (!winBackupOpen || vm.osKind !== "windows") return;
+    setWinStatusLoading(true);
+    getWinBackupStatus(vm.id)
+      .then(({ status, snapshots }) => { setWinStatus(status); setWinSnapshots(snapshots); })
+      .catch(() => {})
+      .finally(() => setWinStatusLoading(false));
+  }, [winBackupOpen, vm.id, vm.osKind]);
+
+  const handleWinBackup = async () => {
+    setWinBackupBusy(true);
+    try {
+      const result = await triggerWinBackup(vm.id);
+      const mb = ((result.status?.sizeBytes ?? 0) / 1024 / 1024).toFixed(1);
+      toast({
+        title: result.ok ? "Windows backup complete" : "Windows backup partial",
+        description: result.ok ? `${mb} MB saved` : result.detail,
+        variant: result.ok ? "default" : "destructive",
+      });
+      // Refresh status after run.
+      const fresh = await getWinBackupStatus(vm.id);
+      setWinStatus(fresh.status);
+      setWinSnapshots(fresh.snapshots);
+    } catch (e) {
+      toast({ title: "Windows backup failed", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setWinBackupBusy(false);
+    }
+  };
 
   // ── Project backup state ──────────────────────────────────────────────────
   const [projectPath, setProjectPath] = useState<string>(vm.projectPath ?? "");
@@ -681,6 +721,113 @@ export function VmTab({
           </div>
         )}
       </div>
+
+      {/* Windows folder backup panel (Windows VMs only) */}
+      {vm.osKind === "windows" && (
+        <div className="border-b bg-muted/10">
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-4 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setWinBackupOpen((o) => !o)}
+          >
+            <Archive className="h-3.5 w-3.5 shrink-0" />
+            <span className="font-medium">Windows Backup</span>
+            {winStatus?.lastBackupAt && (
+              <span className="ml-1 truncate font-mono text-[10px] text-muted-foreground/70">
+                last: {new Date(winStatus.lastBackupAt).toLocaleString()}
+              </span>
+            )}
+            {winStatus?.state === "ok" && (
+              <span className="ml-1 text-[10px] text-emerald-500">✓</span>
+            )}
+            {winStatus?.state === "failed" && (
+              <span className="ml-1 text-[10px] text-destructive">✗</span>
+            )}
+            <ChevronDown
+              className={`ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${winBackupOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+
+          {winBackupOpen && (
+            <div className="border-t px-4 pb-3 pt-2 space-y-2">
+              {/* Status row */}
+              {winStatusLoading && (
+                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Checking backup status…
+                </div>
+              )}
+              {!winStatusLoading && winStatus && winStatus.state !== "never" && (
+                <div className="text-[11px] text-muted-foreground space-y-0.5">
+                  <div>
+                    <span className="font-medium">Last backup: </span>
+                    {winStatus.lastBackupAt
+                      ? new Date(winStatus.lastBackupAt).toLocaleString()
+                      : "—"}
+                    {winStatus.sizeBytes > 0 && (
+                      <span className="ml-2 text-muted-foreground/70">
+                        ({(winStatus.sizeBytes / 1024 / 1024).toFixed(1)} MB)
+                      </span>
+                    )}
+                  </div>
+                  {winStatus.copiedFolders?.length > 0 && (
+                    <div>
+                      <span className="font-medium">Folders: </span>
+                      {winStatus.copiedFolders.join(", ")}
+                    </div>
+                  )}
+                  {winStatus.lastError && (
+                    <div className="text-destructive/80">
+                      <span className="font-medium">Error: </span>{winStatus.lastError}
+                    </div>
+                  )}
+                </div>
+              )}
+              {!winStatusLoading && winStatus?.state === "never" && (
+                <p className="text-[11px] text-muted-foreground">
+                  No backups yet. Documents, Desktop, and Downloads are pulled every 6 hours automatically.
+                </p>
+              )}
+
+              {/* Back up now button */}
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-7"
+                disabled={!isRunning || winBackupBusy}
+                title={!isRunning ? "Start the VM to take a backup" : "Pull Documents, Desktop & Downloads now"}
+                onClick={() => void handleWinBackup()}
+              >
+                {winBackupBusy ? (
+                  <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Backing up…</>
+                ) : (
+                  <><Archive className="mr-1.5 h-3.5 w-3.5" />Back up now</>
+                )}
+              </Button>
+
+              {/* Snapshot list */}
+              {winSnapshots.length > 0 && (
+                <div className="space-y-1 pt-1">
+                  {winSnapshots.map((snap) => (
+                    <div
+                      key={snap.snapshotId}
+                      className="flex items-center justify-between rounded border bg-background px-2 py-1"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate font-mono text-[10px]">
+                          {new Date(snap.createdAt).toLocaleString()}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {snap.folders.join(", ")} · {(snap.sizeBytes / 1024 / 1024).toFixed(1)} MB
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Display (top) + per-VM terminal (bottom) */}
       <ResizablePanelGroup direction="vertical" className="flex-1">

@@ -771,6 +771,9 @@ app.include_router(setup_claude_routes())
 from routes.vault_routes import setup_vault_routes
 app.include_router(setup_vault_routes())
 
+from routes.vm_backup_routes import router as vm_backup_router
+app.include_router(vm_backup_router)
+
 # Contacts (CardDAV)
 from routes.contacts_routes import setup_contacts_routes
 app.include_router(setup_contacts_routes())
@@ -1220,6 +1223,9 @@ async def _startup_event():
     # loop so the agent waits for services, generates a report, and pastes it to
     # Replit via Firefox — no manual intervention needed.
     try:
+        from src.vm_backup import start_backup_scheduler
+        start_backup_scheduler()
+
         from src.bug_loop import auto_start_after_update
         if auto_start_after_update():
             logger.info("[startup] Post-reboot sentinel found — bug-fix loop auto-resumed.")

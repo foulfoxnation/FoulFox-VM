@@ -480,3 +480,60 @@ export function displayWsUrl(vm: VmSummary): string {
 export function provisionStreamUrl(id: string): string {
   return apiUrl(`/api/vm/${encodeURIComponent(id)}/provision/stream`);
 }
+
+// ── Windows VM folder backup ───────────────────────────────────────────────────
+
+export interface WinBackupSnapshot {
+  snapshotId: string;
+  vmId:       string;
+  createdAt:  string;   // ISO-8601
+  sizeBytes:  number;
+  folders:    string[];
+}
+
+export interface WinBackupStatus {
+  vmId:          string;
+  state:         "never" | "ok" | "partial" | "failed" | "error";
+  lastBackupAt:  string | null;
+  lastError:     string | null;
+  sizeBytes:     number;
+  durationSec?:  number;
+  copiedFolders: string[];
+  snapshots:     string[];
+}
+
+export interface WinBackupStatusResponse {
+  status:    WinBackupStatus;
+  snapshots: WinBackupSnapshot[];
+}
+
+export async function getWinBackupStatus(id: string): Promise<WinBackupStatusResponse> {
+  const res = await authedFetch(
+    `/api/vm/${encodeURIComponent(id)}/windows-backup/status`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function listWinBackups(id: string): Promise<WinBackupSnapshot[]> {
+  const res = await authedFetch(`/api/vm/${encodeURIComponent(id)}/windows-backups`);
+  if (!res.ok) throw new Error(await parseError(res));
+  const j = await res.json();
+  return j.snapshots ?? [];
+}
+
+export async function triggerWinBackup(
+  id:      string,
+  folders?: string[],
+): Promise<{ ok: boolean; detail: string; status?: WinBackupStatus }> {
+  const res = await authedFetch(
+    `/api/vm/${encodeURIComponent(id)}/windows-backup`,
+    {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ folders: folders ?? null }),
+    },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
