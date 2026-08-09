@@ -88,7 +88,9 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "app_api",
              # Sub-agent fan-out + user-initiated self-repair. Without these
              # entries native function calls are rejected before dispatch.
-             "spawn_subagents", "self_repair"}
+             "spawn_subagents", "self_repair",
+             # Self-report / self-heal / host-browser automation
+             "generate_system_report", "host_browser", "send_report_to_replit"}
 
 ToolBlock = namedtuple("ToolBlock", ["tool_type", "content"])
 

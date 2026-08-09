@@ -957,6 +957,18 @@ async def _execute_tool_block_impl(
             content, owner=owner, session_id=session_id,
             agent_ctx=agent_ctx, progress_cb=progress_cb,
         )
+    elif tool == "generate_system_report":
+        from src.tool_implementations_bugloop import do_generate_system_report
+        desc = "generate_system_report"
+        result = await do_generate_system_report(content, owner=owner)
+    elif tool == "host_browser":
+        from src.tool_implementations_bugloop import do_host_browser
+        desc = "host_browser"
+        result = await do_host_browser(content, owner=owner)
+    elif tool == "send_report_to_replit":
+        from src.tool_implementations_bugloop import do_send_report_to_replit
+        desc = "send_report_to_replit"
+        result = await do_send_report_to_replit(content, owner=owner)
     elif tool.startswith("mcp__"):
         # MCP tool dispatch
         mcp = get_mcp_manager()

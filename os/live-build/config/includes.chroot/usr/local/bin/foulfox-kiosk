@@ -96,6 +96,8 @@ while true; do
     --check-for-update-interval=31536000 \
     --password-store=basic \
     --autoplay-policy=no-user-gesture-required \
+    --remote-debugging-port=9222 \
+    --remote-debugging-address=127.0.0.1 \
     2>/dev/null || true
   sleep 3
 done

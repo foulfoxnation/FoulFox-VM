@@ -714,6 +714,9 @@ app.include_router(setup_foulfox_app_routes())
 from routes.mtm_routes import router as mtm_router
 app.include_router(mtm_router)
 
+from routes.bug_loop_routes import router as bug_loop_router
+app.include_router(bug_loop_router)
+
 
 # MCP (Model Context Protocol)
 from src.mcp_manager import McpManager

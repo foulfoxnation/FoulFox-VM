@@ -1433,6 +1433,104 @@ FUNCTION_TOOL_SCHEMAS = [
             },
         },
     },
+    # ── Self-report / self-heal / host-browser ─────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_system_report",
+            "description": (
+                "Run a comprehensive health check of all FoulFox OS subsystems "
+                "(OS version, boot type, KVM, disk partitions, network, API server, "
+                "Odysseus service, Ollama models, VMs, noVNC, audio, live-updater, "
+                "CDP browser, and installed apps) and return a structured JSON report "
+                "plus a formatted Markdown summary. Use this before sending a bug "
+                "report to Replit or starting the autonomous fix loop."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "include_markdown": {
+                        "type": "boolean",
+                        "description": "If true (default), include a formatted Markdown summary in the output.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "host_browser",
+            "description": (
+                "Control the FoulFox OS kiosk Chromium browser via Chrome DevTools "
+                "Protocol (CDP). Chromium must have been started with "
+                "--remote-debugging-port=9222 (enabled by default in the kiosk). "
+                "Use this to navigate to URLs, fill in forms, click buttons, or get "
+                "the page text. The primary use case is navigating to Replit and "
+                "pasting bug reports into the AI agent chat. "
+                "Actions: navigate | get_url | get_text | get_title | "
+                "focus | insert_text | set_value | click | key | screenshot"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["navigate", "get_url", "get_text", "get_title",
+                                 "focus", "insert_text", "set_value", "click",
+                                 "key", "screenshot"],
+                        "description": "What to do in the browser.",
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "URL to navigate to (action=navigate).",
+                    },
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector for focus/set_value/click actions.",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Text to insert or set (action=insert_text or set_value).",
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "Key name to press (action=key), e.g. 'Enter', 'Tab', 'Escape'.",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_report_to_replit",
+            "description": (
+                "Generate a full system diagnostic report and send it to the Replit "
+                "AI agent chat by automating the kiosk browser (CDP). Opens the "
+                "Replit project URL, finds the AI chat input, pastes the report, and "
+                "submits it. Returns ok=true with a screenshot on success. "
+                "The user must be logged into Replit in the kiosk browser first. "
+                "Requires Chromium CDP on port 9222."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "replit_url": {
+                        "type": "string",
+                        "description": "URL of the Replit project / AI chat page to navigate to.",
+                    },
+                    "extra_context": {
+                        "type": "string",
+                        "description": "Optional additional context to prepend to the report (e.g. what you just tried).",
+                    },
+                },
+                "required": ["replit_url"],
+            },
+        },
+    },
 ]
 
 

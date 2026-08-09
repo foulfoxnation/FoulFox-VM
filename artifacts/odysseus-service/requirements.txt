@@ -44,6 +44,9 @@ mcp
 pyotp
 qrcode[pil]
 croniter
+# Async WebSocket client — used by host_browser.py for Chrome DevTools Protocol
+# (CDP) automation: controls the kiosk Chromium to paste bug reports to Replit.
+websockets
 pytest
 pytest-asyncio
 # starlette.testclient prefers httpx2 since Starlette 1.2.0 and warns on every
