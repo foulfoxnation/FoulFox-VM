@@ -110,19 +110,32 @@ export function buildQemuArgs(vm: VmRecord, accel: AcceleratorInfo): string[] {
       "/usr/share/edk2/x64/OVMF_VARS.fd",       // Fedora/RHEL
     ];
     const ovmfCodePath = OVMF_CODE_CANDIDATES.find((p) => fs.existsSync(p));
-    if (ovmfCodePath) {
-      // Slot 0: read-only EFI code.
-      args.push("-drive", `if=pflash,format=raw,readonly=on,file=${ovmfCodePath}`);
-      // Slot 1: writeable per-VM NVRAM. Fall back to the template (read-only)
-      // if provisioning hasn't created the per-VM copy yet — the installer will
-      // still boot; EFI vars just won't persist until the copy exists.
-      const perVmVars = c.ovmfVarsPath && fs.existsSync(c.ovmfVarsPath) ? c.ovmfVarsPath : null;
-      const fallbackVars = OVMF_VARS_CANDIDATES.find((p) => fs.existsSync(p));
-      if (perVmVars) {
-        args.push("-drive", `if=pflash,format=raw,file=${perVmVars}`);
-      } else if (fallbackVars) {
-        args.push("-drive", `if=pflash,format=raw,readonly=on,file=${fallbackVars}`);
-      }
+    if (!ovmfCodePath) {
+      // OVMF is required for Windows 11 — it ships as a UEFI-only ISO that
+      // SeaBIOS (QEMU's legacy fallback) cannot boot. Without the firmware the
+      // guest will display "No bootable device" immediately. Fail fast with a
+      // clear message so the user knows to install the ovmf package rather than
+      // spending minutes wondering why the screen is blank.
+      throw new Error(
+        "OVMF UEFI firmware not found on this host (checked: " +
+        OVMF_CODE_CANDIDATES.join(", ") +
+        "). Install the 'ovmf' package (Debian/Ubuntu: sudo apt install ovmf) " +
+        "and restart the FoulFox service. Without OVMF, Windows 11 cannot boot — " +
+        "it shows 'No bootable device' because it requires UEFI and SeaBIOS cannot start it."
+      );
+    }
+
+    // Slot 0: read-only EFI code.
+    args.push("-drive", `if=pflash,format=raw,readonly=on,file=${ovmfCodePath}`);
+    // Slot 1: writeable per-VM NVRAM. Fall back to the template (read-only)
+    // if provisioning hasn't created the per-VM copy yet — the installer will
+    // still boot; EFI vars just won't persist until the copy exists.
+    const perVmVars = c.ovmfVarsPath && fs.existsSync(c.ovmfVarsPath) ? c.ovmfVarsPath : null;
+    const fallbackVars = OVMF_VARS_CANDIDATES.find((p) => fs.existsSync(p));
+    if (perVmVars) {
+      args.push("-drive", `if=pflash,format=raw,file=${perVmVars}`);
+    } else if (fallbackVars) {
+      args.push("-drive", `if=pflash,format=raw,readonly=on,file=${fallbackVars}`);
     }
 
     args.push("-device", "ich9-ahci,id=ahci");

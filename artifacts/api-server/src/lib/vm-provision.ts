@@ -807,6 +807,87 @@ exit 0`;
   <settings pass="windowsPE">
     <component name="Microsoft-Windows-Setup" processorArchitecture="amd64"
                publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+
+      <!-- ── Skip the product-key screen and EULA (key entered later or skipped) ── -->
+      <UserData>
+        <AcceptEula>true</AcceptEula>
+        <ProductKey>
+          <!-- Empty = skip key entry screen; Windows activates after install if a
+               digital licence is linked to the Microsoft account, or the user can
+               enter a key from Settings > Activation. -->
+          <WillShowUI>Never</WillShowUI>
+        </ProductKey>
+      </UserData>
+
+      <!-- ── Partition Disk 0 (the QEMU virtual AHCI disk) for UEFI ─────────────
+           IMPORTANT: Disk 0 inside this VM is the 64 GB virtual qcow2 disk
+           created by FoulFox — it is NOT the physical host drive. The FoulFox OS
+           lives on a completely separate device and is never visible to the VM.
+           WillWipeDisk wipes only this virtual disk. Layout:
+             Part 1 — 512 MB  FAT32 EFI System Partition  (UEFI boot)
+             Part 2 — 16 MB   Microsoft Reserved           (GPT housekeeping)
+             Part 3 — rest     NTFS Windows OS              (C:\)
+      ── -->
+      <DiskConfiguration>
+        <WillShowUI>OnError</WillShowUI>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add">
+              <Order>1</Order>
+              <Type>EFI</Type>
+              <Size>512</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>2</Order>
+              <Type>MSR</Type>
+              <Size>16</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>3</Order>
+              <Type>Primary</Type>
+              <Extend>true</Extend>
+            </CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add">
+              <Order>1</Order>
+              <PartitionID>1</PartitionID>
+              <Label>System</Label>
+              <Format>FAT32</Format>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>2</Order>
+              <PartitionID>2</PartitionID>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>3</Order>
+              <PartitionID>3</PartitionID>
+              <Label>Windows</Label>
+              <Format>NTFS</Format>
+              <Letter>C</Letter>
+            </ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+
+      <!-- ── Install the OS image to the partition we just created ──────────────
+           No <MetaData> means "use the first/default edition" — compatible with
+           both single-edition (Win11 Home) and multi-edition (Pro/Enterprise) ISOs.
+      ── -->
+      <ImageInstall>
+        <OSImage>
+          <InstallTo>
+            <DiskID>0</DiskID>
+            <PartitionID>3</PartitionID>
+          </InstallTo>
+          <WillShowUI>OnError</WillShowUI>
+          <InstallToAvailablePartition>false</InstallToAvailablePartition>
+        </OSImage>
+      </ImageInstall>
+
+      <!-- ── Win11 hardware-check bypass (TPM / SecureBoot / RAM / CPU) ─────── -->
       <RunSynchronous>
         <RunSynchronousCommand wcm:action="add">
           <Order>1</Order>
