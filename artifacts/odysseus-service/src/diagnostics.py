@@ -900,12 +900,56 @@ async def run_all_checks() -> list[dict]:
     return out
 
 
+_SYSTEM_VISION = """
+FoulFox OS is a fully operational AI-native computing environment built around a single goal: a
+JARVIS-grade intelligent workspace where you and your AI Agent collaborate as equals.
+
+What the completed system delivers:
+
+UNIFIED WORKSPACE — FoulFox OS runs natively on bare metal or USB. Inside it, a Windows 11 VM
+lives as an embedded iframe — fully visible, fully controllable. You switch between the host OS and
+the Windows VM without leaving the interface. Both desktops are your workspace simultaneously.
+
+AGENT WITH FULL REACH — The AI Agent operates freely across both environments. Inside FoulFox OS
+it reads files, writes scripts, edits configs, and restarts services. Inside the Windows VM it
+opens applications, writes and runs code, browses the web, and builds software — exactly as a
+human developer would, but without needing sleep.
+
+VIBE CODING AT FULL SPEED — The Agent scaffolds projects, writes every file, fixes every bug, runs
+every test, and ships the result — all while narrating what it is doing in plain English. It works
+across the OS boundary: a Python script on FoulFox calls a Windows tool in the VM, the Agent wires
+them together without being asked.
+
+VOICE-FIRST COMMUNICATION — Voice Forge provides a real-time, low-latency TTS/STT loop. You speak
+naturally, the Agent hears and understands, then responds in a clear synthetic voice you have
+chosen and customised. The conversation continues unbroken whether you are watching a build log or
+stepping away from the keyboard.
+
+YOUR AGENT'S VOICE — Voice Forge lets you tune every aspect of the Agent's speech: voice model,
+speed, pitch, and personality tone. The Agent sounds like your assistant — not a generic chatbot.
+The voice carries context: calm when reporting status, energised when something works, direct when
+flagging a problem.
+
+MEMORY THAT COMPOUNDS — Every lesson the Agent learns about your project, preferences, and
+patterns is stored and retrieved semantically. The longer the system runs, the more effective the
+Agent becomes — past solutions inform future decisions automatically.
+
+SUB-AGENT PARALLELISM — Complex tasks spawn parallel sub-agents. One researches, one codes, one
+tests. Results merge back into the main Agent's context. Work that would take hours serially
+finishes in minutes.
+
+The system you are building is not a tool. It is a collaborator — always on, always aware, always
+improving. Like JARVIS: it knows the workshop, knows the mission, and gets things done.
+""".strip()
+
+
 def results_to_markdown(checks: list[dict], iteration: int = 1) -> str:
     icons  = {"ok": "✅", "warn": "⚠️", "fail": "❌", "unknown": "❓"}
     now    = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     fail_n = sum(1 for c in checks if c["status"] == "fail")
     warn_n = sum(1 for c in checks if c["status"] == "warn")
     ok_n   = sum(1 for c in checks if c["status"] == "ok")
+    all_ok = fail_n == 0 and warn_n == 0
 
     lines = [
         f"# FoulFox OS — Capability Report (#{iteration})",
@@ -913,6 +957,18 @@ def results_to_markdown(checks: list[dict], iteration: int = 1) -> str:
         f"**Summary:** {ok_n} ✅  ·  {warn_n} ⚠️  ·  {fail_n} ❌",
         "",
     ]
+
+    # ── FULLY OPERATIONAL BANNER ──────────────────────────────────────────
+    if all_ok:
+        lines += [
+            "---",
+            "## 🟢 SYSTEM FULLY OPERATIONAL — JARVIS ONLINE",
+            "",
+            _SYSTEM_VISION,
+            "",
+            "---",
+            "",
+        ]
 
     # Group by category
     by_cat: dict[str, list] = {}
@@ -946,6 +1002,16 @@ def results_to_markdown(checks: list[dict], iteration: int = 1) -> str:
                 f"**Detail:** {c['detail']}",
                 "",
             ]
+
+    # ── SYSTEM PURPOSE (shown when things still need fixing) ──────────────
+    if not all_ok:
+        lines += [
+            "---",
+            "## 🎯 What This System Will Be When Fully Online",
+            "",
+            _SYSTEM_VISION,
+            "",
+        ]
 
     lines += ["---", "*Sent automatically by FoulFox OS self-reporting system.*"]
     return "\n".join(lines)
