@@ -2690,14 +2690,31 @@ async def do_vm_tool(
 # as encoded PowerShell, so this targets a Windows guest.
 
 _VM_APP_KNOWN: Dict[str, Dict[str, str]] = {
+    # Browsers
     "chrome":    {"winget": "Google.Chrome", "launch": "chrome"},
+    # Terminals / shells
+    "terminal":  {"winget": "", "launch": "wt"},          # Windows Terminal (built-in Win11)
+    "wt":        {"winget": "", "launch": "wt"},
+    "cmd":       {"winget": "", "launch": "cmd"},
+    "powershell": {"winget": "", "launch": "powershell"},
+    # Languages / runtimes
+    "python":    {"winget": "Python.Python.3", "launch": "python"},
+    "python3":   {"winget": "Python.Python.3", "launch": "python"},
+    "node":      {"winget": "OpenJS.NodeJS.LTS", "launch": "node"},
+    # Dev tools
+    "vscode":    {"winget": "Microsoft.VisualStudioCode", "launch": "code"},
+    "vs":        {"winget": "Microsoft.VisualStudio.2022.Community", "launch": ""},
+    "git":       {"winget": "Git.Git", "launch": ""},
+    # System utilities
+    "notepad":   {"winget": "", "launch": "notepad"},
+    "explorer":  {"winget": "", "launch": "explorer"},
+    "taskmgr":   {"winget": "", "launch": "taskmgr"},
+    "calc":      {"winget": "", "launch": "calc"},
+    # Game engines
     "unity-hub": {"winget": "Unity.UnityHub", "launch": r"C:\Program Files\Unity Hub\Unity Hub.exe"},
     "unity":     {"winget": "Unity.UnityHub", "launch": r"C:\Program Files\Unity Hub\Unity Hub.exe"},
     "epic":      {"winget": "EpicGames.EpicGamesLauncher", "launch": r"C:\Program Files (x86)\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe"},
     "unreal":    {"winget": "EpicGames.EpicGamesLauncher", "launch": r"C:\Program Files (x86)\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe"},
-    "git":       {"winget": "Git.Git", "launch": ""},
-    "vscode":    {"winget": "Microsoft.VisualStudioCode", "launch": "code"},
-    "vs":        {"winget": "Microsoft.VisualStudio.2022.Community", "launch": ""},
 }
 
 # Only these env vars may ever be typed into a guest by type_secret. The explicit
@@ -2940,6 +2957,88 @@ _VM_APP_PLAYBOOKS: Dict[str, str] = {
         "4. Drive the engine UI with vm_computer; open or create a project and build/run.\n"
         "5. If it needs an account, click the field and use vm_app type_secret for any\n"
         "   allowlisted credential, or type non-secret values with vm_computer."
+    ),
+    "windows": (
+        "Windows VM desktop navigation — how to orient and operate autonomously\n"
+        "\n"
+        "FIRST THING: always take a screenshot to see the current state before acting.\n"
+        "\n"
+        "=== LOCK SCREEN / LOGIN SCREEN ===\n"
+        "The VM is configured for permanent auto-login — you should never see a lock screen\n"
+        "on a fresh boot. If you DO see one (e.g. after a manual lock):\n"
+        "  • SSH still works even when the screen is locked. Run shell commands normally.\n"
+        "  • To dismiss via GUI: vm_computer key {keys: ['Escape']} or mouse move, then\n"
+        "    screenshot. If a password field appears, the password is the VM's sshPassword\n"
+        "    from the registry (use vm_app type_secret is NOT available for login — use\n"
+        "    the bash tool: `(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon').DefaultPassword`\n"
+        "    to retrieve it, then vm_computer paste {text: <password>}, then key Return.\n"
+        "  • Nuclear option via SSH: run `shutdown /r /t 0` to reboot (auto-login will kick in).\n"
+        "\n"
+        "=== OPENING A TERMINAL ===\n"
+        "Fastest methods (try in order):\n"
+        "  • vm_app launch {app: 'terminal'}  → opens Windows Terminal (wt.exe)\n"
+        "  • vm_app launch {app: 'cmd'}       → opens Command Prompt\n"
+        "  • vm_app launch {app: 'powershell'}\n"
+        "  • GUI: vm_computer key {keys: ['meta', 'r']}, screenshot, paste {text: 'wt'}, key Return\n"
+        "  • GUI: right-click the desktop → 'Open in Terminal' (screenshot to find the menu)\n"
+        "  • Shortcut: Win+X, then screenshot, then click 'Terminal (Admin)'\n"
+        "NOTE: you almost never need the GUI terminal — bash/python tools already run\n"
+        "PowerShell over SSH. Use those unless you need to see terminal UI output.\n"
+        "\n"
+        "=== ESSENTIAL KEYBOARD SHORTCUTS ===\n"
+        "  Win key         → Start menu (screenshot after, then type to search)\n"
+        "  Win+D           → Show desktop / hide all windows\n"
+        "  Win+E           → File Explorer\n"
+        "  Win+R           → Run dialog (type app name or path)\n"
+        "  Win+Tab         → Task View (see all open windows)\n"
+        "  Alt+Tab         → Switch between open windows\n"
+        "  Alt+F4          → Close active window\n"
+        "  Ctrl+Shift+Esc  → Task Manager directly\n"
+        "  Win+L           → Lock screen (avoid — needs manual unlock)\n"
+        "\n"
+        "=== START MENU / APP SEARCH ===\n"
+        "1. vm_computer key {key: 'meta'} → Start menu opens\n"
+        "2. Screenshot to confirm\n"
+        "3. vm_computer type {text: 'notepad'} (just start typing — search is automatic)\n"
+        "4. Screenshot → click the top result, or key Return\n"
+        "\n"
+        "=== UAC (User Account Control) DIALOG ===\n"
+        "When a program asks 'Do you want to allow...': take a screenshot, find the 'Yes'\n"
+        "button, vm_computer click at those coordinates. The dialog is always modal and\n"
+        "centered. If SSH commands return errors about elevation, run via:\n"
+        "  Start-Process powershell -Verb RunAs -ArgumentList '-Command', '<cmd>'\n"
+        "(but the provisioned account is already an Administrator, so most commands\n"
+        "work without elevation when run over SSH).\n"
+        "\n"
+        "=== UNKNOWN / UNEXPECTED SCREEN STATE ===\n"
+        "If the screenshot shows something unexpected (installer, error dialog, etc.):\n"
+        "  1. Read all visible text in the screenshot carefully.\n"
+        "  2. If it's a dialog: find the default/safe button (often 'OK', 'Yes', 'Next',\n"
+        "     'Close') and click it. Take another screenshot.\n"
+        "  3. If it's a stalled installer: vm_app processes to see what's running.\n"
+        "  4. If the screen is black/frozen: send a mouse move, wait 2s, screenshot again.\n"
+        "  5. Last resort via SSH: `Stop-Process -Name <appname> -Force` or reboot.\n"
+        "\n"
+        "=== CODING WORKFLOW ===\n"
+        "  • Write files: write_file tool (routed over SSH to Windows paths like C:\\\\work\\\\file.py)\n"
+        "  • Run scripts: bash tool (runs as PowerShell, e.g. `python C:\\\\work\\\\script.py`)\n"
+        "  • Paste code into a GUI editor: click the editor, then vm_computer paste {text: <code>}\n"
+        "  • Install packages: bash `pip install <pkg>` or `winget install <id>`\n"
+        "  • Open VS Code on a folder: bash `code C:\\\\work`\n"
+        "\n"
+        "=== GAMING WORKFLOW ===\n"
+        "  • Install via winget: vm_app install {app: '<winget-id>'}\n"
+        "  • Launch the game: vm_app launch {path: 'C:\\\\path\\\\to\\\\game.exe'}\n"
+        "  • Control: vm_computer screenshot to see frame, then click/key/drag to act\n"
+        "  • Games that capture the mouse: use mouse_down + move instead of click+drag\n"
+        "  • To alt-tab out of a full-screen game: key {keys: ['alt', 'tab']}\n"
+        "\n"
+        "=== WORKFLOW: START WORKING IMMEDIATELY ON A FRESH DESKTOP ===\n"
+        "1. vm_computer screenshot → confirm you see the Windows desktop\n"
+        "2. bash `$env:COMPUTERNAME; $env:USERNAME; Get-Date` → confirms SSH works\n"
+        "3. bash `winget list` → see what's already installed (VS Code, Chrome, Git, etc.)\n"
+        "4. Start your task. Use write_file + bash for code; vm_computer for GUI apps.\n"
+        "5. No need for the user to do anything — the VM is fully autonomous."
     ),
 }
 

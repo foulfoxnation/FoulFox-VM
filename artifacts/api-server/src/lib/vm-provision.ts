@@ -934,7 +934,7 @@ exit 0`;
       <AutoLogon>
         <Username>${username}</Username>
         <Enabled>true</Enabled>
-        <LogonCount>1</LogonCount>
+        <LogonCount>99</LogonCount>
         <Password>
           <Value>${password}</Value>
           <PlainText>true</PlainText>
@@ -961,7 +961,21 @@ ${keyCommand}        <SynchronousCommand wcm:action="add">
           <Order>4</Order>
           <CommandLine>netsh advfirewall firewall set rule group="remote desktop" new enable=Yes</CommandLine>
         </SynchronousCommand>
-${browserAutomationCommands}${devToolsCommands}      </FirstLogonCommands>
+${browserAutomationCommands}${devToolsCommands}${sync(50, psEncoded(`
+# Permanent auto-login via registry so the agent gets a desktop after every reboot.
+# This runs once under the autounattend auto-logon and makes every subsequent boot
+# skip the lock/login screen — essential for unattended agent operation.
+$reg = 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon'
+Set-ItemProperty -Path $reg -Name AutoAdminLogon   -Value '1'         -Type String
+Set-ItemProperty -Path $reg -Name DefaultUserName  -Value '${username}' -Type String
+Set-ItemProperty -Path $reg -Name DefaultPassword  -Value '${password}' -Type String
+Set-ItemProperty -Path $reg -Name DefaultDomainName -Value '.'         -Type String
+# Also disable the lock screen and sleep-induced lock so idle time doesn't lock the agent out.
+powercfg /change standby-timeout-ac 0
+powercfg /change monitor-timeout-ac 0
+reg add 'HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Personalization' /v NoLockScreen /t REG_DWORD /d 1 /f
+exit 0
+`.trim()))}      </FirstLogonCommands>
     </component>
   </settings>
 </unattend>

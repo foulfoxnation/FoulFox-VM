@@ -220,17 +220,18 @@ FUNCTION_TOOL_SCHEMAS = [
         "function": {
             "name": "vm_app",
             "description": (
-                "Install and operate applications and game engines inside the selected VM "
-                "(Windows guest; call select_vm first). Pairs with vm_computer for GUI steps. "
-                "Actions: 'install' an app via winget (known: chrome, unity-hub, unity, epic, "
-                "unreal, git, vscode — or pass an explicit winget 'id'); 'launch' a known app, "
-                "an absolute .exe 'path', or the user's FoulFox Engine (app='foulfox', from the "
-                "FOULFOX_ENGINE_PATH secret or a 'path'); 'list_installed' (winget list); "
-                "'processes' (top processes); 'kill' a process by 'name' or 'pid'; 'playbook' "
-                "to get a step-by-step guide (engine=overview|unity|unreal|chrome|foulfox — needs "
-                "no VM); 'type_secret' to type an allowlisted credential (which=UNITY_EMAIL, "
-                "UNITY_PASSWORD, UNITY_SERIAL, EPIC_EMAIL, EPIC_PASSWORD) into the field you "
-                "focused with vm_computer — the value is never shown or logged."
+                "Install, launch, and navigate applications inside the selected Windows VM "
+                "(call select_vm first). Pairs with vm_computer for GUI control. "
+                "Actions: 'install' via winget (known apps: chrome, python, node, terminal, cmd, "
+                "powershell, notepad, explorer, taskmgr, vscode, git, unity-hub, epic/unreal — "
+                "or pass an explicit winget 'id'); 'launch' a known app, absolute .exe 'path', "
+                "or app='foulfox' (FOULFOX_ENGINE_PATH secret); 'list_installed' (winget list); "
+                "'processes' (running procs); 'kill' by 'name' or 'pid'; 'playbook' for a "
+                "step-by-step guide (engine=overview|windows|unity|unreal|chrome|foulfox — "
+                "start with 'windows' to learn desktop navigation, lock-screen recovery, opening "
+                "a terminal, UAC handling, and coding/gaming workflows — no VM needed); "
+                "'type_secret' to type an allowlisted credential into the focused field without "
+                "logging it (which=UNITY_EMAIL|UNITY_PASSWORD|UNITY_SERIAL|EPIC_EMAIL|EPIC_PASSWORD)."
             ),
             "parameters": {
                 "type": "object",
@@ -241,13 +242,13 @@ FUNCTION_TOOL_SCHEMAS = [
                                  "kill", "playbook", "type_secret"],
                         "description": "What to do."
                     },
-                    "app": {"type": "string", "description": "A known app name (chrome, unity-hub, unity, epic, unreal, git, vscode, or 'foulfox' for launch)."},
+                    "app": {"type": "string", "description": "A known app name (chrome, python, node, terminal, cmd, powershell, notepad, explorer, taskmgr, vscode, git, unity-hub, epic, unreal, or 'foulfox' for the FoulFox Engine)."},
                     "id": {"type": "string", "description": "An explicit winget package id for action=install (e.g. 'Google.Chrome')."},
                     "path": {"type": "string", "description": "Absolute path to an .exe for action=launch (e.g. the FoulFox Engine build)."},
                     "args": {"type": "array", "items": {"type": "string"}, "description": "Optional command-line arguments passed to the launched program (action=launch)."},
                     "name": {"type": "string", "description": "Process name to kill (action=kill)."},
                     "pid": {"type": "integer", "description": "Process id to kill (action=kill)."},
-                    "engine": {"type": "string", "description": "Which playbook to return (overview, unity, unreal, chrome, foulfox) for action=playbook."},
+                    "engine": {"type": "string", "description": "Which playbook to return for action=playbook: 'windows' (desktop nav, lock screen, terminal, UAC, coding+gaming), 'overview', 'unity', 'unreal', 'chrome', 'foulfox'."},
                     "which": {"type": "string", "description": "Which allowlisted secret to type (action=type_secret): UNITY_EMAIL, UNITY_PASSWORD, UNITY_SERIAL, EPIC_EMAIL, EPIC_PASSWORD."}
                 },
                 "required": ["action"]
