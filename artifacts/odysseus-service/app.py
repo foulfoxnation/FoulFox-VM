@@ -1217,22 +1217,35 @@ async def _startup_event():
     from src.cookbook_serve_lifecycle import cookbook_serve_lifecycle_loop
     _startup_tasks.append(asyncio.create_task(cookbook_serve_lifecycle_loop()))
 
-    # ── Post-update auto-resume ───────────────────────────────────────────────
-    # If the previous bug-fix loop triggered an update + reboot, a sentinel file
-    # survives on persistent storage. Detect it here and automatically resume the
-    # loop so the agent waits for services, generates a report, and pastes it to
-    # Replit via Firefox — no manual intervention needed.
+    # ── Bug-fix loop auto-start ───────────────────────────────────────────────
+    # Two paths that both run without any manual trigger:
+    #
+    #   1. Post-reboot sentinel path: previous loop wrote a sentinel before
+    #      rebooting; auto_start_after_update() detects it and resumes the loop
+    #      immediately (the loop itself then waits for services internally).
+    #
+    #   2. Normal-boot path: no sentinel present, but we still want the loop to
+    #      start automatically once services come online.  auto_start_on_ready()
+    #      waits up to 5 minutes for services (bypassing stuck ones), then starts
+    #      the loop.  If path 1 already started it, path 2 is a no-op.
     try:
         from src.vm_backup import start_backup_scheduler
         start_backup_scheduler()
 
-        from src.bug_loop import auto_start_after_update
-        if auto_start_after_update():
+        from src.bug_loop import auto_start_after_update, auto_start_on_ready
+
+        sentinel_started = auto_start_after_update()
+        if sentinel_started:
             logger.info("[startup] Post-reboot sentinel found — bug-fix loop auto-resumed.")
         else:
-            logger.debug("[startup] No post-reboot sentinel — normal startup.")
+            logger.debug("[startup] No post-reboot sentinel — scheduling normal-boot auto-start.")
+
+        # Always schedule the normal-boot watcher.  It is a no-op if the
+        # sentinel path already started the loop.
+        _startup_tasks.append(asyncio.create_task(auto_start_on_ready()))
+
     except Exception as _e:
-        logger.warning(f"[startup] Post-reboot auto-start check failed (non-critical): {_e}")
+        logger.warning(f"[startup] Bug-fix loop auto-start setup failed (non-critical): {_e}")
 
     logger.info("Application startup complete")
 

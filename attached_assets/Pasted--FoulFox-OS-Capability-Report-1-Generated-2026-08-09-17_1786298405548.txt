@@ -1,0 +1,205 @@
+# FoulFox OS — Capability Report (#1)
+**Generated:** 2026-08-09 17:55:17 UTC
+**Summary:** 17 ✅  ·  6 ⚠️  ·  8 ❌
+
+## ❌ 🖥️ FoulFox OS
+
+- ⚠️ **OS Version**: No FoulFox version file; base OS: Debian GNU/Linux 12 (bookworm)
+- ✅ **Boot Type**: Installed to disk (fstype=ext4)
+- ✅ **KVM Hardware Acceleration**: /dev/kvm present — VMs run at full speed
+- ✅ **Data Partition**: 5.4G used / 98G total (6%)
+- ✅ **Root Disk**: 13G used / 147G total (10%)
+- ❌ **API Server**: Not reachable on :8080 — shell UI cannot function
+- ❌ **Odysseus AI Service**: Not reachable on :5001 — AI features unavailable
+- ✅ **Live Updater**: Up-to-date (no pending updates)
+- ✅ **Internet Connectivity**: Online — Reachable (ping 8.8.8.8 OK)
+
+## ❌ 🎤 Voice Forge
+
+- ❌ **Speech-to-Text Engine**: STT service not responding — voice input unavailable
+- ❌ **Text-to-Speech Engine**: TTS service not responding — voice output unavailable
+- ❌ **Audio Hardware (PulseAudio)**: PulseAudio not running — microphone and speaker unavailable
+
+## ✅ 🦙 Llama Llama Studio
+
+- ✅ **Ollama Engine**: 1 model(s): llama3.1:8b-instruct-q4_K_M
+- ✅ **Local AI Model**: Llama-family model ready: llama3.1:8b-instruct-q4_K_M
+- ❓ **Llama Llama Studio App**: App list unavailable
+
+## ⚠️ 🪟 Windows 11 VM
+
+- ✅ **Windows 11 VM**: 'Default VM' exists (id=default)
+- ⚠️ **Windows VM State**: 'Default VM' stopped — start it from the VM tab
+- ⚠️ **Windows VM Display (noVNC)**: VM not running — start it to get a display
+
+## ❌ 🔌 Agent → Windows VM
+
+- ❌ **Agent→VM SSH Key**: No keys directory at /var/lib/foulfox/keys — VM agent auth not set up
+- ⚠️ **Agent→VM Shell Bridge**: Windows VM 'Default VM' not running — start it for agent access
+- ⚠️ **Agent Workspace Mode**: Agent targeting 'host' — toggle to 'Windows VM' in the chat header
+
+## ✅ 🤖 Agent → FoulFox OS
+
+- ✅ **Agent Host Shell (bash)**: Agent can run host commands as foulfox
+- ✅ **Agent File I/O**: Agent can read and write files on the host
+- ✅ **Agent Web Fetch**: Agent can reach the internet and fetch web content
+
+## ❌ 💾 Windows VM Backups
+
+- ❌ **VM Backup Directory**: No backup directory at /var/lib/foulfox/vm-backups/windows — Windows VM file backups have never run
+- ❌ **Last Backup Age**: No backups exist — critical Windows files are not protected
+
+## ⚠️ 🗣️ Voice + Agent Integration
+
+- ⚠️ **Voice ↔ Agent Loop**: Incomplete — STT and TTS not enabled; enable in Settings → Voice
+- ❓ **AI Model for Voice Responses**: check could not run
+- ✅ **Kiosk Browser CDP**: Chrome DevTools Protocol available — Chrome/151.0.7922.108
+
+## ✅ 🧠 Agent Memory & Lessons
+
+- ❓ **Agent Lessons**: Lessons endpoint unavailable
+- ❓ **Agent Notes**: Notes endpoint unavailable
+- ❓ **Agent Memory (Long-term)**: Memory endpoint unavailable
+- ✅ **Semantic Knowledge Search**: ChromaDB embedded store ready at /var/lib/foulfox/chroma
+
+## ✅ 📈 Agent Learning & Improvement
+
+- ❓ **Agent Skills Library**: Skills endpoint unavailable
+- ❓ **Skill Self-Improvement Audit**: Audit status unavailable
+- ❓ **Self-Repair Capability**: Could not read self-repair preference
+
+## ✅ 👁️ Agent System Awareness
+
+- ❓ **Multi-Task Memory (MTM)**: MTM endpoint unavailable
+- ❓ **Research Library**: Research library unavailable
+- ❓ **AI Model Configuration**: Agent suite state unavailable
+
+## ✅ ⚡ Sub-Agents (Task Speed)
+
+- ✅ **Sub-Agent Spawn Tool**: spawn_subagents tool available — agent can fan out parallel tasks
+- ❓ **Sub-Agent Usage History**: MTM unavailable — cannot read task history
+
+## ✅ 🎓 Sub-Agents (Learning & Skills)
+
+- ✅ **Sub-Agent Learning Tools**: All learning tools available: ask_teacher, manage_skills, pipeline, trigger_research
+- ❓ **Sub-Agent Skill Discovery**: Skills endpoint unavailable
+- ✅ **Sub-Agent Verification Chain**: Research + Teacher + Sub-agents all available — agent can spawn researchers, verify accuracy, and improve results
+
+---
+## 🔧 What Needs Fixing
+
+### ⚠️ OS Version
+**Status:** WARN
+**System:** foulfox_os
+**Detail:** No FoulFox version file; base OS: Debian GNU/Linux 12 (bookworm)
+
+### ❌ API Server
+**Status:** FAIL
+**System:** foulfox_os
+**Detail:** Not reachable on :8080 — shell UI cannot function
+
+### ❌ Odysseus AI Service
+**Status:** FAIL
+**System:** foulfox_os
+**Detail:** Not reachable on :5001 — AI features unavailable
+
+### ❌ Speech-to-Text Engine
+**Status:** FAIL
+**System:** voice_forge
+**Detail:** STT service not responding — voice input unavailable
+
+### ❌ Text-to-Speech Engine
+**Status:** FAIL
+**System:** voice_forge
+**Detail:** TTS service not responding — voice output unavailable
+
+### ❌ Audio Hardware (PulseAudio)
+**Status:** FAIL
+**System:** voice_forge
+**Detail:** PulseAudio not running — microphone and speaker unavailable
+
+### ⚠️ Windows VM State
+**Status:** WARN
+**System:** windows_vm
+**Detail:** 'Default VM' stopped — start it from the VM tab
+
+### ⚠️ Windows VM Display (noVNC)
+**Status:** WARN
+**System:** windows_vm
+**Detail:** VM not running — start it to get a display
+
+### ❌ Agent→VM SSH Key
+**Status:** FAIL
+**System:** agent_vm_socket
+**Detail:** No keys directory at /var/lib/foulfox/keys — VM agent auth not set up
+
+### ⚠️ Agent→VM Shell Bridge
+**Status:** WARN
+**System:** agent_vm_socket
+**Detail:** Windows VM 'Default VM' not running — start it for agent access
+
+### ⚠️ Agent Workspace Mode
+**Status:** WARN
+**System:** agent_vm_socket
+**Detail:** Agent targeting 'host' — toggle to 'Windows VM' in the chat header
+
+### ❌ VM Backup Directory
+**Status:** FAIL
+**System:** vm_backups
+**Detail:** No backup directory at /var/lib/foulfox/vm-backups/windows — Windows VM file backups have never run
+
+### ❌ Last Backup Age
+**Status:** FAIL
+**System:** vm_backups
+**Detail:** No backups exist — critical Windows files are not protected
+
+### ⚠️ Voice ↔ Agent Loop
+**Status:** WARN
+**System:** voice_agent
+**Detail:** Incomplete — STT and TTS not enabled; enable in Settings → Voice
+
+---
+## 🎯 What This System Will Be When Fully Online
+
+FoulFox OS is a fully operational AI-native computing environment built around a single goal: a
+JARVIS-grade intelligent workspace where you and your AI Agent collaborate as equals.
+
+What the completed system delivers:
+
+UNIFIED WORKSPACE — FoulFox OS runs natively on bare metal or USB. Inside it, a Windows 11 VM
+lives as an embedded iframe — fully visible, fully controllable. You switch between the host OS and
+the Windows VM without leaving the interface. Both desktops are your workspace simultaneously.
+
+AGENT WITH FULL REACH — The AI Agent operates freely across both environments. Inside FoulFox OS
+it reads files, writes scripts, edits configs, and restarts services. Inside the Windows VM it
+opens applications, writes and runs code, browses the web, and builds software — exactly as a
+human developer would, but without needing sleep.
+
+VIBE CODING AT FULL SPEED — The Agent scaffolds projects, writes every file, fixes every bug, runs
+every test, and ships the result — all while narrating what it is doing in plain English. It works
+across the OS boundary: a Python script on FoulFox calls a Windows tool in the VM, the Agent wires
+them together without being asked.
+
+VOICE-FIRST COMMUNICATION — Voice Forge provides a real-time, low-latency TTS/STT loop. You speak
+naturally, the Agent hears and understands, then responds in a clear synthetic voice you have
+chosen and customised. The conversation continues unbroken whether you are watching a build log or
+stepping away from the keyboard.
+
+YOUR AGENT'S VOICE — Voice Forge lets you tune every aspect of the Agent's speech: voice model,
+speed, pitch, and personality tone. The Agent sounds like your assistant — not a generic chatbot.
+The voice carries context: calm when reporting status, energised when something works, direct when
+flagging a problem.
+
+MEMORY THAT COMPOUNDS — Every lesson the Agent learns about your project, preferences, and
+patterns is stored and retrieved semantically. The longer the system runs, the more effective the
+Agent becomes — past solutions inform future decisions automatically.
+
+SUB-AGENT PARALLELISM — Complex tasks spawn parallel sub-agents. One researches, one codes, one
+tests. Results merge back into the main Agent's context. Work that would take hours serially
+finishes in minutes.
+
+The system you are building is not a tool. It is a collaborator — always on, always aware, always
+improving. Like JARVIS: it knows the workshop, knows the mission, and gets things done.
+
+---
+*Sent automatically by FoulFox OS self-reporting system.*

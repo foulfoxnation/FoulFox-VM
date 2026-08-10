@@ -414,6 +414,73 @@ async def _wait_for_firefox_cdp(debug_port: int = FIREFOX_CDP_PORT, timeout: flo
     return False
 
 
+async def _try_open_chat_panel(browser: HostBrowser) -> bool:
+    """
+    Autonomously attempt to open the Replit AI / Agent chat panel if it is
+    collapsed.  Tries a series of selectors that match the panel toggle buttons
+    across Replit's various UI generations.  Returns True if it clicked
+    something (panel may now be opening), False if nothing was found.
+
+    This is called *before* looking for the chat input so the AI never needs a
+    human to manually expand the panel.
+    """
+    # Selectors for the panel-open / tab buttons, in priority order.
+    # Replit has shipped several UI generations; we try all of them.
+    PANEL_OPEN_SELECTORS = [
+        # Current Replit (2025): Agent tab in the right sidebar
+        "button[aria-label='AI']",
+        "button[aria-label='Agent']",
+        "button[aria-label='AI Agent']",
+        "button[aria-label='Chat']",
+        # data-testid variants
+        "button[data-testid='ai-tab']",
+        "button[data-testid='agent-tab']",
+        "button[data-testid='chat-tab']",
+        "button[data-testid='open-ai-panel']",
+        "button[data-testid='open-agent-panel']",
+        # Text-content match via JS (catches icon-only buttons with visible label)
+        "__text__:AI",
+        "__text__:Agent",
+        # Generic panel-toggle aria patterns
+        "[aria-label*='open'][aria-label*='chat' i]",
+        "[aria-label*='open'][aria-label*='agent' i]",
+        "[aria-label*='show'][aria-label*='ai' i]",
+        # Collapsed sidebar panel button (common pattern: role=tab with AI label)
+        "[role='tab'][aria-label*='AI' i]",
+        "[role='tab'][aria-label*='Agent' i]",
+        "[role='tab'][data-value='ai']",
+        "[role='tab'][data-value='agent']",
+        "[role='tab'][data-value='chat']",
+    ]
+
+    for sel in PANEL_OPEN_SELECTORS:
+        try:
+            if sel.startswith("__text__:"):
+                # Match button by visible text content
+                target_text = sel[len("__text__:"):]
+                js = f"""
+                (function() {{
+                    const btns = Array.from(document.querySelectorAll('button, [role="tab"]'));
+                    const btn = btns.find(b => b.textContent.trim() === {json.dumps(target_text)});
+                    if (!btn) return false;
+                    btn.click();
+                    return true;
+                }})()
+                """
+                clicked = await browser.eval(js)
+                if clicked:
+                    return True
+            else:
+                found = await browser.wait_for_selector(sel, timeout=2)
+                if found:
+                    await browser.click_selector(sel)
+                    return True
+        except Exception:
+            continue
+
+    return False
+
+
 async def paste_report_via_firefox(
     report_markdown: str,
     replit_url: str = _REPLIT_PROJECT_URL,
@@ -422,11 +489,11 @@ async def paste_report_via_firefox(
 ) -> dict:
     """
     Connect to the always-running Firefox instance via CDP on port 9223.
-    Navigate to the Replit project, confirm the page title contains
-    expected_project, then paste report_markdown into the AI chat input.
+    Navigate to the Replit project autonomously, open the AI chat panel if it
+    is collapsed, and paste report_markdown into the AI chat input.
 
-    Firefox is launched at OS startup with --remote-debugging-port=9223 so it
-    is always available without needing to spawn a new process here.
+    Firefox is launched at OS startup with --remote-debugging-port=9223.
+    No human interaction is required — the AI navigates on its own.
 
     Returns {"ok": bool, "detail": str, "screenshot": str|None}
     """
@@ -448,7 +515,7 @@ async def paste_report_via_firefox(
             current = await browser.get_url()
             if replit_url not in current:
                 await browser.navigate(replit_url, wait_load=True, timeout=40)
-                await asyncio.sleep(4)   # give Replit SPA time to hydrate
+                await asyncio.sleep(5)   # give Replit SPA time to hydrate
 
             # ── 3. Confirm project name (warning only — never blocks the paste) ──
             title = await browser.get_title()
@@ -457,20 +524,40 @@ async def paste_report_via_firefox(
                 await asyncio.sleep(3)
                 title = await browser.get_title()
             title_ok   = not expected_project or expected_project.lower() in title.lower()
-            title_note = f"✅ '{title}'" if title_ok else f"⚠️  title='{title}' (expected '{expected_project}') — pasting anyway"
+            title_note = (
+                f"✅ '{title}'" if title_ok
+                else f"⚠️  title='{title}' (expected '{expected_project}') — pasting anyway"
+            )
 
-            # ── 4. Find the chat input ─────────────────────────────────────────
+            # ── 4. Find the chat input; open the panel if it is collapsed ─────
             input_sel = None
             for sel in REPLIT_CHAT_SELECTORS:
-                if await browser.wait_for_selector(sel, timeout=6):
+                if await browser.wait_for_selector(sel, timeout=4):
                     input_sel = sel
                     break
 
             if input_sel is None:
+                # Chat panel is probably collapsed — try to open it autonomously
+                panel_clicked = await _try_open_chat_panel(browser)
+                if panel_clicked:
+                    # Give the panel animation time to complete
+                    await asyncio.sleep(2)
+
+                # Try the input selectors again after (potentially) opening the panel
+                for sel in REPLIT_CHAT_SELECTORS:
+                    if await browser.wait_for_selector(sel, timeout=6):
+                        input_sel = sel
+                        break
+
+            if input_sel is None:
+                # Nothing worked — take a screenshot so we can diagnose
                 screenshot = await browser.screenshot()
                 return {
                     "ok":     False,
-                    "detail": "Could not find Replit chat input — is the AI chat panel open?",
+                    "detail": (
+                        "Could not find Replit chat input after attempting to open "
+                        "the AI panel automatically. The UI may have changed."
+                    ),
                     "screenshot": screenshot,
                 }
 
@@ -480,7 +567,7 @@ async def paste_report_via_firefox(
             await browser.insert_text(report_markdown)
             await asyncio.sleep(0.5)
 
-            # Submit
+            # ── 6. Submit ──────────────────────────────────────────────────────
             submitted = False
             for sel in REPLIT_SUBMIT_SELECTORS:
                 try:
@@ -490,11 +577,11 @@ async def paste_report_via_firefox(
                 except Exception:
                     continue
             if not submitted:
+                # Fallback: Ctrl+Enter or plain Enter
                 await browser.key("Enter")
 
             await asyncio.sleep(1)
             screenshot = await browser.screenshot()
-            final_url  = await browser.get_url()
             return {
                 "ok":     True,
                 "detail": f"Report submitted. {title_note}",
