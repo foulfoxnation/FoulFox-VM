@@ -1081,6 +1081,27 @@ Write-Host '    Open Epic Games Launcher to install Unreal Engine.'
 
 // Generate (or reuse) a dedicated ed25519 keypair for this VM's agent login.
 // The private key stays on the host (referenced by vm.config.sshKeyPath); the
+// Startup helper: generate SSH keypairs for any VMs that were provisioned
+// without one (e.g. VMs created before keygen was added, or Windows VMs whose
+// provisioning pathway didn't call ensureVmSshKey). Safe to call on every boot
+// — it is a no-op when the key files already exist. The new key path is
+// persisted into the VM config so ssh/exec routes can use it immediately.
+export async function backfillVmSshKeys(): Promise<void> {
+  const { listVms, updateVmConfig } = await import("./vm-registry");
+  const vms = listVms();
+  for (const vm of vms) {
+    if (vm.config.sshKeyPath) continue; // already has a key
+    logger.info({ vm: vm.id }, "backfilling agent SSH keypair");
+    const result = await ensureVmSshKey(vm.id);
+    if (result) {
+      updateVmConfig(vm.id, { sshKeyPath: result.keyPath });
+      logger.info({ vm: vm.id, keyPath: result.keyPath }, "agent SSH keypair ready");
+    }
+  }
+}
+
+// Generate (or reuse) a dedicated ed25519 keypair for this VM's agent login.
+// The private key stays on the host (referenced by vm.config.sshKeyPath); the
 // public key is injected into the guest at provision time. Returns null if
 // ssh-keygen is unavailable so provisioning degrades to password/manual setup.
 async function ensureVmSshKey(vmId: string): Promise<{ keyPath: string; pubKey: string } | null> {

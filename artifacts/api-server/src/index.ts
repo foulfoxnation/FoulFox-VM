@@ -6,6 +6,7 @@ import appUiRouter from "./routes/app-ui";
 import { createShellWss } from "./routes/shell";
 import { ensureDefaultVm } from "./lib/vm-registry";
 import { reconcileOrphans } from "./lib/vm-launch";
+import { backfillVmSshKeys } from "./lib/vm-provision";
 import { createDisplayWss } from "./lib/vm-display";
 import { autostartApps, stopAllApps } from "./lib/app-runner";
 import { seedDefaultApps } from "./lib/default-apps";
@@ -43,6 +44,11 @@ ensureDefaultVm()
     } catch (err) {
       logger.error({ err }, "Orphan reconciliation failed");
     }
+    // Generate missing SSH keypairs for any VMs that were provisioned without
+    // one. This is a no-op when keys already exist so it is safe every boot.
+    backfillVmSshKeys().catch((err) =>
+      logger.error({ err }, "SSH keypair backfill failed"),
+    );
   })
   .catch((err) => logger.error({ err }, "Failed to initialize default VM"));
 
