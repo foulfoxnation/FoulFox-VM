@@ -14,6 +14,25 @@ export HOME=/var/lib/foulfox
 # Always-on appliance: no screen blanking or power management.
 xset s off -dpms s noblank 2>/dev/null || true
 
+# ── Hardware profile: adapt to available RAM ──────────────────────────────────
+# Read total RAM once at session start so Chromium and Firefox can use the
+# right flags. On 8 GB machines Ollama occupies ~4.7 GB when running on CPU
+# (or 0 MB when the GTX GPU offloads it to VRAM), so we conserve where we can.
+TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}')
+TOTAL_RAM_GB=$(( (TOTAL_RAM_KB + 524288) / 1048576 ))   # round to nearest GB
+# Chromium memory tuning flags: applied on ALL machines, scaled by RAM.
+# --max_old_space_size caps V8 per-renderer heap; --process-per-site reduces
+# the total number of renderer processes (important on low-RAM machines).
+if [ "$TOTAL_RAM_GB" -le 8 ]; then
+  # 8 GB or less: aggressive memory limits.
+  CHROMIUM_MEM_FLAGS="--memory-model=low --max_old_space_size=512 --process-per-site --disable-smooth-scrolling"
+elif [ "$TOTAL_RAM_GB" -le 16 ]; then
+  # 16 GB: moderate limits.
+  CHROMIUM_MEM_FLAGS="--memory-model=low --max_old_space_size=1024"
+else
+  CHROMIUM_MEM_FLAGS=""
+fi
+
 # ── Priority 1: Window manager + taskbar ─────────────────────────────────────
 # These must be up before any application window opens.
 # Window manager — restart automatically if it crashes so windows stay manageable.
@@ -113,9 +132,11 @@ sleep 1
 # FoulFoxKiosk class keeps it undecorated + maximized (respecting the panel's
 # reserved strip); --kiosk would map true-fullscreen and cover the taskbar.
 while true; do
+  # shellcheck disable=SC2086  # CHROMIUM_MEM_FLAGS is intentionally word-split
   chromium \
     --class=FoulFoxKiosk \
     --disable-gpu-compositing \
+    $CHROMIUM_MEM_FLAGS \
     --app="$url" \
     --start-maximized \
     --no-first-run \

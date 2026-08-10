@@ -14,13 +14,15 @@ Type=simple
 User=foulfox
 Group=foulfox
 EnvironmentFile=/etc/foulfox/foulfox.env
+# Hardware-specific GPU/CPU config written by foulfox-first-run on first boot.
+# Contains OLLAMA_NUM_GPU (GPU layer count) and/or OLLAMA_NUM_THREADS (CPU).
+# Prefixed with "-" — a missing file is silently ignored (safe on all hardware).
+EnvironmentFile=-/etc/foulfox/ollama-hw.env
 Environment=HOME=/var/lib/foulfox
 # Bind loopback only; models live on the persistent partition (seeded from the
 # read-only baked copy by foulfox-first-run so `ollama pull` of new models works).
 Environment=OLLAMA_HOST=127.0.0.1:11434
 Environment=OLLAMA_MODELS=/var/lib/foulfox/ollama/models
-# Keep the model warm between requests; single-user appliance.
-Environment=OLLAMA_KEEP_ALIVE=30m
 Environment=OLLAMA_NUM_PARALLEL=1
 ExecStart=/usr/local/bin/ollama serve
 Restart=on-failure

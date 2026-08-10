@@ -68,6 +68,83 @@ if [ -d "$BAKED_FASTEMBED" ] && [ ! -f "$FASTEMBED_SEED_MARKER" ]; then
   chown -R foulfox:foulfox "$FASTEMBED_DEST" 2>/dev/null || true
 fi
 
+# ── Hardware-specific Ollama tuning (GPU offload / CPU threads) ───────────────
+# Written once on first boot; ollama.service reads it via EnvironmentFile=-.
+# Writing it every boot would clobber manual tuning the user has set via the
+# agent, so the marker guards it. Delete the marker to force a re-detect.
+GPU_HW_ENV=/etc/foulfox/ollama-hw.env
+GPU_HW_MARKER="$FOULFOX_HOME/.ollama-hw-detected"
+if [ ! -f "$GPU_HW_MARKER" ]; then
+  NVIDIA_FOUND=0
+  NVIDIA_VRAM_MB=0
+  # Try nvidia-smi first (available once the driver is loaded post-boot).
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    if nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | grep -qE '^[0-9]'; then
+      NVIDIA_FOUND=1
+      NVIDIA_VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ' || echo 0)
+    fi
+  fi
+  # Fallback: check PCI device list (works before the driver loads).
+  if [ "$NVIDIA_FOUND" = "0" ] && lspci 2>/dev/null | grep -iq "nvidia"; then
+    NVIDIA_FOUND=1
+  fi
+
+  CPU_THREADS=$(nproc 2>/dev/null || echo 4)
+  TOTAL_RAM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 8192)
+
+  if [ "$NVIDIA_FOUND" = "1" ]; then
+    echo "[foulfox-first-run] NVIDIA GPU detected (VRAM ~${NVIDIA_VRAM_MB} MB) — enabling GPU offload"
+    # OLLAMA_NUM_GPU=-1 offloads ALL transformer layers to GPU VRAM.
+    # On a 6GB VRAM GPU (GTX 1060/1660) the 8B Q4_K_M model (~4.9 GB) fits
+    # entirely in VRAM, freeing ~4.5 GB of system RAM for the shell + Chromium.
+    # CPU_THREADS still set for the tokenizer / sampling steps (run on CPU).
+    cat > "$GPU_HW_ENV" <<EOF
+# Auto-detected: NVIDIA GPU with ~${NVIDIA_VRAM_MB} MB VRAM
+# All model layers offloaded to GPU — system RAM freed for the OS + shell.
+OLLAMA_NUM_GPU=-1
+OLLAMA_NUM_THREADS=${CPU_THREADS}
+EOF
+  else
+    echo "[foulfox-first-run] No NVIDIA GPU — CPU-only inference (${CPU_THREADS} threads, ${TOTAL_RAM_MB} MB RAM)"
+    # CPU-only: use all threads. Keep context short (already set in foulfox.env)
+    # and KV cache quantized to reduce the RAM the model occupies.
+    cat > "$GPU_HW_ENV" <<EOF
+# Auto-detected: CPU-only (no NVIDIA GPU found)
+# Using all ${CPU_THREADS} CPU threads for inference.
+OLLAMA_NUM_GPU=0
+OLLAMA_NUM_THREADS=${CPU_THREADS}
+EOF
+  fi
+  chmod 644 "$GPU_HW_ENV"
+  touch "$GPU_HW_MARKER"
+  echo "[foulfox-first-run] Wrote $GPU_HW_ENV"
+fi
+
+# ── Swap file: create one if the machine has none ────────────────────────────
+# 8 GB machines run out of RAM fast when Ollama + Chromium + the OS are all
+# active. A 4 GB swap file prevents OOM kills during peak load. Idempotent:
+# skip if swap already exists (including a swap partition on installed systems).
+SWAP_FILE=/var/lib/foulfox/swapfile
+if ! swapon --show 2>/dev/null | grep -q .; then
+  TOTAL_RAM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 8192)
+  # Scale swap to RAM: ≤8 GB → 4 GB swap, ≤16 GB → 2 GB, >16 GB → skip.
+  if [ "$TOTAL_RAM_MB" -le 8192 ]; then SWAP_MB=4096
+  elif [ "$TOTAL_RAM_MB" -le 16384 ]; then SWAP_MB=2048
+  else SWAP_MB=0
+  fi
+  if [ "$SWAP_MB" -gt 0 ] && [ ! -f "$SWAP_FILE" ]; then
+    echo "[foulfox-first-run] Creating ${SWAP_MB} MB swap file at $SWAP_FILE ..."
+    # fallocate is instant on ext4; dd is the safe fallback (btrfs, overlay).
+    if ! fallocate -l "${SWAP_MB}M" "$SWAP_FILE" 2>/dev/null; then
+      dd if=/dev/zero of="$SWAP_FILE" bs=1M count="$SWAP_MB" status=none
+    fi
+    chmod 600 "$SWAP_FILE"
+    mkswap "$SWAP_FILE"
+    swapon "$SWAP_FILE" && echo "[foulfox-first-run] Swap enabled (${SWAP_MB} MB)" || \
+      echo "[foulfox-first-run] WARNING: swapon failed — running without swap" >&2
+  fi
+fi
+
 # Updater state the patcher mutates AS ROOT (downloaded bundles, extracted
 # releases, shared venvs, and the status/rollback/boot-recovery markers) stays
 # root-owned so the unprivileged 'foulfox' service user — which runs the
