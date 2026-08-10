@@ -168,14 +168,21 @@ async def check_api_server() -> dict:
 
 async def check_odysseus_service() -> dict:
     data = await _json_get(f"{ODYSSEUS}/api/agent-suite/state")
-    if data is not None:
-        suite = data.get("suite", {})
-        roles = [r for r, v in suite.items() if v.get("model")]
+    if data is not None and isinstance(data, dict):
+        suite = data.get("suite", {}) or {}
+        if not isinstance(suite, dict):
+            suite = {}
+        port = os.environ.get("ODYSSEUS_PORT", "7000")
+        roles = [r for r, v in suite.items() if isinstance(v, dict) and v.get("model")]
         return _ok("odysseus_svc", CAT_OS, "Odysseus AI Service",
-                   f"Running on :5001; {len(roles)} agent role(s) configured" if roles
-                   else "Running on :5001 (no model configured yet)")
+                   f"Running on :{port}; {len(roles)} agent role(s) configured" if roles
+                   else f"Running on :{port} (no model configured yet)")
+    if data is not None:
+        # Endpoint responded but returned non-dict JSON
+        return _warn("odysseus_svc", CAT_OS, "Odysseus AI Service",
+                     "Service reachable but returned unexpected response format")
     return _fail("odysseus_svc", CAT_OS, "Odysseus AI Service",
-                 "Not reachable on :5001 — AI features unavailable")
+                 "Not reachable — AI features unavailable")
 
 async def check_live_updater() -> dict:
     pending = os.path.join(DATA_DIR, ".update-pending")
@@ -739,8 +746,16 @@ async def check_model_configured() -> dict:
     if data is None:
         return _unk("model_config", CAT_AWARE, "AI Model Configuration",
                     "Agent suite state unavailable")
-    suite = data.get("suite", {})
-    models = {role: (info or {}).get("model") for role, info in suite.items()}
+    if not isinstance(data, dict):
+        return _unk("model_config", CAT_AWARE, "AI Model Configuration",
+                    "Unexpected response format from agent suite endpoint")
+    suite = data.get("suite", {}) or {}
+    if not isinstance(suite, dict):
+        suite = {}
+    models = {
+        role: (info.get("model") if isinstance(info, dict) else None)
+        for role, info in suite.items()
+    }
     configured = {r: m for r, m in models.items() if m}
     if not configured:
         return _fail("model_config", CAT_AWARE, "AI Model Configuration",
@@ -846,10 +861,158 @@ async def check_sa_research_tools() -> dict:
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# CATEGORY 0 — System Hardware (shown first — tells the agent WHAT machine it's on)
+# ════════════════════════════════════════════════════════════════════════════════
+CAT_SYSINFO = "system_about"
+
+async def check_cpu_info() -> dict:
+    """CPU model name and logical core count."""
+    model = "unknown"
+    cores = 0
+    try:
+        with open("/proc/cpuinfo") as f:
+            content = f.read()
+        for line in content.splitlines():
+            if line.startswith("model name") and ":" in line:
+                model = line.split(":", 1)[1].strip()
+                break
+        cores = content.count("processor\t:")
+        if cores == 0:
+            cores = content.count("processor :")
+    except Exception:
+        pass
+    if model == "unknown":
+        _, out, _ = await _cmd(["uname", "-m"])
+        model = out or "unknown"
+    note = ""
+    if 0 < cores < 4:
+        note = " — low core count; parallel agent tasks will queue"
+    elif cores >= 16:
+        note = " — high-core machine; sub-agent parallelism benefits fully"
+    detail = f"{model} — {cores} logical core(s){note}"
+    return _ok("cpu_info", CAT_SYSINFO, "CPU", detail,
+               {"model": model, "cores": cores})
+
+async def check_ram_info() -> dict:
+    """Total and available RAM."""
+    total_kb = avail_kb = 0
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    total_kb = int(line.split()[1])
+                elif line.startswith("MemAvailable:"):
+                    avail_kb = int(line.split()[1])
+    except Exception:
+        pass
+    total_gb = total_kb / 1048576
+    avail_gb = avail_kb / 1048576
+    used_gb  = total_gb - avail_gb
+    pct_used = (used_gb / total_gb * 100) if total_gb > 0 else 0
+    detail = f"{total_gb:.1f} GB total — {avail_gb:.1f} GB free ({pct_used:.0f}% used)"
+    if total_gb < 8:
+        return _warn("ram_info", CAT_SYSINFO, "RAM",
+                     detail + " — under 8 GB; agent + VM may compete for memory",
+                     {"total_gb": round(total_gb, 1), "available_gb": round(avail_gb, 1)})
+    if pct_used > 85:
+        return _warn("ram_info", CAT_SYSINFO, "RAM",
+                     detail + " — memory pressure is high",
+                     {"total_gb": round(total_gb, 1), "available_gb": round(avail_gb, 1)})
+    return _ok("ram_info", CAT_SYSINFO, "RAM", detail,
+               {"total_gb": round(total_gb, 1), "available_gb": round(avail_gb, 1)})
+
+async def check_gpu_info() -> dict:
+    """GPU / display adapter — important for VM console rendering speed."""
+    rc, out, _ = await _cmd(["lspci"], timeout=6)
+    if rc == 0 and out:
+        gpu_lines = [
+            l for l in out.splitlines()
+            if any(k in l.lower() for k in
+                   ("vga", "3d controller", "display", "nvidia", "radeon",
+                    "amd/ati", "intel graphics", "gpu"))
+        ]
+        if gpu_lines:
+            gpus = [l.split(":", 2)[-1].strip() for l in gpu_lines[:3]]
+            return _ok("gpu_info", CAT_SYSINFO, "GPU / Display Adapter",
+                       "; ".join(gpus), gpus)
+    # Fallback checks
+    if os.path.isdir("/proc/driver/nvidia"):
+        return _ok("gpu_info", CAT_SYSINFO, "GPU / Display Adapter",
+                   "NVIDIA driver loaded (/proc/driver/nvidia present)", "nvidia")
+    if os.path.isdir("/dev/dri"):
+        devices = os.listdir("/dev/dri")
+        return _ok("gpu_info", CAT_SYSINFO, "GPU / Display Adapter",
+                   f"DRI devices present: {', '.join(devices)}", devices)
+    return _warn("gpu_info", CAT_SYSINFO, "GPU / Display Adapter",
+                 "No GPU detected (lspci unavailable or no display adapter found) — "
+                 "VM console will use software rendering")
+
+async def check_host_identity() -> dict:
+    """Hostname, kernel, and architecture."""
+    _, hostname, _ = await _cmd(["hostname"])
+    _, kernel, _   = await _cmd(["uname", "-r"])
+    _, arch, _     = await _cmd(["uname", "-m"])
+    parts = []
+    if hostname: parts.append(f"host={hostname}")
+    if arch:     parts.append(f"arch={arch}")
+    if kernel:   parts.append(f"kernel={kernel}")
+    detail = "  ·  ".join(parts) if parts else "unavailable"
+    return _ok("host_identity", CAT_SYSINFO, "Machine Identity", detail,
+               {"hostname": hostname, "kernel": kernel, "arch": arch})
+
+async def check_system_load() -> dict:
+    """CPU load average and system uptime."""
+    uptime_secs = 0.0
+    load1 = load5 = load15 = "?"
+    cores = 1
+    try:
+        with open("/proc/uptime") as f:
+            uptime_secs = float(f.read().split()[0])
+    except Exception:
+        pass
+    try:
+        with open("/proc/loadavg") as f:
+            parts = f.read().split()
+        load1, load5, load15 = parts[0], parts[1], parts[2]
+    except Exception:
+        pass
+    try:
+        with open("/proc/cpuinfo") as f:
+            cnt = f.read().count("processor\t:")
+        cores = max(cnt, 1)
+    except Exception:
+        pass
+
+    if uptime_secs < 3600:
+        uptime_str = f"{uptime_secs/60:.0f}m"
+    elif uptime_secs < 86400:
+        uptime_str = f"{uptime_secs/3600:.1f}h"
+    else:
+        uptime_str = f"{uptime_secs/86400:.1f}d"
+
+    detail = f"Up {uptime_str}  ·  load: {load1} / {load5} / {load15} (1/5/15 min avg, {cores} cores)"
+    try:
+        l1 = float(load1)
+        if l1 > cores * 0.9:
+            return _warn("system_load", CAT_SYSINFO, "System Load",
+                         detail + " — CPU saturated; agent responses will be slow",
+                         {"uptime_s": uptime_secs, "load1": load1, "cores": cores})
+        if l1 > cores * 0.6:
+            return _warn("system_load", CAT_SYSINFO, "System Load",
+                         detail + " — load is elevated",
+                         {"uptime_s": uptime_secs, "load1": load1, "cores": cores})
+    except (ValueError, TypeError):
+        pass
+    return _ok("system_load", CAT_SYSINFO, "System Load", detail,
+               {"uptime_s": uptime_secs, "load1": load1, "cores": cores})
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # Category registry (ordered — drives both report sections and UI)
 # ════════════════════════════════════════════════════════════════════════════════
 
 CATEGORIES: list[dict] = [
+    {"id": CAT_SYSINFO,    "label": "System Hardware",               "icon": "⚙️"},
     {"id": CAT_OS,         "label": "FoulFox OS",                    "icon": "🖥️"},
     {"id": CAT_VOICE,      "label": "Voice Forge",                   "icon": "🎤"},
     {"id": CAT_LLAMA,      "label": "Llama Llama Studio",            "icon": "🦙"},
@@ -867,6 +1030,9 @@ CATEGORIES: list[dict] = [
 
 # All check functions, grouped by category
 ALL_CHECKS: list = [
+    # System Hardware (always first — tells us what machine we're on)
+    check_cpu_info, check_ram_info, check_gpu_info,
+    check_host_identity, check_system_load,
     # FoulFox OS
     check_os_version, check_boot_type, check_kvm,
     check_data_partition, check_root_disk,
@@ -955,6 +1121,48 @@ improving. Like JARVIS: it knows the workshop, knows the mission, and gets thing
 """.strip()
 
 
+def _render_system_hardware_block(checks: list[dict]) -> list[str]:
+    """Render a compact inline hardware summary for the top of the report."""
+    hw = {c["id"]: c for c in checks if c.get("category") == CAT_SYSINFO}
+    if not hw:
+        return []
+
+    def _val(cid: str, fallback: str = "unknown") -> str:
+        c = hw.get(cid)
+        if c is None:
+            return fallback
+        v = c.get("value")
+        if isinstance(v, dict):
+            # Extract the most useful single field
+            if cid == "cpu_info":
+                m = v.get("model", "?")
+                n = v.get("cores", "?")
+                return f"{m} ({n} cores)"
+            if cid == "ram_info":
+                return f"{v.get('total_gb', '?')} GB total, {v.get('available_gb', '?')} GB free"
+            if cid == "host_identity":
+                return f"{v.get('hostname', '?')} — {v.get('arch', '?')} — kernel {v.get('kernel', '?')}"
+            if cid == "system_load":
+                return f"load {v.get('load1', '?')} ({v.get('cores', '?')} cores), up {v.get('uptime_s', 0)/3600:.1f}h"
+        if isinstance(v, list):
+            return "; ".join(str(x) for x in v[:2])
+        return c.get("detail", fallback)
+
+    lines: list[str] = [
+        "## ⚙️ This Machine",
+        "",
+        f"| | |",
+        f"|---|---|",
+        f"| **CPU** | {_val('cpu_info')} |",
+        f"| **RAM** | {_val('ram_info')} |",
+        f"| **GPU** | {_val('gpu_info')} |",
+        f"| **Identity** | {_val('host_identity')} |",
+        f"| **Load** | {_val('system_load')} |",
+        "",
+    ]
+    return lines
+
+
 def results_to_markdown(checks: list[dict], iteration: int = 1) -> str:
     icons  = {"ok": "✅", "warn": "⚠️", "fail": "❌", "unknown": "❓"}
     now    = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -969,6 +1177,10 @@ def results_to_markdown(checks: list[dict], iteration: int = 1) -> str:
         f"**Summary:** {ok_n} ✅  ·  {warn_n} ⚠️  ·  {fail_n} ❌",
         "",
     ]
+
+    # Hardware summary — always first so the reader/agent knows what machine this is
+    lines += _render_system_hardware_block(checks)
+    lines.append("")
 
     # ── FULLY OPERATIONAL BANNER ──────────────────────────────────────────
     if all_ok:
