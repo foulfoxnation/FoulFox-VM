@@ -7,12 +7,15 @@ This startup task makes that model actually *used* out of the box:
 1. Waits for the local Ollama server to come up and confirms the baked
    model is present.
 2. Registers a ``ModelEndpoint`` for it (idempotent — matched by base_url).
-3. Assigns it to all 3 agent-suite roles, but ONLY when no role has a model
-   configured yet. A user's explicit model choice is never overridden
-   (creating an endpoint != using it — the suite must be provisioned too).
+3. Provisions all 3 agent-suite roles onto local Ollama when:
+   a) no suite / no roles have a model set yet, OR
+   b) the currently-configured endpoint is unreachable (cloud endpoint
+      that can't be reached off-platform, or Replit proxy set by start.sh
+      that doesn't work on the appliance).  In that case local Ollama is
+      preferred automatically — the user can always reconfigure later.
 
-Gated on ``FOULFOX_LOCAL_OLLAMA=1`` (set in /etc/foulfox/foulfox.env), so it
-is a no-op in the Replit dev workspace and on non-appliance installs.
+Local Ollama is always the free default; the user's cloud Ollama proxy is
+an explicit opt-in.  We never override a working cloud configuration.
 """
 
 import asyncio
@@ -34,6 +37,18 @@ ENDPOINT_NAME = "FoulFox Local AI"
 # startup, so a long window costs nothing.
 WAIT_TOTAL_SECONDS = 3600
 POLL_INTERVAL_SECONDS = 5
+
+# Hosts/URLs that are known-dead on the appliance (off-platform cloud).
+# Any configured endpoint whose base URL contains one of these strings is
+# treated as unreachable without a live network probe (saves 5-second timeout
+# per host on every boot).
+_KNOWN_OFFPLATFORM = (
+    "openai-proxy.replit.com",   # Replit AI proxy — only reachable in dev
+    "openai.com",
+    "anthropic.com",
+    "api.groq.com",
+    "openrouter.ai",
+)
 
 
 async def _model_present(client, model: str) -> bool:
@@ -89,13 +104,61 @@ def _ensure_endpoint(model: str) -> str:
         db.close()
 
 
-def _suite_needs_provisioning() -> bool:
-    """True when no suite exists yet, or when NO role has a model configured.
+def _get_current_suite_endpoint_urls() -> list[str]:
+    """Return all endpoint base_urls configured in the active suite's roles."""
+    from core.database import SessionLocal, AgentSuite, AgentSuiteMember, ModelEndpoint
 
-    If even one role has an endpoint configured, the user (or a previous
-    bootstrap) has made a choice — leave everything alone.
-    """
-    from core.database import SessionLocal, AgentSuite, AgentSuiteMember, CrewMember
+    db = SessionLocal()
+    try:
+        suite = (
+            db.query(AgentSuite)
+            .filter(AgentSuite.owner.is_(None), AgentSuite.is_active == True)  # noqa: E712
+            .order_by(AgentSuite.created_at.desc())
+            .first()
+        )
+        if suite is None:
+            return []
+        members = db.query(AgentSuiteMember).filter(AgentSuiteMember.suite_id == suite.id).all()
+        urls: list[str] = []
+        for m in members:
+            if not m.endpoint_id:
+                continue
+            ep = db.query(ModelEndpoint).filter(ModelEndpoint.id == m.endpoint_id).first()
+            if ep and ep.base_url:
+                urls.append(ep.base_url)
+        return urls
+    except Exception as exc:
+        logger.debug("local-ollama: could not read suite endpoint URLs: %s", exc)
+        return []
+    finally:
+        db.close()
+
+
+async def _suite_endpoint_reachable(client, urls: list[str]) -> bool:
+    """Return True if at least one configured endpoint is actually responding."""
+    if not urls:
+        return False
+    for url in urls:
+        # Fast-fail known off-platform cloud hosts without a network probe.
+        if any(bad in url for bad in _KNOWN_OFFPLATFORM):
+            logger.debug("local-ollama: endpoint %s is known-offplatform — treating as unreachable", url)
+            continue
+        # Probe: try /models (OpenAI-compat) then /api/tags (Ollama native).
+        base = url.rstrip("/")
+        for probe_path in ("/models", "/api/tags", "/v1/models"):
+            try:
+                resp = await client.get(base + probe_path, timeout=4.0)
+                if resp.status_code < 400:
+                    logger.debug("local-ollama: endpoint %s is reachable (%s)", url, probe_path)
+                    return True
+            except Exception:
+                continue
+    return False
+
+
+def _suite_needs_provisioning() -> bool:
+    """True when no suite exists or NO role has an endpoint configured."""
+    from core.database import SessionLocal, AgentSuite, AgentSuiteMember
 
     db = SessionLocal()
     try:
@@ -108,13 +171,7 @@ def _suite_needs_provisioning() -> bool:
         if suite is None:
             return True
         members = db.query(AgentSuiteMember).filter(AgentSuiteMember.suite_id == suite.id).all()
-        for m in members:
-            if not m.crew_member_id:
-                continue
-            crew = db.query(CrewMember).filter(CrewMember.id == m.crew_member_id).first()
-            if crew and (crew.endpoint_url or "").strip():
-                return False
-        return True
+        return not any(m.endpoint_id for m in members)
     finally:
         db.close()
 
@@ -139,9 +196,35 @@ async def ensure_local_ollama() -> None:
                 return
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
+    logger.info("local-ollama: model %s confirmed present on %s", model, OLLAMA_NATIVE)
+
     try:
         endpoint_id = await asyncio.to_thread(_ensure_endpoint, model)
-        if await asyncio.to_thread(_suite_needs_provisioning):
+
+        needs_provision = await asyncio.to_thread(_suite_needs_provisioning)
+
+        if not needs_provision:
+            # Suite is configured — but is the endpoint it points at actually alive?
+            current_urls = await asyncio.to_thread(_get_current_suite_endpoint_urls)
+            reachable    = await _suite_endpoint_reachable(client, current_urls)
+
+            if reachable:
+                logger.info(
+                    "local-ollama: suite already configured and endpoint is reachable — "
+                    "local endpoint registered but roles untouched"
+                )
+                return
+
+            # Endpoint is unreachable (off-platform cloud, dead proxy, etc.).
+            # Switch all roles to local Ollama — the user can reconfigure later.
+            logger.warning(
+                "local-ollama: suite is configured but endpoint(s) %s are unreachable — "
+                "switching all roles to local Ollama (%s)",
+                current_urls, model,
+            )
+            needs_provision = True
+
+        if needs_provision:
             from src import agent_suite
 
             role_models = {
@@ -150,12 +233,14 @@ async def ensure_local_ollama() -> None:
             }
             await asyncio.to_thread(
                 agent_suite.provision_suite,
-                None,  # owner
+                None,   # owner
                 "FoulFox VM Suite",
                 role_models,
             )
-            logger.info("local-ollama: provisioned all agent roles onto %s (%s)", ENDPOINT_NAME, model)
-        else:
-            logger.info("local-ollama: suite already configured; endpoint registered but roles untouched")
+            logger.info(
+                "local-ollama: provisioned all agent roles onto %s (%s)",
+                ENDPOINT_NAME, model,
+            )
+
     except Exception:
         logger.exception("local-ollama: bootstrap failed (non-critical)")

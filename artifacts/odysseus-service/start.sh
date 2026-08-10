@@ -89,13 +89,36 @@ if [ -n "$AI_INTEGRATIONS_ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
 fi
 
 # Set Replit AI OpenAI-compatible base URL if not already configured.
+#
+# IMPORTANT: gate the Replit AI proxy to the Replit dev environment ONLY.
+# On the appliance the proxy is unreachable (off-platform), so setting
+# OPENAI_BASE_URL to openai-proxy.replit.com means every fallback request
+# tries a dead cloud URL instead of the baked local Ollama.  On the
+# appliance, prefer local Ollama (FOULFOX_LOCAL_OLLAMA=1); if local Ollama
+# is not configured either, leave the var unset so the agent surfaces a
+# clean "no model configured" state instead of silently hammering a
+# dead endpoint.
 if [ -z "$OPENAI_BASE_URL" ]; then
-  export OPENAI_BASE_URL="https://openai-proxy.replit.com/v1"
+  if [ -n "$REPL_ID" ] || [ -n "$REPLIT_DEV_DOMAIN" ]; then
+    # Replit dev workspace: use the Replit AI proxy.
+    export OPENAI_BASE_URL="https://openai-proxy.replit.com/v1"
+  elif [ "${FOULFOX_LOCAL_OLLAMA:-0}" = "1" ]; then
+    # Appliance with baked Ollama: point directly at local Ollama's
+    # OpenAI-compatible surface so env-based fallbacks work immediately,
+    # even before the bootstrap finishes provisioning the suite.
+    export OPENAI_BASE_URL="http://127.0.0.1:11434/v1"
+  fi
+  # Otherwise leave OPENAI_BASE_URL unset — no cloud fallback on appliance.
 fi
 
-# Default model: claude-sonnet-4-5 via the Replit AI proxy
+# Default model.  Match the env-based AI URL chosen above so the model and
+# endpoint stay in sync for any caller that reads both vars directly.
 if [ -z "$OPENAI_MODEL" ]; then
-  export OPENAI_MODEL="claude-sonnet-4-5"
+  if [ -n "$REPL_ID" ] || [ -n "$REPLIT_DEV_DOMAIN" ]; then
+    export OPENAI_MODEL="claude-sonnet-4-5"
+  elif [ "${FOULFOX_LOCAL_OLLAMA:-0}" = "1" ]; then
+    export OPENAI_MODEL="${FOULFOX_LOCAL_MODEL:-llama3.1:8b-instruct-q4_K_M}"
+  fi
 fi
 
 # ── Odysseus → Express API server shell/exec bridge ───────────────────────────
