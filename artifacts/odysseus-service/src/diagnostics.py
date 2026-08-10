@@ -72,8 +72,14 @@ async def _json_get(url: str, timeout: float = 5.0) -> Optional[Any]:
     return None
 
 DATA_DIR = os.environ.get("ODYSSEUS_DATA_DIR", "/var/lib/foulfox")
-ODYSSEUS  = "http://127.0.0.1:5001"
-API       = "http://127.0.0.1:8080"
+
+# ── Service base URLs (read env vars so they work on both the appliance and dev) ─
+# Appliance: foulfox.env sets ODYSSEUS_PORT=7000 and PORT=8080 (api-server).
+# Replit dev: ODYSSEUS_PORT is the workflow-assigned Odysseus port; API_SERVER_PORT
+#   is the Express api-server port (set explicitly by the api-server workflow).
+# Never hardcode ports here — old images used 5001 which is now retired.
+ODYSSEUS = f"http://127.0.0.1:{os.environ.get('ODYSSEUS_PORT', '7000')}"
+API      = f"http://127.0.0.1:{os.environ.get('API_SERVER_PORT', '8080')}"
 
 # ════════════════════════════════════════════════════════════════════════════════
 # CATEGORY 1 — FoulFox OS Foundation
@@ -148,11 +154,17 @@ async def check_root_disk() -> dict:
     return _unk("root_disk", CAT_OS, "Root Disk")
 
 async def check_api_server() -> dict:
-    data = await _json_get(f"{API}/api/health")
-    if data is not None:
-        return _ok("api_server", CAT_OS, "API Server", "Responding on :8080", data)
+    # Try /api/healthz first (Express api-server route), then /api/health fallback.
+    # The port is read from API_SERVER_PORT env var (default 8080) so this
+    # works on both the appliance and Replit dev without hardcoding.
+    port = os.environ.get('API_SERVER_PORT', '8080')
+    for path in ("/api/healthz", "/api/health", "/api/status"):
+        data = await _json_get(f"{API}{path}", timeout=4)
+        if data is not None:
+            return _ok("api_server", CAT_OS, "API Server",
+                       f"Responding on :{port}", data)
     return _fail("api_server", CAT_OS, "API Server",
-                 "Not reachable on :8080 — shell UI cannot function")
+                 f"Not reachable on :{port} — shell UI cannot function")
 
 async def check_odysseus_service() -> dict:
     data = await _json_get(f"{ODYSSEUS}/api/agent-suite/state")

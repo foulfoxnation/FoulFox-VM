@@ -1217,6 +1217,38 @@ async def _startup_event():
     from src.cookbook_serve_lifecycle import cookbook_serve_lifecycle_loop
     _startup_tasks.append(asyncio.create_task(cookbook_serve_lifecycle_loop()))
 
+    # ── First-boot directory provisioning ────────────────────────────────────
+    # Create directories that the diagnostics / VM subsystem expect to exist.
+    # These are no-ops if the dirs already exist (exist_ok=True).  Doing this at
+    # startup means the checks report "empty" instead of "missing" immediately
+    # after a fresh install, and the next use (backup run, VM key generation)
+    # finds the parent already there.
+    try:
+        _data_root = os.environ.get("ODYSSEUS_DATA_DIR", "/var/lib/foulfox")
+        for _sub in ("keys", "vm-backups/windows", "reports", "updates"):
+            os.makedirs(os.path.join(_data_root, _sub), exist_ok=True)
+    except Exception as _de:
+        logger.debug(f"[startup] Directory pre-creation skipped: {_de}")
+
+    # ── Version file ─────────────────────────────────────────────────────────
+    # Write $ODYSSEUS_DATA_DIR/.version on first run so the OS Version diagnostic
+    # reports the actual build version instead of "No FoulFox version file".
+    # FOULFOX_VERSION is set by the patcher / CI build; falls back to a dev stamp.
+    try:
+        _ver_path = os.path.join(os.environ.get("ODYSSEUS_DATA_DIR", "/var/lib/foulfox"), ".version")
+        if not os.path.exists(_ver_path):
+            import datetime as _dt
+            _ver_str = (
+                os.environ.get("FOULFOX_VERSION")
+                or os.environ.get("FOULFOX_BUILD_TAG")
+                or f"dev-{_dt.datetime.now().strftime('%Y.%m.%d')}"
+            )
+            with open(_ver_path, "w") as _vf:
+                _vf.write(_ver_str)
+            logger.info(f"[startup] Wrote version file: {_ver_str}")
+    except Exception as _ve:
+        logger.debug(f"[startup] Version file write skipped: {_ve}")
+
     # ── Bug-fix loop auto-start ───────────────────────────────────────────────
     # Two paths that both run without any manual trigger:
     #
