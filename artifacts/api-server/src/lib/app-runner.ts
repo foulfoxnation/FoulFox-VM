@@ -137,6 +137,24 @@ function adjustOomScore(pid: number): void {
 
 function contractEnv(a: AppRecord, port: number, token: string): NodeJS.ProcessEnv {
   const apiPort = process.env["PORT"] || "8080";
+  // OLLAMA_BASE_URL must be the *native* Ollama API root (no /v1) so apps
+  // that call /api/chat or /api/tags directly work correctly.  If the host
+  // env has OLLAMA_BASE_URL pointing at the OpenAI-compat /v1 surface
+  // (e.g. set by Odysseus start.sh on the appliance), strip the suffix so
+  // we always hand apps the canonical base URL.
+  const rawOllamaUrl = process.env["OLLAMA_BASE_URL"] || "http://127.0.0.1:11434";
+  const ollamaBaseUrl = rawOllamaUrl.replace(/\/v1\/?$/, "");
+
+  // OLLAMA_MODEL / FOULFOX_LOCAL_MODEL: the exact model tag baked into the
+  // ISO (e.g. "llama3.1:8b-instruct-q4_K_M").  Apps that read this env var
+  // (or the FOULFOX_LOCAL_MODEL alias) will use the right tag without needing
+  // a settings-DB migration.  Falls back to empty string on non-appliance
+  // installs so apps use their own default.
+  const localModel =
+    process.env["FOULFOX_LOCAL_MODEL"] ||
+    process.env["OLLAMA_MODEL"] ||
+    "";
+
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     [a.manifest.portEnv]: String(port),
@@ -144,7 +162,9 @@ function contractEnv(a: AppRecord, port: number, token: string): NodeJS.ProcessE
     FOULFOX_APP_ID: a.id,
     FOULFOX_APP_TOKEN: token,
     FOULFOX_API_BASE: `http://127.0.0.1:${apiPort}`,
-    OLLAMA_BASE_URL: process.env["OLLAMA_BASE_URL"] || "http://127.0.0.1:11434",
+    OLLAMA_BASE_URL: ollamaBaseUrl,
+    // Explicit model tag so apps don't have to parse FOULFOX_LOCAL_MODEL.
+    OLLAMA_MODEL: localModel,
     HOME: appDataDir(a.id), // keep stray dotfile writes inside the data dir
   };
   // Never leak the OS-internal bridge credential into app processes.

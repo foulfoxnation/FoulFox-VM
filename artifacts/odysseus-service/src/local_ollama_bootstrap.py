@@ -25,6 +25,15 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# App-level DB paths (relative to ODYSSEUS_DATA_DIR/apps/).
+# Both Llama Llama Studio and VoiceForge store their settings / agent
+# config in predictable SQLite files; we patch them so the apps use the
+# same baked model that Odysseus and the agent suite use.
+# ---------------------------------------------------------------------------
+_VOICEFORGE_DB_REL    = os.path.join("foulfox-voice",      "data", "app.db")
+_LLAMASTUDIO_DB_REL   = os.path.join("llama-llama-studio",  "data", "db", "app.db")
+
 OLLAMA_NATIVE = "http://127.0.0.1:11434"
 OLLAMA_OPENAI_BASE = "http://127.0.0.1:11434/v1"
 ENDPOINT_NAME = "FoulFox Local AI"
@@ -156,6 +165,82 @@ async def _suite_endpoint_reachable(client, urls: list[str]) -> bool:
     return False
 
 
+def _configure_default_apps(model: str) -> None:
+    """Patch Llama Llama Studio and VoiceForge SQLite DBs to use the baked model.
+
+    Both apps store the Ollama model name in their own SQLite databases and
+    default to names that don't exist in the ISO (e.g. ``llama3.2`` or
+    ``llama3.1:8b``).  We overwrite those after confirming the baked model is
+    present so the apps work out of the box without any manual Settings visit.
+
+    This is intentionally narrow — it only updates model-name fields that we
+    know are wrong relative to the baked model.  It does NOT touch user edits
+    to unrelated settings (voice, theme, API keys, etc.).
+
+    Silently skips if a DB file doesn't exist yet (app not started for the
+    first time) — a re-run of the bootstrap at the next boot will catch it.
+    """
+    import sqlite3 as _sqlite3
+
+    apps_dir = os.path.join(
+        os.environ.get("ODYSSEUS_DATA_DIR", os.environ.get("HOME", "/tmp")),
+        "apps",
+    )
+    local_url = OLLAMA_NATIVE  # native API root, no /v1
+
+    # ── VoiceForge ────────────────────────────────────────────────────────────
+    # agents.model stores the Ollama model name for each voice agent.
+    # The factory agent ships with "llama3.1:8b" which only matches an
+    # unquantized pull; the ISO bakes a specific quantization tag.
+    vf_db = os.path.join(apps_dir, _VOICEFORGE_DB_REL)
+    if os.path.exists(vf_db):
+        try:
+            conn = _sqlite3.connect(vf_db, timeout=5)
+            cur = conn.cursor()
+            cur.execute("SELECT model FROM agents WHERE model != ?", (model,))
+            stale = [r[0] for r in cur.fetchall()]
+            if stale:
+                cur.execute("UPDATE agents SET model = ? WHERE model != ?", (model, model))
+                conn.commit()
+                logger.info(
+                    "local-ollama: VoiceForge agents updated to model %s (was: %s)",
+                    model, stale,
+                )
+            conn.close()
+        except Exception:
+            logger.debug("local-ollama: VoiceForge DB update failed (non-critical)", exc_info=True)
+    else:
+        logger.debug("local-ollama: VoiceForge DB not found at %s (app not yet started)", vf_db)
+
+    # ── Llama Llama Studio ────────────────────────────────────────────────────
+    # settings table has key/value rows.  We upsert:
+    #   ollamaEndpoint -> local native URL (in case cloud URL was saved)
+    #   defaultModel   -> the baked model tag
+    ls_db = os.path.join(apps_dir, _LLAMASTUDIO_DB_REL)
+    if os.path.exists(ls_db):
+        try:
+            conn = _sqlite3.connect(ls_db, timeout=5)
+            cur = conn.cursor()
+            for key, val in (("ollamaEndpoint", local_url), ("defaultModel", model)):
+                cur.execute(
+                    "INSERT INTO settings (key, value) VALUES (?, ?)"
+                    " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (key, val),
+                )
+            conn.commit()
+            logger.info(
+                "local-ollama: Llama Llama Studio settings updated — "
+                "ollamaEndpoint=%s defaultModel=%s", local_url, model,
+            )
+            conn.close()
+        except Exception:
+            logger.debug("local-ollama: Llama Llama Studio DB update failed (non-critical)", exc_info=True)
+    else:
+        logger.debug(
+            "local-ollama: Llama Llama Studio DB not found at %s (app not yet started)", ls_db,
+        )
+
+
 def _suite_needs_provisioning() -> bool:
     """True when no suite exists or NO role has an endpoint configured."""
     from core.database import SessionLocal, AgentSuite, AgentSuiteMember
@@ -241,6 +326,11 @@ async def ensure_local_ollama() -> None:
                 "local-ollama: provisioned all agent roles onto %s (%s)",
                 ENDPOINT_NAME, model,
             )
+
+        # Always patch the built-in apps' SQLite DBs so they use the same
+        # baked model — regardless of whether the agent suite needed
+        # (re)provisioning this boot.
+        await asyncio.to_thread(_configure_default_apps, model)
 
     except Exception:
         logger.exception("local-ollama: bootstrap failed (non-critical)")
