@@ -276,6 +276,42 @@ async function provisionWindows(vmId: string, signal?: AbortSignal): Promise<voi
   // 1. Honor a user-supplied ISO (USB frontload / VM settings) if present.
   let isoPath = vm.config.isoPath && fs.existsSync(vm.config.isoPath) ? vm.config.isoPath : null;
 
+  // 1b. Auto-scan the frontload/isos staging directory for any .iso file —
+  //     the user may have downloaded one via Firefox or copied it from a USB
+  //     drive without explicitly setting it in VM settings. Prefer files whose
+  //     name contains "win" or "windows". Persist the found path to VM config
+  //     so future starts use it without re-scanning.
+  if (!isoPath) {
+    const frontloadRoot = process.env["FRONTLOAD_STAGING_DIR"]
+      ? path.join(process.env["FRONTLOAD_STAGING_DIR"], "isos")
+      : path.join(DATA_DIR, ".odysseus-vms", "frontload", "isos");
+    try {
+      if (fs.existsSync(frontloadRoot)) {
+        const candidates = fs.readdirSync(frontloadRoot)
+          .filter((f) => f.toLowerCase().endsWith(".iso"))
+          .map((f) => path.join(frontloadRoot, f));
+        // Prefer ISOs whose filename contains "win"/"windows", else take the first.
+        const found =
+          candidates.find((f) => /win/i.test(path.basename(f))) ??
+          candidates[0] ??
+          null;
+        if (found) {
+          isoPath = found;
+          updateVmConfig(vmId, { isoPath: found });
+          emit(vmId, {
+            status: "downloading",
+            progress: 100,
+            error: null,
+            message: `Using frontloaded ISO: ${path.basename(found)}`,
+          });
+          logger.info({ vm: vmId, iso: found }, "Using frontloaded Windows ISO");
+        }
+      }
+    } catch (err) {
+      logger.warn({ err, vm: vmId }, "Frontload ISO scan failed (continuing)");
+    }
+  }
+
   // 2. Otherwise resolve + download the official ISO straight from Microsoft so
   //    the user never needs a second machine. This endpoint is a moving target
   //    and Microsoft blocks some networks, so failure is expected and falls back

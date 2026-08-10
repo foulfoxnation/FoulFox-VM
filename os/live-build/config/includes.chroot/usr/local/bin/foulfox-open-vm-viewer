@@ -1,7 +1,14 @@
 #!/bin/sh
-# Watch for the Windows VM's SPICE port and attach a fullscreen viewer when it
-# comes up. Runs inside the kiosk X session, retrying for the life of the
-# session so the viewer reappears each time the VM is (re)started.
+# Watch for the Windows VM's SPICE port and attach a viewer when it comes up.
+# Runs inside the kiosk X session, retrying for the life of the session so the
+# viewer reappears each time the VM is (re)started.
+#
+# IMPORTANT — cursor & keyboard behaviour:
+#   • The viewer opens as a normal window (NOT fullscreen) so you can Alt+Tab
+#     between it and other apps normally.
+#   • Clicking INSIDE the viewer captures the cursor for the Windows guest.
+#   • Press Shift+F12 at any time to release the cursor back to the desktop.
+#   • The tint2 taskbar at the bottom shows "FoulFox VM" — click it to switch.
 
 # shellcheck disable=SC1091
 [ -f /etc/foulfox/foulfox.env ] && . /etc/foulfox/foulfox.env
@@ -9,8 +16,14 @@ SPICE_PORT="${VM_SPICE_PORT:-5930}"
 
 while true; do
   if ss -ltn 2>/dev/null | grep -q "127.0.0.1:${SPICE_PORT}\b"; then
-    # Blocks until the viewer window is closed or the VM stops.
-    remote-viewer --full-screen "spice://127.0.0.1:${SPICE_PORT}" 2>/dev/null || true
+    # Open as a regular window — NOT fullscreen — so the user can Alt+Tab to
+    # other apps (Firefox, the FoulFox shell, etc.) at any time.
+    # --hotkeys: Shift+F12 releases the captured cursor/keyboard. F11 toggles
+    # fullscreen if the user wants it manually.
+    remote-viewer \
+      --hotkeys=release-cursor=shift+f12,toggle-fullscreen=f11 \
+      --title="FoulFox VM (Shift+F12 = release cursor)" \
+      "spice://127.0.0.1:${SPICE_PORT}" 2>/dev/null || true
     sleep 3
   fi
   sleep 2
