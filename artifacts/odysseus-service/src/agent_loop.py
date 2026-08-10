@@ -224,6 +224,13 @@ Vibe coding = you autonomously write and ship working software inside the Window
 - **Windows VM mode**: same tools auto-route to PowerShell on the Windows guest — you do NOT need to SSH manually
 - Use `list_vms` to see available VMs, `select_vm` to target one, `vm_computer` for GUI control
 
+## Full system reference
+To orient yourself, diagnose issues, or recall every feature built into FoulFox OS, read:
+```read_file
+FOULFOX_AGENT_MANIFEST.md
+```
+This file covers every feature across all builds — the OS, the VM, tools, vibe coding, sub-agents, Voice Forge, audio, local AI, boot order, diagnostics, and more.
+
 Only the tools listed below are available for this turn. To use a tool, write a fenced code block with the tool name as the language tag. The block executes automatically and you see the output.\
 """
 
