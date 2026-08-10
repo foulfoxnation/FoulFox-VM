@@ -1163,6 +1163,32 @@ def _render_system_hardware_block(checks: list[dict]) -> list[str]:
     return lines
 
 
+def _render_value(val: Any, max_len: int = 800) -> str:
+    """Format a check's raw value field for markdown output."""
+    if val is None:
+        return ""
+    if isinstance(val, bool):
+        return str(val).lower()
+    if isinstance(val, (int, float)):
+        return str(val)
+    if isinstance(val, str):
+        val = val.strip()
+        if not val:
+            return ""
+        if len(val) > max_len:
+            val = val[:max_len] + f"\n… ({len(val) - max_len} chars truncated)"
+        return val
+    if isinstance(val, (dict, list)):
+        try:
+            s = json.dumps(val, indent=2, default=str)
+        except Exception:
+            s = str(val)
+        if len(s) > max_len:
+            s = s[:max_len] + f"\n… ({len(s) - max_len} chars truncated)"
+        return s
+    return str(val)
+
+
 def results_to_markdown(checks: list[dict], iteration: int = 1) -> str:
     icons  = {"ok": "✅", "warn": "⚠️", "fail": "❌", "unknown": "❓"}
     now    = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -1194,7 +1220,8 @@ def results_to_markdown(checks: list[dict], iteration: int = 1) -> str:
             "",
         ]
 
-    # Group by category
+    # ── QUICK OVERVIEW: one-liner per check, grouped by category ─────────
+    # This section gives a fast pass/warn/fail overview before the full log.
     by_cat: dict[str, list] = {}
     for c in checks:
         by_cat.setdefault(c.get("category", "unknown"), []).append(c)
@@ -1213,19 +1240,60 @@ def results_to_markdown(checks: list[dict], iteration: int = 1) -> str:
             lines.append(f"- {icon} **{c['name']}**: {c['detail']}")
         lines.append("")
 
-    # Issues section for fix-loop context
-    issues = [c for c in checks if c["status"] in ("fail", "warn")]
-    if issues:
-        lines += ["---", "## 🔧 What Needs Fixing", ""]
-        for c in issues:
-            icon = icons[c["status"]]
+    # ── ACTION REQUIRED: fails only, with raw value for immediate debugging ──
+    fails = [c for c in checks if c["status"] == "fail"]
+    if fails:
+        lines += ["---", "## ❌ Action Required (Failures)", ""]
+        for c in fails:
             lines += [
-                f"### {icon} {c['name']}",
-                f"**Status:** {c['status'].upper()}",
-                f"**System:** {c.get('category', '?')}",
+                f"### ❌ {c['name']}",
+                f"**Category:** {c.get('category', '?')}",
                 f"**Detail:** {c['detail']}",
-                "",
             ]
+            val_str = _render_value(c.get("value"))
+            if val_str:
+                lines.append(f"**Measured value:**")
+                lines.append(f"```")
+                lines.append(val_str)
+                lines.append(f"```")
+            lines.append("")
+
+    # ── FULL DIAGNOSTIC LOG: every check, every value ─────────────────────
+    # This is the raw output of every probe so you can see exactly what was
+    # measured — not just what failed. All 46 checks, all raw values.
+    lines += ["---", "## 📋 Full Diagnostic Log", ""]
+    lines.append("Every check that ran, with its raw measured value.")
+    lines.append("")
+
+    for cat in CATEGORIES:
+        cat_checks = by_cat.get(cat["id"], [])
+        if not cat_checks:
+            continue
+        cat_fail = any(c["status"] == "fail" for c in cat_checks)
+        cat_warn = any(c["status"] == "warn" for c in cat_checks)
+        header_icon = "❌" if cat_fail else ("⚠️" if cat_warn else "✅")
+        lines.append(f"### {header_icon} {cat['icon']} {cat['label']}")
+        lines.append("")
+        for c in cat_checks:
+            icon = icons.get(c["status"], "❓")
+            status_upper = c["status"].upper()
+            lines.append(f"**{icon} {c['name']}** `[{status_upper}]`")
+            lines.append(f"- Detail: {c['detail']}")
+            val_str = _render_value(c.get("value"))
+            if val_str:
+                # Inline values that are short (≤80 chars, no newlines)
+                if len(val_str) <= 80 and "\n" not in val_str:
+                    lines.append(f"- Value: `{val_str}`")
+                else:
+                    lines.append(f"- Value:")
+                    lines.append(f"  ```")
+                    for vline in val_str.splitlines():
+                        lines.append(f"  {vline}")
+                    lines.append(f"  ```")
+            else:
+                lines.append(f"- Value: *(none)*")
+            lines.append("")
+        lines.append("")
 
     # ── SYSTEM PURPOSE (shown when things still need fixing) ──────────────
     if not all_ok:
