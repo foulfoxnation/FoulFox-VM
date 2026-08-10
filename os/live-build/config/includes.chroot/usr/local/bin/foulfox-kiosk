@@ -14,9 +14,8 @@ export HOME=/var/lib/foulfox
 # Always-on appliance: no screen blanking or power management.
 xset s off -dpms s noblank 2>/dev/null || true
 
-# Attach the fullscreen Windows-VM viewer whenever the guest is up (background).
-/usr/local/bin/foulfox-open-vm-viewer &
-
+# ── Priority 1: Window manager + taskbar ─────────────────────────────────────
+# These must be up before any application window opens.
 # Window manager — restart automatically if it crashes so windows stay manageable.
 ( while true; do
     openbox 2>/dev/null || true
@@ -31,6 +30,9 @@ xset s off -dpms s noblank 2>/dev/null || true
     sleep 2
   done ) &
 
+# ── Priority 2: Wait for FoulFox OS (api-server) to be online ────────────────
+# NOTHING else opens until the shell API answers. The VM viewer, Firefox, and
+# Chromium are all gated here so FoulFox OS is always the first service up.
 # Wait for the api-server to serve the shell before opening the browser.
 # No time limit: launching Chromium at the shell URL before the API is up
 # strands the user on a "127.0.0.1 refused to connect" error page that never
@@ -77,6 +79,13 @@ done
   done
 ) &
 sleep 2
+
+# ── Priority 3: Windows VM viewer ────────────────────────────────────────────
+# Attach the SPICE viewer whenever the Windows VM is running. Placed HERE —
+# after FoulFox OS is confirmed online and Firefox is open — so the VM window
+# never steals focus before the shell is ready. Uses windowed mode (not
+# fullscreen) so Alt+Tab works; Shift+F12 releases the captured cursor.
+/usr/local/bin/foulfox-open-vm-viewer &
 
 # ── PulseAudio (required for Voice Forge mic + speaker access) ───────────────
 # Start PulseAudio as a user-mode daemon for the foulfox kiosk session.

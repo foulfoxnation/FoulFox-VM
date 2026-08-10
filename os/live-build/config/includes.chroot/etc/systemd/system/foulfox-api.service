@@ -5,7 +5,7 @@ Description=FoulFox VM API server (Express; serves shell + /api + Odysseus proxy
 # "127.0.0.1 refused to connect" with no API (WiFi, USB, VMs all dead).
 # The API server is fully local and needs no network to start.
 After=foulfox-prepare.service odysseus-service.service
-Requires=foulfox-prepare.service
+Requires=foulfox-prepare.service odysseus-service.service
 
 [Service]
 Type=simple

@@ -56,6 +56,11 @@ ALWAYS_AVAILABLE = frozenset({
     # what other concurrent agents have already found.
     "discover",
     "read_mtm",
+    # Parallel sub-agent fan-out: spawn up to 12 concurrent worker/explorer
+    # agents in a single call. Always available so the agent can parallelize
+    # any workload — vibe-coding multiple files, investigating multiple targets,
+    # or running independent actions — without waiting for RAG to retrieve it.
+    "spawn_subagents",
 })
 
 # Tools that the Personal Assistant always has access to during scheduled
