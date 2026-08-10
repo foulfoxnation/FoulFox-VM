@@ -199,29 +199,59 @@ class ChatProcessor:
                 "content": preset_system_prompt
             })
 
-        # Workspace mode: when the user has toggled "Windows VM" in the shell,
-        # prepend a trusted system context so the agent knows to work in the VM
-        # by default without needing to be told every turn. This is static for
-        # the duration of the mode setting so it is safe in a system message
-        # (does not pollute the KV-cache per-turn).
+        # Workspace mode: inject a trusted system context telling the agent
+        # exactly where it is working and what that means for every tool call.
+        # Covers both "windows" (VM) and "host" (FoulFox OS) modes.
         try:
-            from src.vm_target import get_workspace_mode, get_workspace_vm_label
+            from src.vm_target import get_workspace_mode, get_workspace_vm_label, get_selected_vm
             _wmode = get_workspace_mode()
             if _wmode == "windows":
-                _vm_label = get_workspace_vm_label() or "the Windows VM"
+                _vm_label = get_workspace_vm_label() or "Default VM"
                 preface.append({
                     "role": "system",
                     "content": (
-                        f"WORKSPACE: Windows VM mode is active. {_vm_label} is pre-selected "
-                        f"as your working environment.\n"
-                        "• When the user asks you to build, code, install, run, test, or work on "
-                        "ANYTHING, do it inside the Windows VM by default — not on the FoulFox OS host.\n"
-                        "• bash / python / write_file / read_file / edit_file / ls / grep are already "
-                        "routed to PowerShell on the Windows guest — use them directly.\n"
-                        "• Use vm_computer (screenshot → click/type/key) to drive the Windows GUI when needed.\n"
-                        "• You do NOT need to call select_vm — the VM is pre-selected.\n"
-                        "• If you need to check the Windows desktop state first, call "
-                        "vm_app with action='playbook' and engine='windows' for a full navigation guide."
+                        f"## ACTIVE WORKSPACE: Windows VM — {_vm_label}\n\n"
+                        "You are working INSIDE the Windows 11 VM right now. "
+                        "Every shell command, file read/write, and script runs on Windows, not on FoulFox OS.\n\n"
+                        "**What this means for your tools:**\n"
+                        "• `bash` → runs PowerShell commands on the Windows guest (already routed — do NOT ssh manually)\n"
+                        "• `python` → runs Python on Windows (if installed in the VM)\n"
+                        "• `read_file` / `write_file` / `edit_file` / `ls` / `grep` → Windows filesystem\n"
+                        "• `vm_computer` → takes a screenshot of the Windows desktop, clicks, types, presses keys\n"
+                        "• `vm_app` → lists, launches, kills Windows apps; `action=playbook engine=windows` gives the full navigation guide\n\n"
+                        "**Vibe coding — your default behaviour when asked to build anything:**\n"
+                        "1. `vm_computer` screenshot → see current Windows desktop state\n"
+                        "2. Open VS Code or the appropriate editor (click or `bash` PowerShell)\n"
+                        "3. Write EVERY file — scaffold the project completely\n"
+                        "4. Run it in a Windows terminal, read the output\n"
+                        "5. Fix every error, re-run, iterate until it works\n"
+                        "6. Report what was built and where it lives on the Windows filesystem\n"
+                        "Never stop at 'I opened the editor'. Go all the way. Build. Fix. Ship.\n\n"
+                        "**Do NOT call `select_vm`** — the VM is already pre-selected.\n"
+                        "**Do NOT use `foulfox-open-browser`** — that opens the kiosk browser on the host, not in Windows."
+                    ),
+                })
+            else:
+                # Host mode — FoulFox OS Linux shell
+                preface.append({
+                    "role": "system",
+                    "content": (
+                        "## ACTIVE WORKSPACE: FoulFox OS (host)\n\n"
+                        "You are working on the FoulFox OS Linux host right now.\n\n"
+                        "**What you can do from here:**\n"
+                        "• Run host shell commands: `bash` / `python` / file tools → Linux host filesystem\n"
+                        "• Open a URL in the kiosk browser: `bash` → `foulfox-open-browser <url>`\n"
+                        "• Take a screenshot of the kiosk/desktop: `vm_computer` with `vm_id=host` or use CDP on :9222\n"
+                        "• Manage the Windows VM: `list_vms` to see it, `vm_computer` to screenshot/control it\n"
+                        "• Check services: `bash` → `systemctl status <service>` or `journalctl -u <service> -n 50`\n"
+                        "• Check Voice Forge audio: `bash` → `pactl info` (PulseAudio), `pactl list sinks`\n"
+                        "• Run the diagnostic report: `bash` → `curl -sf http://127.0.0.1:7000/api/diagnostics/run | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d.get('markdown','')[:4000])\"`\n"
+                        "• Switch to Windows VM workspace: tell the user to toggle 'Windows VM' in the chat header\n\n"
+                        "**To control the Windows VM from host mode:**\n"
+                        "• `list_vms` → find the VM id\n"
+                        "• `select_vm` with the id → routes shell tools to the Windows guest\n"
+                        "• `vm_computer` → screenshot, click, type on the Windows desktop\n"
+                        "• Or ask the user to toggle to 'Windows VM' mode in the chat header for persistent routing"
                     ),
                 })
         except Exception as _e:  # noqa: BLE001
