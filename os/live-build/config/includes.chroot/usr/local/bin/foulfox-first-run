@@ -69,55 +69,81 @@ if [ -d "$BAKED_FASTEMBED" ] && [ ! -f "$FASTEMBED_SEED_MARKER" ]; then
 fi
 
 # ── Hardware-specific Ollama tuning (GPU offload / CPU threads) ───────────────
-# Written once on first boot; ollama.service reads it via EnvironmentFile=-.
-# Writing it every boot would clobber manual tuning the user has set via the
-# agent, so the marker guards it. Delete the marker to force a re-detect.
+# ollama.service reads $GPU_HW_ENV via EnvironmentFile=-.
+#
+# Detection policy (fixes the "GPU present but Ollama stuck on CPU" trap):
+#   * GPU is claimed ONLY when nvidia-smi actually works — PCI presence alone
+#     proves the card exists, not that the driver/CUDA stack is usable, and
+#     writing OLLAMA_NUM_GPU=-1 on a broken driver silently falls back to CPU.
+#   * A CPU-only result is NEVER final: while the env says OLLAMA_NUM_GPU=0 we
+#     re-probe on EVERY boot, so a driver that only becomes healthy later
+#     (DKMS build, Secure Boot enrollment, nouveau→nvidia switch) upgrades the
+#     config automatically instead of being frozen out by a one-shot marker.
+#   * Once GPU mode is written we leave the file alone (no downgrade churn,
+#     and manual tuning is preserved). Delete $GPU_HW_ENV to force a re-detect.
 GPU_HW_ENV=/etc/foulfox/ollama-hw.env
-GPU_HW_MARKER="$FOULFOX_HOME/.ollama-hw-detected"
-if [ ! -f "$GPU_HW_MARKER" ]; then
-  NVIDIA_FOUND=0
-  NVIDIA_VRAM_MB=0
-  # Try nvidia-smi first (available once the driver is loaded post-boot).
-  if command -v nvidia-smi >/dev/null 2>&1; then
-    if nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | grep -qE '^[0-9]'; then
-      NVIDIA_FOUND=1
-      NVIDIA_VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ' || echo 0)
-    fi
-  fi
-  # Fallback: check PCI device list (works before the driver loads).
-  if [ "$NVIDIA_FOUND" = "0" ] && lspci 2>/dev/null | grep -iq "nvidia"; then
-    NVIDIA_FOUND=1
-  fi
+GPU_HW_MARKER="$FOULFOX_HOME/.ollama-hw-detected"   # legacy one-shot marker (no longer gates re-probes)
 
-  CPU_THREADS=$(nproc 2>/dev/null || echo 4)
-  TOTAL_RAM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 8192)
+# Returns 0 and prints VRAM MB when the NVIDIA driver is genuinely usable.
+nvidia_vram_mb() {
+  command -v nvidia-smi >/dev/null 2>&1 || return 1
+  # Best effort: make sure the kernel module is loaded before probing (prepare
+  # runs before the display manager, so nothing else may have loaded it yet).
+  modprobe nvidia 2>/dev/null || true
+  local out
+  out=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
+  case "$out" in
+    ''|*[!0-9]*) return 1 ;;
+    *) printf '%s\n' "$out"; return 0 ;;
+  esac
+}
 
-  if [ "$NVIDIA_FOUND" = "1" ]; then
-    echo "[foulfox-first-run] NVIDIA GPU detected (VRAM ~${NVIDIA_VRAM_MB} MB) — enabling GPU offload"
-    # OLLAMA_NUM_GPU=-1 offloads ALL transformer layers to GPU VRAM.
-    # On a 6GB VRAM GPU (GTX 1060/1660) the 8B Q4_K_M model (~4.9 GB) fits
-    # entirely in VRAM, freeing ~4.5 GB of system RAM for the shell + Chromium.
-    # CPU_THREADS still set for the tokenizer / sampling steps (run on CPU).
-    cat > "$GPU_HW_ENV" <<EOF
-# Auto-detected: NVIDIA GPU with ~${NVIDIA_VRAM_MB} MB VRAM
+write_gpu_env() {  # $1 = vram MB
+  # OLLAMA_NUM_GPU=-1 offloads ALL transformer layers to GPU VRAM. On a 6GB
+  # VRAM GPU (GTX 1060/1660) the 8B Q4_K_M model (~4.9 GB) fits entirely in
+  # VRAM, freeing ~4.5 GB of system RAM for the shell + Chromium. CPU threads
+  # still handle tokenizer/sampling.
+  cat > "$GPU_HW_ENV" <<EOF
+# Auto-detected: NVIDIA GPU with ~${1} MB VRAM (verified via nvidia-smi)
 # All model layers offloaded to GPU — system RAM freed for the OS + shell.
 OLLAMA_NUM_GPU=-1
 OLLAMA_NUM_THREADS=${CPU_THREADS}
 EOF
+  chmod 644 "$GPU_HW_ENV"
+}
+
+CPU_THREADS=$(nproc 2>/dev/null || echo 4)
+TOTAL_RAM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 8192)
+
+if [ -f "$GPU_HW_ENV" ] && grep -q '^OLLAMA_NUM_GPU=-1' "$GPU_HW_ENV" 2>/dev/null; then
+  echo "[foulfox-first-run] GPU offload already configured — leaving $GPU_HW_ENV untouched"
+elif VRAM_MB=$(nvidia_vram_mb); then
+  echo "[foulfox-first-run] NVIDIA GPU verified via nvidia-smi (VRAM ~${VRAM_MB} MB) — enabling GPU offload"
+  write_gpu_env "$VRAM_MB"
+  touch "$GPU_HW_MARKER"
+  echo "[foulfox-first-run] Wrote $GPU_HW_ENV (GPU mode)"
+elif [ -f "$GPU_HW_ENV" ]; then
+  # Existing CPU-only config and the driver still isn't usable: keep the file
+  # (it may carry manual thread tuning) but say WHY, loudly, every boot.
+  if lspci 2>/dev/null | grep -iq "nvidia"; then
+    echo "[foulfox-first-run] WARNING: NVIDIA GPU present on PCI but nvidia-smi is not working — Ollama stays CPU-only. Check 'journalctl -u foulfox-gpu-fallback' and 'dmesg | grep -i nvidia' (nouveau may own the card, or the driver failed to load). Will re-probe next boot." >&2
+  fi
+else
+  # First boot, no usable NVIDIA driver right now → CPU-only for today.
+  if lspci 2>/dev/null | grep -iq "nvidia"; then
+    echo "[foulfox-first-run] NVIDIA GPU on PCI but driver not usable yet — writing CPU-only config; will re-probe every boot" >&2
   else
     echo "[foulfox-first-run] No NVIDIA GPU — CPU-only inference (${CPU_THREADS} threads, ${TOTAL_RAM_MB} MB RAM)"
-    # CPU-only: use all threads. Keep context short (already set in foulfox.env)
-    # and KV cache quantized to reduce the RAM the model occupies.
-    cat > "$GPU_HW_ENV" <<EOF
-# Auto-detected: CPU-only (no NVIDIA GPU found)
-# Using all ${CPU_THREADS} CPU threads for inference.
+  fi
+  cat > "$GPU_HW_ENV" <<EOF
+# Auto-detected: CPU-only (no WORKING NVIDIA driver at detection time).
+# This is re-evaluated on every boot until a GPU is verified via nvidia-smi.
 OLLAMA_NUM_GPU=0
 OLLAMA_NUM_THREADS=${CPU_THREADS}
 EOF
-  fi
   chmod 644 "$GPU_HW_ENV"
   touch "$GPU_HW_MARKER"
-  echo "[foulfox-first-run] Wrote $GPU_HW_ENV"
+  echo "[foulfox-first-run] Wrote $GPU_HW_ENV (CPU mode)"
 fi
 
 # ── Swap file: create one if the machine has none ────────────────────────────
