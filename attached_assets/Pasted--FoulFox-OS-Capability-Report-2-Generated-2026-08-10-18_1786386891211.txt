@@ -1,0 +1,494 @@
+# FoulFox OS — Capability Report (#2)
+**Generated:** 2026-08-10 18:33:13 UTC
+**Summary:** 27 ✅  ·  15 ⚠️  ·  4 ❌
+
+## ⚙️ This Machine
+
+| | |
+|---|---|
+| **CPU** | AMD Ryzen 5 3500 6-Core Processor (6 cores) |
+| **RAM** | 7.7 GB total, 3.5 GB free |
+| **GPU** | NVIDIA Corporation GP107 [GeForce GTX 1050] (rev a1); NVIDIA Corporation GP107GL High Definition Audio Controller (rev a1) |
+| **Identity** | foulfox — x86_64 — kernel 6.1.0-52-amd64 |
+| **Load** | load 0.60 (6 cores), up 9.7h |
+
+
+## ⚠️ ⚙️ System Hardware
+
+- ✅ **CPU**: AMD Ryzen 5 3500 6-Core Processor — 6 logical core(s)
+- ⚠️ **RAM**: 7.7 GB total — 3.5 GB free (54% used) — under 8 GB; agent + VM may compete for memory
+- ✅ **GPU / Display Adapter**: NVIDIA Corporation GP107 [GeForce GTX 1050] (rev a1); NVIDIA Corporation GP107GL High Definition Audio Controller (rev a1)
+- ✅ **Machine Identity**: host=foulfox  ·  arch=x86_64  ·  kernel=6.1.0-52-amd64
+- ✅ **System Load**: Up 9.7h  ·  load: 0.60 / 0.72 / 0.97 (1/5/15 min avg, 6 cores)
+
+## ✅ 🖥️ FoulFox OS
+
+- ✅ **OS Version**: FoulFox dev-2026.08.09
+- ✅ **Boot Type**: Installed to disk (fstype=ext4)
+- ✅ **KVM Hardware Acceleration**: /dev/kvm present — VMs run at full speed
+- ✅ **Data Partition**: 11G used / 98G total (11%)
+- ✅ **Root Disk**: 13G used / 147G total (10%)
+- ✅ **API Server**: Responding on :8080
+- ✅ **Odysseus AI Service**: Running on :7000 (no model configured yet)
+- ✅ **Live Updater**: Up-to-date (no pending updates)
+- ✅ **Internet Connectivity**: Online — Reachable (ping 8.8.8.8 OK)
+
+## ❌ 🎤 Voice Forge
+
+- ⚠️ **Speech-to-Text Engine**: STT loaded (voiceforge) but disabled — enable in Settings → Voice
+- ⚠️ **Text-to-Speech Engine**: TTS loaded (voiceforge) but disabled — enable in Settings → Voice
+- ❌ **Audio Hardware (PulseAudio)**: PulseAudio not running — microphone and speaker unavailable
+
+## ✅ 🦙 Llama Llama Studio
+
+- ✅ **Ollama Engine**: 1 model(s): llama3.1:8b-instruct-q4_K_M
+- ✅ **Local AI Model**: Llama-family model ready: llama3.1:8b-instruct-q4_K_M
+- ❓ **Llama Llama Studio App**: App list unavailable
+
+## ✅ 🪟 Windows 11 VM
+
+- ✅ **Windows 11 VM**: 'Default VM' exists (id=default)
+- ✅ **Windows VM State**: 'Default VM' running — display available via noVNC
+- ✅ **Windows VM Display (noVNC)**: Running — VNC port will be assigned by VM launcher
+
+## ❌ 🔌 Agent → Windows VM
+
+- ❌ **Agent→VM SSH Key**: Keys directory exists but empty — agent cannot SSH into VMs
+- ⚠️ **Agent→VM Shell Bridge**: Bridge endpoint returned HTTP 404 — Windows agent may not be running yet
+- ⚠️ **Agent Workspace Mode**: Agent targeting 'host' — toggle to 'Windows VM' in the chat header
+
+## ✅ 🤖 Agent → FoulFox OS
+
+- ✅ **Agent Host Shell (bash)**: Agent can run host commands as foulfox
+- ✅ **Agent File I/O**: Agent can read and write files on the host
+- ✅ **Agent Web Fetch**: Agent can reach the internet and fetch web content
+
+## ⚠️ 💾 Windows VM Backups
+
+- ⚠️ **VM Backup Directory**: Backup directory exists but is empty — no backups taken yet
+- ⚠️ **Last Backup Age**: Backup directory empty — no files backed up yet
+
+## ❌ 🗣️ Voice + Agent Integration
+
+- ⚠️ **Voice ↔ Agent Loop**: Incomplete — STT and TTS not enabled; enable in Settings → Voice
+- ❌ **AI Model for Voice Responses**: No AI model set — voice responses cannot be generated; configure a model in Setup
+- ✅ **Kiosk Browser CDP**: Chrome DevTools Protocol available — Chrome/151.0.7922.108
+
+## ⚠️ 🧠 Agent Memory & Lessons
+
+- ✅ **Agent Lessons**: 18 lesson(s) stored; latest: 2026-08-09
+- ⚠️ **Agent Notes**: No notes stored — agent hasn't saved any knowledge yet
+- ⚠️ **Agent Memory (Long-term)**: No long-term memories — agent forgets context between sessions; use the agent regularly to build memory
+- ✅ **Semantic Knowledge Search**: ChromaDB embedded store ready at /var/lib/foulfox/chroma
+
+## ⚠️ 📈 Agent Learning & Improvement
+
+- ⚠️ **Agent Skills Library**: No skills saved — agent is using defaults only; have the agent discover and save skills via the Agents tab
+- ⚠️ **Skill Self-Improvement Audit**: No audit has run yet — trigger from the Agents tab to let the agent self-improve
+- ⚠️ **Self-Repair Capability**: Self-repair disabled — enable in Settings → Agent to allow autonomous code fixes
+
+## ❌ 👁️ Agent System Awareness
+
+- ❓ **Multi-Task Memory (MTM)**: MTM endpoint unavailable
+- ⚠️ **Research Library**: No research reports — ask the agent to research topics so it builds knowledge
+- ❌ **AI Model Configuration**: No AI model configured — complete the Setup wizard to pick a model
+
+## ✅ ⚡ Sub-Agents (Task Speed)
+
+- ✅ **Sub-Agent Spawn Tool**: spawn_subagents tool available — agent can fan out parallel tasks
+- ❓ **Sub-Agent Usage History**: MTM unavailable — cannot read task history
+
+## ⚠️ 🎓 Sub-Agents (Learning & Skills)
+
+- ✅ **Sub-Agent Learning Tools**: All learning tools available: ask_teacher, manage_skills, pipeline, trigger_research
+- ⚠️ **Sub-Agent Skill Discovery**: No skills discovered yet — have a sub-agent research and save domain-specific skills
+- ✅ **Sub-Agent Verification Chain**: Research + Teacher + Sub-agents all available — agent can spawn researchers, verify accuracy, and improve results
+
+---
+## ❌ Action Required (Failures)
+
+### ❌ Audio Hardware (PulseAudio)
+**Category:** voice_forge
+**Detail:** PulseAudio not running — microphone and speaker unavailable
+
+### ❌ Agent→VM SSH Key
+**Category:** agent_vm_socket
+**Detail:** Keys directory exists but empty — agent cannot SSH into VMs
+
+### ❌ AI Model for Voice Responses
+**Category:** voice_agent
+**Detail:** No AI model set — voice responses cannot be generated; configure a model in Setup
+
+### ❌ AI Model Configuration
+**Category:** agent_awareness
+**Detail:** No AI model configured — complete the Setup wizard to pick a model
+
+---
+## 📋 Full Diagnostic Log
+
+Every check that ran, with its raw measured value.
+
+### ⚠️ ⚙️ System Hardware
+
+**✅ CPU** `[OK]`
+- Detail: AMD Ryzen 5 3500 6-Core Processor — 6 logical core(s)
+- Value:
+  ```
+  {
+    "model": "AMD Ryzen 5 3500 6-Core Processor",
+    "cores": 6
+  }
+  ```
+
+**⚠️ RAM** `[WARN]`
+- Detail: 7.7 GB total — 3.5 GB free (54% used) — under 8 GB; agent + VM may compete for memory
+- Value:
+  ```
+  {
+    "total_gb": 7.7,
+    "available_gb": 3.5
+  }
+  ```
+
+**✅ GPU / Display Adapter** `[OK]`
+- Detail: NVIDIA Corporation GP107 [GeForce GTX 1050] (rev a1); NVIDIA Corporation GP107GL High Definition Audio Controller (rev a1)
+- Value:
+  ```
+  [
+    "NVIDIA Corporation GP107 [GeForce GTX 1050] (rev a1)",
+    "NVIDIA Corporation GP107GL High Definition Audio Controller (rev a1)"
+  ]
+  ```
+
+**✅ Machine Identity** `[OK]`
+- Detail: host=foulfox  ·  arch=x86_64  ·  kernel=6.1.0-52-amd64
+- Value:
+  ```
+  {
+    "hostname": "foulfox",
+    "kernel": "6.1.0-52-amd64",
+    "arch": "x86_64"
+  }
+  ```
+
+**✅ System Load** `[OK]`
+- Detail: Up 9.7h  ·  load: 0.60 / 0.72 / 0.97 (1/5/15 min avg, 6 cores)
+- Value:
+  ```
+  {
+    "uptime_s": 34748.05,
+    "load1": "0.60",
+    "cores": 6
+  }
+  ```
+
+
+### ✅ 🖥️ FoulFox OS
+
+**✅ OS Version** `[OK]`
+- Detail: FoulFox dev-2026.08.09
+- Value: `dev-2026.08.09`
+
+**✅ Boot Type** `[OK]`
+- Detail: Installed to disk (fstype=ext4)
+- Value: `disk`
+
+**✅ KVM Hardware Acceleration** `[OK]`
+- Detail: /dev/kvm present — VMs run at full speed
+- Value: *(none)*
+
+**✅ Data Partition** `[OK]`
+- Detail: 11G used / 98G total (11%)
+- Value: `11`
+
+**✅ Root Disk** `[OK]`
+- Detail: 13G used / 147G total (10%)
+- Value: `10`
+
+**✅ API Server** `[OK]`
+- Detail: Responding on :8080
+- Value:
+  ```
+  {
+    "status": "ok"
+  }
+  ```
+
+**✅ Odysseus AI Service** `[OK]`
+- Detail: Running on :7000 (no model configured yet)
+- Value: *(none)*
+
+**✅ Live Updater** `[OK]`
+- Detail: Up-to-date (no pending updates)
+- Value: *(none)*
+
+**✅ Internet Connectivity** `[OK]`
+- Detail: Online — Reachable (ping 8.8.8.8 OK)
+- Value: *(none)*
+
+
+### ❌ 🎤 Voice Forge
+
+**⚠️ Speech-to-Text Engine** `[WARN]`
+- Detail: STT loaded (voiceforge) but disabled — enable in Settings → Voice
+- Value: *(none)*
+
+**⚠️ Text-to-Speech Engine** `[WARN]`
+- Detail: TTS loaded (voiceforge) but disabled — enable in Settings → Voice
+- Value: *(none)*
+
+**❌ Audio Hardware (PulseAudio)** `[FAIL]`
+- Detail: PulseAudio not running — microphone and speaker unavailable
+- Value: *(none)*
+
+
+### ✅ 🦙 Llama Llama Studio
+
+**✅ Ollama Engine** `[OK]`
+- Detail: 1 model(s): llama3.1:8b-instruct-q4_K_M
+- Value:
+  ```
+  [
+    "llama3.1:8b-instruct-q4_K_M"
+  ]
+  ```
+
+**✅ Local AI Model** `[OK]`
+- Detail: Llama-family model ready: llama3.1:8b-instruct-q4_K_M
+- Value:
+  ```
+  [
+    "llama3.1:8b-instruct-q4_K_M"
+  ]
+  ```
+
+**❓ Llama Llama Studio App** `[UNKNOWN]`
+- Detail: App list unavailable
+- Value: *(none)*
+
+
+### ✅ 🪟 Windows 11 VM
+
+**✅ Windows 11 VM** `[OK]`
+- Detail: 'Default VM' exists (id=default)
+- Value:
+  ```
+  {
+    "id": "default",
+    "name": "Default VM",
+    "osKind": "windows",
+    "state": "running",
+    "pid": 117845,
+    "uptime": 454,
+    "isoPath": null,
+    "diskPath": "/var/lib/foulfox/.odysseus-vms/default/disk.qcow2",
+    "ramGb": 4,
+    "cpuCores": 5,
+    "gpuPassthrough": null,
+    "connectionMode": "ssh",
+    "sshPort": 5985,
+    "authMode": "password",
+    "ports": {
+      "ssh": 5985,
+      "rdp": 22000,
+      "vnc": 23000,
+      "vncWs": 24000,
+      "monitor": 25000,
+      "cdp": 26000
+    },
+    "provisioning": {
+      "status": "ready",
+      "progress": 100,
+      "message": "Windows disk + unattended answer file generated. Add a Windows ISO via File Explorer \u2192 USB Frontload \u2192 ISOs (or this VM's settings), then start the VM.",
+      "error": null,
+      "imageUrl": null
+    },
+    "displayToken": "51a5d7f945c46ca5a1a3632
+  … (72 chars truncated)
+  ```
+
+**✅ Windows VM State** `[OK]`
+- Detail: 'Default VM' running — display available via noVNC
+- Value: `running`
+
+**✅ Windows VM Display (noVNC)** `[OK]`
+- Detail: Running — VNC port will be assigned by VM launcher
+- Value: *(none)*
+
+
+### ❌ 🔌 Agent → Windows VM
+
+**❌ Agent→VM SSH Key** `[FAIL]`
+- Detail: Keys directory exists but empty — agent cannot SSH into VMs
+- Value: *(none)*
+
+**⚠️ Agent→VM Shell Bridge** `[WARN]`
+- Detail: Bridge endpoint returned HTTP 404 — Windows agent may not be running yet
+- Value: *(none)*
+
+**⚠️ Agent Workspace Mode** `[WARN]`
+- Detail: Agent targeting 'host' — toggle to 'Windows VM' in the chat header
+- Value: *(none)*
+
+
+### ✅ 🤖 Agent → FoulFox OS
+
+**✅ Agent Host Shell (bash)** `[OK]`
+- Detail: Agent can run host commands as foulfox
+- Value: *(none)*
+
+**✅ Agent File I/O** `[OK]`
+- Detail: Agent can read and write files on the host
+- Value: *(none)*
+
+**✅ Agent Web Fetch** `[OK]`
+- Detail: Agent can reach the internet and fetch web content
+- Value: *(none)*
+
+
+### ⚠️ 💾 Windows VM Backups
+
+**⚠️ VM Backup Directory** `[WARN]`
+- Detail: Backup directory exists but is empty — no backups taken yet
+- Value: *(none)*
+
+**⚠️ Last Backup Age** `[WARN]`
+- Detail: Backup directory empty — no files backed up yet
+- Value: *(none)*
+
+
+### ❌ 🗣️ Voice + Agent Integration
+
+**⚠️ Voice ↔ Agent Loop** `[WARN]`
+- Detail: Incomplete — STT and TTS not enabled; enable in Settings → Voice
+- Value: *(none)*
+
+**❌ AI Model for Voice Responses** `[FAIL]`
+- Detail: No AI model set — voice responses cannot be generated; configure a model in Setup
+- Value: *(none)*
+
+**✅ Kiosk Browser CDP** `[OK]`
+- Detail: Chrome DevTools Protocol available — Chrome/151.0.7922.108
+- Value: *(none)*
+
+
+### ⚠️ 🧠 Agent Memory & Lessons
+
+**✅ Agent Lessons** `[OK]`
+- Detail: 18 lesson(s) stored; latest: 2026-08-09
+- Value: `18`
+
+**⚠️ Agent Notes** `[WARN]`
+- Detail: No notes stored — agent hasn't saved any knowledge yet
+- Value: *(none)*
+
+**⚠️ Agent Memory (Long-term)** `[WARN]`
+- Detail: No long-term memories — agent forgets context between sessions; use the agent regularly to build memory
+- Value: *(none)*
+
+**✅ Semantic Knowledge Search** `[OK]`
+- Detail: ChromaDB embedded store ready at /var/lib/foulfox/chroma
+- Value: *(none)*
+
+
+### ⚠️ 📈 Agent Learning & Improvement
+
+**⚠️ Agent Skills Library** `[WARN]`
+- Detail: No skills saved — agent is using defaults only; have the agent discover and save skills via the Agents tab
+- Value: *(none)*
+
+**⚠️ Skill Self-Improvement Audit** `[WARN]`
+- Detail: No audit has run yet — trigger from the Agents tab to let the agent self-improve
+- Value: *(none)*
+
+**⚠️ Self-Repair Capability** `[WARN]`
+- Detail: Self-repair disabled — enable in Settings → Agent to allow autonomous code fixes
+- Value: *(none)*
+
+
+### ❌ 👁️ Agent System Awareness
+
+**❓ Multi-Task Memory (MTM)** `[UNKNOWN]`
+- Detail: MTM endpoint unavailable
+- Value: *(none)*
+
+**⚠️ Research Library** `[WARN]`
+- Detail: No research reports — ask the agent to research topics so it builds knowledge
+- Value: *(none)*
+
+**❌ AI Model Configuration** `[FAIL]`
+- Detail: No AI model configured — complete the Setup wizard to pick a model
+- Value: *(none)*
+
+
+### ✅ ⚡ Sub-Agents (Task Speed)
+
+**✅ Sub-Agent Spawn Tool** `[OK]`
+- Detail: spawn_subagents tool available — agent can fan out parallel tasks
+- Value: *(none)*
+
+**❓ Sub-Agent Usage History** `[UNKNOWN]`
+- Detail: MTM unavailable — cannot read task history
+- Value: *(none)*
+
+
+### ⚠️ 🎓 Sub-Agents (Learning & Skills)
+
+**✅ Sub-Agent Learning Tools** `[OK]`
+- Detail: All learning tools available: ask_teacher, manage_skills, pipeline, trigger_research
+- Value: *(none)*
+
+**⚠️ Sub-Agent Skill Discovery** `[WARN]`
+- Detail: No skills discovered yet — have a sub-agent research and save domain-specific skills
+- Value: *(none)*
+
+**✅ Sub-Agent Verification Chain** `[OK]`
+- Detail: Research + Teacher + Sub-agents all available — agent can spawn researchers, verify accuracy, and improve results
+- Value: *(none)*
+
+
+---
+## 🎯 What This System Will Be When Fully Online
+
+FoulFox OS is a fully operational AI-native computing environment built around a single goal: a
+JARVIS-grade intelligent workspace where you and your AI Agent collaborate as equals.
+
+What the completed system delivers:
+
+UNIFIED WORKSPACE — FoulFox OS runs natively on bare metal or USB. Inside it, a Windows 11 VM
+lives as an embedded iframe — fully visible, fully controllable. You switch between the host OS and
+the Windows VM without leaving the interface. Both desktops are your workspace simultaneously.
+
+AGENT WITH FULL REACH — The AI Agent operates freely across both environments. Inside FoulFox OS
+it reads files, writes scripts, edits configs, and restarts services. Inside the Windows VM it
+opens applications, writes and runs code, browses the web, and builds software — exactly as a
+human developer would, but without needing sleep.
+
+VIBE CODING AT FULL SPEED — The Agent scaffolds projects, writes every file, fixes every bug, runs
+every test, and ships the result — all while narrating what it is doing in plain English. It works
+across the OS boundary: a Python script on FoulFox calls a Windows tool in the VM, the Agent wires
+them together without being asked.
+
+VOICE-FIRST COMMUNICATION — Voice Forge provides a real-time, low-latency TTS/STT loop. You speak
+naturally, the Agent hears and understands, then responds in a clear synthetic voice you have
+chosen and customised. The conversation continues unbroken whether you are watching a build log or
+stepping away from the keyboard.
+
+YOUR AGENT'S VOICE — Voice Forge lets you tune every aspect of the Agent's speech: voice model,
+speed, pitch, and personality tone. The Agent sounds like your assistant — not a generic chatbot.
+The voice carries context: calm when reporting status, energised when something works, direct when
+flagging a problem.
+
+MEMORY THAT COMPOUNDS — Every lesson the Agent learns about your project, preferences, and
+patterns is stored and retrieved semantically. The longer the system runs, the more effective the
+Agent becomes — past solutions inform future decisions automatically.
+
+SUB-AGENT PARALLELISM — Complex tasks spawn parallel sub-agents. One researches, one codes, one
+tests. Results merge back into the main Agent's context. Work that would take hours serially
+finishes in minutes.
+
+The system you are building is not a tool. It is a collaborator — always on, always aware, always
+improving. Like JARVIS: it knows the workshop, knows the mission, and gets things done.
+
+---
+*Sent automatically by FoulFox OS self-reporting system.*

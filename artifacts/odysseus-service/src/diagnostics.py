@@ -221,12 +221,13 @@ async def check_stt() -> dict:
     data = await _json_get(f"{ODYSSEUS}/api/stt/stats")
     if data is None:
         return _fail("stt", CAT_VOICE, "Speech-to-Text Engine",
-                     "STT service not responding — voice input unavailable")
+                     "STT service not responding — voice input unavailable",
+                     {"endpoint": f"{ODYSSEUS}/api/stt/stats", "result": "no response"})
     provider = data.get("provider", "unknown")
     enabled  = data.get("enabled", False)
     if not enabled:
         return _warn("stt", CAT_VOICE, "Speech-to-Text Engine",
-                     f"STT loaded ({provider}) but disabled — enable in Settings → Voice")
+                     f"STT loaded ({provider}) but disabled — enable in Settings → Voice", data)
     return _ok("stt", CAT_VOICE, "Speech-to-Text Engine",
                f"Active — provider: {provider}", data)
 
@@ -234,27 +235,40 @@ async def check_tts() -> dict:
     data = await _json_get(f"{ODYSSEUS}/api/tts/stats")
     if data is None:
         return _fail("tts", CAT_VOICE, "Text-to-Speech Engine",
-                     "TTS service not responding — voice output unavailable")
+                     "TTS service not responding — voice output unavailable",
+                     {"endpoint": f"{ODYSSEUS}/api/tts/stats", "result": "no response"})
     provider = data.get("provider", "unknown")
     enabled  = data.get("enabled", False)
     if not enabled:
         return _warn("tts", CAT_VOICE, "Text-to-Speech Engine",
-                     f"TTS loaded ({provider}) but disabled — enable in Settings → Voice")
+                     f"TTS loaded ({provider}) but disabled — enable in Settings → Voice", data)
     return _ok("tts", CAT_VOICE, "Text-to-Speech Engine",
                f"Active — provider: {provider}", data)
 
 async def check_audio_hw() -> dict:
-    rc, out, _ = await _cmd(["pactl", "info"])
-    if rc == 0 and "Server Name" in out:
-        for line in out.splitlines():
+    rc, pactl_out, pactl_err = await _cmd(["pactl", "info"])
+    if rc == 0 and "Server Name" in pactl_out:
+        sink = "unknown"
+        for line in pactl_out.splitlines():
             if "Default Sink:" in line:
                 sink = line.split(":", 1)[1].strip()
-                return _ok("audio_hw", CAT_VOICE, "Audio Hardware (PulseAudio)",
-                           f"Running — default sink: {sink}")
         return _ok("audio_hw", CAT_VOICE, "Audio Hardware (PulseAudio)",
-                   "PulseAudio running")
+                   f"Running — default sink: {sink}",
+                   {"sink": sink, "pactl_info": pactl_out[:600]})
+    # Capture rich failure context
+    _, ps_out, _ = await _cmd(["bash", "-c", "ps aux | grep -i pulse | grep -v grep"])
+    _, svc_out, svc_err = await _cmd(
+        ["bash", "-c", "systemctl --user status pulseaudio.service 2>&1 | tail -15 || "
+                       "journalctl --user -u pulseaudio.service -n 10 --no-pager 2>&1 | tail -10"])
+    _, svc_sys, _ = await _cmd(
+        ["bash", "-c", "systemctl status pulseaudio.service 2>&1 | tail -10 || true"])
     return _fail("audio_hw", CAT_VOICE, "Audio Hardware (PulseAudio)",
-                 "PulseAudio not running — microphone and speaker unavailable")
+                 "PulseAudio not running — microphone and speaker unavailable",
+                 {"pactl_rc": rc,
+                  "pactl_error": (pactl_err or pactl_out or "no output")[:400],
+                  "pulse_processes": ps_out[:300] or "none found",
+                  "user_service_status": svc_out[:500] or svc_err[:300] or "unavailable",
+                  "system_service_status": svc_sys[:300] or "unavailable"})
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -296,24 +310,29 @@ async def check_llama_model() -> dict:
     return _unk("llama_model", CAT_LLAMA, "Local AI Model", "Ollama not reachable")
 
 async def check_llama_studio_app() -> dict:
-    data = await _json_get(f"{API}/api/foulfox-apps", timeout=5)
+    # Correct endpoints: api-server exposes /api/apps, Odysseus exposes /api/foulfox-apps
+    data = await _json_get(f"{API}/api/apps", timeout=5)
     if data is None:
-        data = await _json_get(f"{ODYSSEUS}/api/apps", timeout=5)
+        data = await _json_get(f"{ODYSSEUS}/api/foulfox-apps", timeout=5)
     if data is None:
         return _unk("llama_studio", CAT_LLAMA, "Llama Llama Studio App",
-                    "App list unavailable")
+                    "App list unavailable",
+                    {"tried": [f"{API}/api/apps", f"{ODYSSEUS}/api/foulfox-apps"]})
     apps = data if isinstance(data, list) else data.get("apps", [])
+    all_ids = [str(a.get("id", "")) for a in apps]
     for app in apps:
         aid = str(app.get("id", "")).lower()
         if "llama" in aid or "studio" in aid:
             st = app.get("status", "unknown")
             if st == "running":
                 return _ok("llama_studio", CAT_LLAMA, "Llama Llama Studio App",
-                           f"Running (id={app['id']})", app)
+                           f"Running (id={app.get('id')})", app)
             return _warn("llama_studio", CAT_LLAMA, "Llama Llama Studio App",
-                         f"Installed but not running (status={st}) — open the Apps tab to launch")
+                         f"Installed but not running (status={st}) — open the Apps tab to launch",
+                         {"app": app, "all_app_ids": all_ids})
     return _warn("llama_studio", CAT_LLAMA, "Llama Llama Studio App",
-                 "Not installed — install from the App Store in the Apps tab")
+                 "Not installed — install from the App Store in the Apps tab",
+                 {"installed_apps": all_ids})
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -392,21 +411,33 @@ async def check_agent_vm_key() -> dict:
     """Check whether an SSH key is provisioned for the Windows VM."""
     keys_dir = os.path.join(DATA_DIR, "keys")
     if not os.path.isdir(keys_dir):
+        # Check if backfillVmSshKeys generated keys in a VM-specific location
+        _, find_out, _ = await _cmd(
+            ["bash", "-c", f"find {DATA_DIR} -name 'id_ed25519' 2>/dev/null | head -10"])
         return _fail("agent_vm_key", CAT_AGENT_VM, "Agent→VM SSH Key",
-                     f"No keys directory at {keys_dir} — VM agent auth not set up")
-    key_files = [f for f in os.listdir(keys_dir)
-                 if os.path.isfile(os.path.join(keys_dir, f, "id_ed25519"))
-                    or os.path.isfile(os.path.join(keys_dir, f))]
-    if key_files:
-        return _ok("agent_vm_key", CAT_AGENT_VM, "Agent→VM SSH Key",
-                   f"{len(key_files)} VM key(s) provisioned", key_files)
-    # Also check for flat key files
-    flat = [f for f in os.listdir(keys_dir) if f.endswith(".pem") or "ed25519" in f]
-    if flat:
-        return _ok("agent_vm_key", CAT_AGENT_VM, "Agent→VM SSH Key",
-                   f"{len(flat)} key file(s) in {keys_dir}")
+                     f"No keys directory at {keys_dir} — VM agent auth not set up",
+                     {"data_dir": DATA_DIR,
+                      "keys_dir_exists": False,
+                      "ed25519_search": find_out[:400] or "none found"})
+    # Deep scan: keys may be in subdirs (one per VM id)
+    all_entries = []
+    for entry in os.listdir(keys_dir):
+        full = os.path.join(keys_dir, entry)
+        if os.path.isdir(full):
+            sub = os.listdir(full)
+            all_entries.append(f"{entry}/: {sub}")
+            if "id_ed25519" in sub:
+                return _ok("agent_vm_key", CAT_AGENT_VM, "Agent→VM SSH Key",
+                           f"SSH key provisioned for VM '{entry}'",
+                           {"vm_id": entry, "keys_dir": keys_dir})
+        elif os.path.isfile(full) and ("ed25519" in entry or entry.endswith(".pem")):
+            all_entries.append(entry)
+            return _ok("agent_vm_key", CAT_AGENT_VM, "Agent→VM SSH Key",
+                       f"Key file present: {entry}", {"file": entry})
     return _fail("agent_vm_key", CAT_AGENT_VM, "Agent→VM SSH Key",
-                 "Keys directory exists but empty — agent cannot SSH into VMs")
+                 "Keys directory exists but empty — backfillVmSshKeys() has not run yet",
+                 {"keys_dir": keys_dir,
+                  "directory_contents": all_entries or ["(empty)"]})
 
 async def check_agent_vm_shell() -> dict:
     """Check if the VM shell bridge endpoint is configured and working."""
@@ -447,12 +478,18 @@ async def check_agent_vm_workspace_mode() -> dict:
         mode = get_workspace_mode()
         if mode == "windows":
             return _ok("agent_vm_mode", CAT_AGENT_VM, "Agent Workspace Mode",
-                       "Agent is targeting Windows VM by default")
+                       "Agent is targeting Windows VM by default", {"mode": mode})
         return _warn("agent_vm_mode", CAT_AGENT_VM, "Agent Workspace Mode",
-                     f"Agent targeting '{mode}' — toggle to 'Windows VM' in the chat header")
-    except Exception:
+                     f"Agent targeting '{mode}' — toggle to 'Windows VM' in the chat header",
+                     {"mode": mode})
+    except ImportError as e:
         return _unk("agent_vm_mode", CAT_AGENT_VM, "Agent Workspace Mode",
-                    "Could not read workspace mode")
+                    "vm_target module not found — workspace mode unavailable",
+                    {"import_error": str(e)})
+    except Exception as e:
+        return _unk("agent_vm_mode", CAT_AGENT_VM, "Agent Workspace Mode",
+                    f"Could not read workspace mode: {e}",
+                    {"error": str(e)})
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -560,35 +597,46 @@ async def check_voice_agent_loop() -> dict:
     tts_ok = tts and tts.get("enabled")
     if stt_ok and tts_ok:
         return _ok("voice_loop", CAT_VOICE_AGENT, "Voice ↔ Agent Loop",
-                   f"Full loop ready — STT({stt.get('provider')}) → Agent → TTS({tts.get('provider')})")
+                   f"Full loop ready — STT({stt.get('provider')}) → Agent → TTS({tts.get('provider')})",
+                   {"stt": stt, "tts": tts})
     missing = []
     if not stt_ok: missing.append("STT")
     if not tts_ok: missing.append("TTS")
     return _warn("voice_loop", CAT_VOICE_AGENT, "Voice ↔ Agent Loop",
-                 f"Incomplete — {' and '.join(missing)} not enabled; enable in Settings → Voice")
+                 f"Incomplete — {' and '.join(missing)} not enabled; enable in Settings → Voice",
+                 {"stt": stt or "no response", "tts": tts or "no response"})
 
 async def check_voice_model() -> dict:
     """Is there a model configured so the voice agent can actually respond?"""
     data = await _json_get(f"{ODYSSEUS}/api/agent-suite/state")
     if data is None:
-        return _unk("voice_model", CAT_VOICE_AGENT, "AI Model for Voice Responses")
+        return _unk("voice_model", CAT_VOICE_AGENT, "AI Model for Voice Responses",
+                    "Agent suite endpoint unavailable",
+                    {"endpoint": f"{ODYSSEUS}/api/agent-suite/state"})
     suite = data.get("suite", {})
     chat_model = (suite.get("chat") or {}).get("model") or (suite.get("worker") or {}).get("model")
     if chat_model:
         return _ok("voice_model", CAT_VOICE_AGENT, "AI Model for Voice Responses",
-                   f"Model configured: {chat_model}", chat_model)
+                   f"Model configured: {chat_model}", {"model": chat_model, "suite_state": suite})
     return _fail("voice_model", CAT_VOICE_AGENT, "AI Model for Voice Responses",
-                 "No AI model set — voice responses cannot be generated; configure a model in Setup")
+                 "No AI model set — voice responses cannot be generated; configure a model in Setup",
+                 {"suite_state": suite})
 
 async def check_chromium_cdp() -> dict:
     data = await _json_get("http://127.0.0.1:9222/json/version", timeout=3)
     if data is not None:
         browser = data.get("Browser", "?")
+        v8 = data.get("V8-Version", "?")
         return _ok("chromium_cdp", CAT_VOICE_AGENT, "Kiosk Browser CDP",
-                   f"Chrome DevTools Protocol available — {browser}")
+                   f"CDP available — {browser}",
+                   {"browser": browser, "v8": v8, "full": data})
+    rc, _, _ = await _cmd(["bash", "-c", "nc -z 127.0.0.1 9222 && echo open || echo closed"])
+    _, ps_out, _ = await _cmd(
+        ["bash", "-c", "ps aux | grep -E 'chromium|chrome' | grep -v grep | head -3"])
     return _warn("chromium_cdp", CAT_VOICE_AGENT, "Kiosk Browser CDP",
-                 "CDP not available on :9222 — browser automation (self-report) disabled; "
-                 "kiosk needs --remote-debugging-port=9222 (already added, needs ISO rebuild)")
+                 "CDP not available on :9222 — browser automation disabled",
+                 {"port_9222": "open" if rc == 0 else "closed",
+                  "chromium_procs": ps_out[:400] or "none found"})
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -716,17 +764,28 @@ async def check_self_repair_enabled() -> dict:
 CAT_AWARE = "agent_awareness"
 
 async def check_mtm() -> dict:
-    """Multi-Task Memory — shared KV + task registry."""
-    data = await _json_get(f"{ODYSSEUS}/api/mtm/state")
-    if data is None:
-        return _unk("mtm", CAT_AWARE, "Multi-Task Memory (MTM)",
-                    "MTM endpoint unavailable")
-    tasks = data.get("tasks", [])
-    mem   = data.get("memory", {})
+    """Multi-Task Memory — shared KV + task registry.
+    Routes: /api/mtm/tasks, /api/mtm/memory, /api/mtm/context  (no /state endpoint)."""
+    tasks_data = await _json_get(f"{ODYSSEUS}/api/mtm/tasks", timeout=4)
+    mem_data   = await _json_get(f"{ODYSSEUS}/api/mtm/memory", timeout=4)
+    if tasks_data is None and mem_data is None:
+        # Fall back to context endpoint
+        ctx = await _json_get(f"{ODYSSEUS}/api/mtm/context", timeout=4)
+        if ctx is None:
+            return _unk("mtm", CAT_AWARE, "Multi-Task Memory (MTM)",
+                        "MTM unavailable — all endpoints returned no response",
+                        {"tried": [f"{ODYSSEUS}/api/mtm/tasks",
+                                   f"{ODYSSEUS}/api/mtm/memory",
+                                   f"{ODYSSEUS}/api/mtm/context"]})
+        return _ok("mtm", CAT_AWARE, "Multi-Task Memory (MTM)",
+                   "MTM reachable (context endpoint)", {"context": ctx})
+    tasks = tasks_data if isinstance(tasks_data, list) else (tasks_data or {}).get("tasks", [])
+    mem   = mem_data if isinstance(mem_data, dict) else {}
     active = [t for t in tasks if t.get("status") in ("running", "pending")]
     return _ok("mtm", CAT_AWARE, "Multi-Task Memory (MTM)",
-               f"Operational — {len(active)} active task(s), {len(mem)} shared memory entry(s)",
-               {"tasks": len(tasks), "memory": len(mem)})
+               f"Operational — {len(active)} active task(s), {len(mem)} shared memory key(s)",
+               {"active_tasks": len(active), "total_tasks": len(tasks),
+                "memory_keys": len(mem)})
 
 async def check_research_library() -> dict:
     data = await _json_get(f"{ODYSSEUS}/api/research/library?sort=recent&limit=5")
@@ -745,10 +804,12 @@ async def check_model_configured() -> dict:
     data = await _json_get(f"{ODYSSEUS}/api/agent-suite/state")
     if data is None:
         return _unk("model_config", CAT_AWARE, "AI Model Configuration",
-                    "Agent suite state unavailable")
+                    "Agent suite state unavailable",
+                    {"endpoint": f"{ODYSSEUS}/api/agent-suite/state"})
     if not isinstance(data, dict):
         return _unk("model_config", CAT_AWARE, "AI Model Configuration",
-                    "Unexpected response format from agent suite endpoint")
+                    "Unexpected response format from agent suite endpoint",
+                    {"response_type": type(data).__name__, "raw": str(data)[:300]})
     suite = data.get("suite", {}) or {}
     if not isinstance(suite, dict):
         suite = {}
@@ -759,10 +820,13 @@ async def check_model_configured() -> dict:
     configured = {r: m for r, m in models.items() if m}
     if not configured:
         return _fail("model_config", CAT_AWARE, "AI Model Configuration",
-                     "No AI model configured — complete the Setup wizard to pick a model")
-    desc = ", ".join(f"{r}={m}" for r, m in list(configured.items())[:2])
+                     "No AI model configured — complete the Setup wizard to pick a model",
+                     {"full_suite_state": data,
+                      "all_roles": list(suite.keys()),
+                      "hint": "Run Setup, pick Ollama → llama3.1:8b-instruct-q4_K_M"})
+    desc = ", ".join(f"{r}={m}" for r, m in list(configured.items())[:3])
     return _ok("model_config", CAT_AWARE, "AI Model Configuration",
-               f"{len(configured)}/3 role(s) have models: {desc}", configured)
+               f"{len(configured)}/3 role(s) configured: {desc}", configured)
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1008,18 +1072,308 @@ async def check_system_load() -> dict:
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# CATEGORY 14 — AI Performance (GPU inference, Ollama tuning, swap)
+# ════════════════════════════════════════════════════════════════════════════════
+CAT_PERF = "ai_performance"
+
+async def check_nvidia_inference() -> dict:
+    """Is Ollama using the NVIDIA GPU for inference, or falling back to CPU?"""
+    hw_env = "/etc/foulfox/ollama-hw.env"
+    gpu_val = None
+    if os.path.isfile(hw_env):
+        try:
+            with open(hw_env) as f:
+                for line in f:
+                    if "OLLAMA_NUM_GPU" in line and "=" in line:
+                        gpu_val = line.split("=", 1)[1].strip().strip('"')
+        except Exception:
+            pass
+    # Check if nvidia-smi shows a GPU
+    rc_smi, smi_out, smi_err = await _cmd(
+        ["bash", "-c", "nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader 2>&1 | head -3"])
+    gpu_name = smi_out.strip() if rc_smi == 0 and smi_out.strip() else None
+    # Check if Ollama process has GPU visible
+    _, ollama_ps, _ = await _cmd(
+        ["bash", "-c", "ps aux | grep -E 'ollama|llama' | grep -v grep | head -5"])
+    if gpu_val == "-1" or (gpu_val and gpu_val != "0"):
+        verdict = "GPU mode active" if gpu_name else f"GPU requested (OLLAMA_NUM_GPU={gpu_val}) but nvidia-smi not available"
+        return _ok("nvidia_inf", CAT_PERF, "Ollama GPU Inference",
+                   verdict,
+                   {"OLLAMA_NUM_GPU": gpu_val, "nvidia_smi": gpu_name or smi_err[:200],
+                    "hw_env": hw_env})
+    if gpu_val == "0":
+        return _warn("nvidia_inf", CAT_PERF, "Ollama GPU Inference",
+                     f"CPU-only mode (OLLAMA_NUM_GPU=0) — inference will be slow",
+                     {"OLLAMA_NUM_GPU": "0", "nvidia_smi": gpu_name or "not detected",
+                      "hw_env_exists": os.path.isfile(hw_env)})
+    if gpu_val is None:
+        msg = (f"ollama-hw.env not found at {hw_env} — first-run GPU detection hasn't run yet"
+               if not os.path.isfile(hw_env)
+               else f"OLLAMA_NUM_GPU not set in {hw_env}")
+        return _warn("nvidia_inf", CAT_PERF, "Ollama GPU Inference",
+                     msg,
+                     {"hw_env_exists": os.path.isfile(hw_env),
+                      "nvidia_smi": gpu_name or smi_err[:200] or "unavailable"})
+    return _unk("nvidia_inf", CAT_PERF, "Ollama GPU Inference",
+                f"Cannot determine GPU mode (OLLAMA_NUM_GPU={gpu_val!r})",
+                {"OLLAMA_NUM_GPU": gpu_val, "nvidia_smi": gpu_name})
+
+async def check_ollama_config() -> dict:
+    """Read the Ollama tuning variables from foulfox.env."""
+    env_path = "/etc/foulfox/foulfox.env"
+    hw_env   = "/etc/foulfox/ollama-hw.env"
+    config = {}
+    for path in [env_path, hw_env]:
+        if os.path.isfile(path):
+            try:
+                with open(path) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("OLLAMA_") and "=" in line:
+                            k, v = line.split("=", 1)
+                            config[k] = v.strip().strip('"')
+            except Exception:
+                pass
+    if not config:
+        return _warn("ollama_cfg", CAT_PERF, "Ollama Tuning Config",
+                     f"No Ollama tuning vars found (looked in {env_path}, {hw_env})",
+                     {"env_exists": os.path.isfile(env_path),
+                      "hw_env_exists": os.path.isfile(hw_env)})
+    ctx = config.get("OLLAMA_CONTEXT_LENGTH", "default")
+    fa  = config.get("OLLAMA_FLASH_ATTENTION", "?")
+    kv  = config.get("OLLAMA_KV_CACHE_TYPE", "?")
+    gpu = config.get("OLLAMA_NUM_GPU", "auto")
+    return _ok("ollama_cfg", CAT_PERF, "Ollama Tuning Config",
+               f"ctx={ctx}  flash_attn={fa}  kv_cache={kv}  num_gpu={gpu}",
+               config)
+
+async def check_swap() -> dict:
+    """Check swap space — critical for running a 7B model + Windows VM on 8 GB RAM."""
+    _, swap_out, _ = await _cmd(["bash", "-c", "swapon --show=NAME,SIZE,TYPE,USED --noheadings 2>/dev/null"])
+    _, free_out, _ = await _cmd(["bash", "-c", "free -h | grep -i swap"])
+    if swap_out.strip():
+        lines = swap_out.strip().splitlines()
+        return _ok("swap", CAT_PERF, "Swap Space",
+                   f"{len(lines)} swap device(s): {swap_out.strip()[:120]}",
+                   {"swapon": swap_out.strip(), "free_swap": free_out.strip()})
+    # Check for a foulfox swap file specifically
+    _, swapfile, _ = await _cmd(["bash", "-c", "ls -lh /swapfile /var/lib/foulfox/swapfile 2>/dev/null"])
+    return _warn("swap", CAT_PERF, "Swap Space",
+                 "No swap active — risk of OOM with VM + Ollama under load on ≤8GB RAM",
+                 {"swapon_output": swap_out or "empty", "swapfile_check": swapfile or "none found",
+                  "free": free_out or "unavailable"})
+
+async def check_ollama_running_model() -> dict:
+    """What model does Ollama have currently loaded in VRAM/RAM?"""
+    data = await _json_get("http://127.0.0.1:11434/api/ps", timeout=4)
+    if data is None:
+        return _unk("ollama_loaded", CAT_PERF, "Ollama Loaded Model",
+                    "Ollama not responding — cannot check loaded model")
+    models = data.get("models", [])
+    if not models:
+        return _warn("ollama_loaded", CAT_PERF, "Ollama Loaded Model",
+                     "No model currently loaded — first inference will take ~5s to load",
+                     {"models": []})
+    m = models[0]
+    name = m.get("name", "?")
+    size_vram = m.get("size_vram", 0)
+    size      = m.get("size", 0)
+    vram_mb = size_vram // 1048576
+    size_mb = size // 1048576
+    return _ok("ollama_loaded", CAT_PERF, "Ollama Loaded Model",
+               f"'{name}' loaded — {size_mb}MB total, {vram_mb}MB in VRAM",
+               {"model": name, "size_mb": size_mb, "vram_mb": vram_mb})
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# CATEGORY 15 — Browser Automation (CDP)
+# ════════════════════════════════════════════════════════════════════════════════
+CAT_BROWSER = "browser_automation"
+
+async def check_firefox_cdp() -> dict:
+    """Firefox CDP on :9223 — agent's secondary browser target."""
+    data = await _json_get("http://127.0.0.1:9223/json/version", timeout=3)
+    if data is not None:
+        browser = data.get("Browser", "?")
+        return _ok("firefox_cdp", CAT_BROWSER, "Firefox Browser CDP",
+                   f"CDP available on :9223 — {browser}",
+                   {"browser": browser, "full": data})
+    _, ps_out, _ = await _cmd(
+        ["bash", "-c", "ps aux | grep -E 'firefox' | grep -v grep | head -3"])
+    return _warn("firefox_cdp", CAT_BROWSER, "Firefox Browser CDP",
+                 "CDP not available on :9223 — Firefox may not be running or not started with --remote-debugging-port",
+                 {"firefox_procs": ps_out[:400] or "none found"})
+
+async def check_app_runtime_ports() -> dict:
+    """Check if any FoulFox apps are running on their dedicated port range (27000–27199)."""
+    _, ss_out, _ = await _cmd(
+        ["bash", "-c",
+         "ss -tlnp 2>/dev/null | awk '$4 ~ /:270/ {print}' | head -10"])
+    if ss_out.strip():
+        lines = ss_out.strip().splitlines()
+        return _ok("app_ports", CAT_BROWSER, "App Runtime Ports (27000–27199)",
+                   f"{len(lines)} app port(s) listening: {', '.join(l.split()[3] for l in lines[:4] if len(l.split()) > 3)}",
+                   {"listening": ss_out.strip()})
+    data = await _json_get(f"{API}/api/apps", timeout=4)
+    running = []
+    if data:
+        apps = data if isinstance(data, list) else data.get("apps", [])
+        running = [a for a in apps if a.get("status") == "running"]
+    if not running:
+        return _warn("app_ports", CAT_BROWSER, "App Runtime Ports (27000–27199)",
+                     "No apps currently running — open the Apps tab to launch one",
+                     {"ss_output": ss_out or "none", "app_count": len(apps) if data else "unknown"})
+    return _ok("app_ports", CAT_BROWSER, "App Runtime Ports (27000–27199)",
+               f"{len(running)} app(s) running",
+               {"running": [a.get("id") for a in running]})
+
+async def check_guest_cdp() -> dict:
+    """Guest Chrome CDP on :9224 — bridged from Windows VM via netsh portproxy."""
+    data = await _json_get("http://127.0.0.1:9224/json/version", timeout=3)
+    if data is not None:
+        browser = data.get("Browser", "?")
+        return _ok("guest_cdp", CAT_BROWSER, "Windows VM Guest CDP",
+                   f"Guest CDP available on :9224 — {browser}",
+                   {"browser": browser})
+    return _warn("guest_cdp", CAT_BROWSER, "Windows VM Guest CDP",
+                 "Guest CDP not available on :9224 — Chrome must be running inside the Windows VM "
+                 "with --remote-debugging-port=9222 and netsh portproxy forwarding host:9224→guest:9222",
+                 {"port_9224": "closed"})
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# CATEGORY 16 — OS Services & Boot Health
+# ════════════════════════════════════════════════════════════════════════════════
+CAT_SERVICES = "os_services"
+
+async def check_foulfox_services() -> dict:
+    """Systemd status for the core FoulFox service chain."""
+    services = ["foulfox-api", "odysseus-service", "ollama",
+                "foulfox-vm-autostart", "foulfox-seed-ollama"]
+    results = {}
+    failed = []
+    inactive = []
+    for svc in services:
+        rc, out, _ = await _cmd(
+            ["bash", "-c",
+             f"systemctl is-active {svc} 2>/dev/null || systemctl is-active {svc}.service 2>/dev/null || echo unknown"])
+        state = out.strip() or "unknown"
+        results[svc] = state
+        if state == "failed":
+            failed.append(svc)
+        elif state in ("inactive", "unknown"):
+            inactive.append(svc)
+    if failed:
+        _, journal, _ = await _cmd(
+            ["bash", "-c",
+             f"journalctl -u {failed[0]} -n 15 --no-pager 2>&1 | tail -15"])
+        return _fail("ff_services", CAT_SERVICES, "FoulFox Service Chain",
+                     f"Failed service(s): {', '.join(failed)}",
+                     {"services": results, "journal_tail": journal[:600]})
+    if inactive:
+        return _warn("ff_services", CAT_SERVICES, "FoulFox Service Chain",
+                     f"Inactive service(s): {', '.join(inactive)} (expected in dev/non-FoulFox-OS environment)",
+                     {"services": results})
+    return _ok("ff_services", CAT_SERVICES, "FoulFox Service Chain",
+               f"All {len(services)} services active", {"services": results})
+
+async def check_first_run_complete() -> dict:
+    """Was foulfox-first-run completed? Check for sentinel files."""
+    markers = [
+        "/var/lib/foulfox/.first-run-complete",
+        "/etc/foulfox/.first-run-complete",
+        os.path.join(DATA_DIR, ".first-run-complete"),
+    ]
+    for marker in markers:
+        if os.path.isfile(marker):
+            try:
+                ts = time.strftime(
+                    "%Y-%m-%d", time.localtime(os.path.getmtime(marker)))
+            except Exception:
+                ts = "unknown"
+            return _ok("first_run", CAT_SERVICES, "First-Run Provisioning",
+                       f"First-run complete (marker: {marker}, date: {ts})",
+                       {"marker": marker, "date": ts})
+    # Check if data dirs exist (indicates first-run has run even without marker)
+    data_subdirs = []
+    if os.path.isdir(DATA_DIR):
+        data_subdirs = os.listdir(DATA_DIR)
+    if data_subdirs:
+        return _warn("first_run", CAT_SERVICES, "First-Run Provisioning",
+                     "No first-run sentinel found but data dir has content — "
+                     "first-run may have run without writing a marker",
+                     {"data_dir": DATA_DIR,
+                      "data_contents": data_subdirs[:10]})
+    return _warn("first_run", CAT_SERVICES, "First-Run Provisioning",
+                 "First-run sentinel not found — provisioning may not have completed "
+                 "(expected on fresh install or live USB)",
+                 {"checked": markers, "data_dir": DATA_DIR,
+                  "data_dir_exists": os.path.isdir(DATA_DIR)})
+
+async def check_kiosk_session() -> dict:
+    """Is the FoulFox kiosk session (openbox + Chromium) running?"""
+    _, ps_ob, _ = await _cmd(
+        ["bash", "-c", "ps aux | grep -E 'openbox|tint2' | grep -v grep | head -3"])
+    _, ps_cr, _ = await _cmd(
+        ["bash", "-c", "ps aux | grep -E 'chromium|chrome' | grep 'app=' | grep -v grep | head -3"])
+    _, ps_ff, _ = await _cmd(
+        ["bash", "-c", "ps aux | grep firefox | grep -v grep | head -2"])
+    ob_running = bool(ps_ob.strip())
+    cr_running = bool(ps_cr.strip())
+    ff_running = bool(ps_ff.strip())
+    if ob_running and cr_running:
+        return _ok("kiosk", CAT_SERVICES, "Kiosk Session",
+                   "Openbox + Chromium kiosk running" + (" + Firefox" if ff_running else ""),
+                   {"openbox": ob_running, "chromium": cr_running, "firefox": ff_running})
+    missing = []
+    if not ob_running: missing.append("openbox")
+    if not cr_running: missing.append("chromium-kiosk")
+    return _warn("kiosk", CAT_SERVICES, "Kiosk Session",
+                 f"Not in kiosk session — {', '.join(missing)} not running "
+                 "(expected in dev/non-GUI environment)",
+                 {"openbox_procs": ps_ob[:200] or "none",
+                  "chromium_procs": ps_cr[:200] or "none",
+                  "firefox_procs": ps_ff[:200] or "none"})
+
+async def check_foulfox_patcher() -> dict:
+    """Live updater (foulfox-patcher) status — is the OTA stack healthy?"""
+    data = await _json_get(f"{ODYSSEUS}/api/os/patcher/status", timeout=4)
+    if data is None:
+        data = await _json_get(f"{API}/api/os/patcher/status", timeout=4)
+    if data is None:
+        return _unk("patcher", CAT_SERVICES, "Live Updater (OTA Patcher)",
+                    "Patcher status endpoint unavailable",
+                    {"tried": [f"{ODYSSEUS}/api/os/patcher/status",
+                               f"{API}/api/os/patcher/status"]})
+    state = data.get("state", data.get("status", "?"))
+    pending = data.get("pending_update", data.get("pendingUpdate", False))
+    version = data.get("current_version", data.get("version", "?"))
+    if state == "ok" or state == "idle":
+        msg = f"Patcher healthy — v{version}"
+        if pending:
+            return _warn("patcher", CAT_SERVICES, "Live Updater (OTA Patcher)",
+                         msg + " (update pending — will apply on next boot)", data)
+        return _ok("patcher", CAT_SERVICES, "Live Updater (OTA Patcher)", msg, data)
+    return _warn("patcher", CAT_SERVICES, "Live Updater (OTA Patcher)",
+                 f"Patcher state: {state}", data)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # Category registry (ordered — drives both report sections and UI)
 # ════════════════════════════════════════════════════════════════════════════════
 
 CATEGORIES: list[dict] = [
     {"id": CAT_SYSINFO,    "label": "System Hardware",               "icon": "⚙️"},
     {"id": CAT_OS,         "label": "FoulFox OS",                    "icon": "🖥️"},
+    {"id": CAT_SERVICES,   "label": "OS Services & Boot Health",     "icon": "🔧"},
+    {"id": CAT_PERF,       "label": "AI Performance (GPU / Ollama)", "icon": "🚀"},
     {"id": CAT_VOICE,      "label": "Voice Forge",                   "icon": "🎤"},
     {"id": CAT_LLAMA,      "label": "Llama Llama Studio",            "icon": "🦙"},
     {"id": CAT_WIN,        "label": "Windows 11 VM",                 "icon": "🪟"},
     {"id": CAT_AGENT_VM,   "label": "Agent → Windows VM",           "icon": "🔌"},
     {"id": CAT_AGENT_HOST, "label": "Agent → FoulFox OS",           "icon": "🤖"},
     {"id": CAT_BACKUP,     "label": "Windows VM Backups",            "icon": "💾"},
+    {"id": CAT_BROWSER,    "label": "Browser Automation (CDP)",      "icon": "🌐"},
     {"id": CAT_VOICE_AGENT,"label": "Voice + Agent Integration",     "icon": "🗣️"},
     {"id": CAT_MEMORY,     "label": "Agent Memory & Lessons",        "icon": "🧠"},
     {"id": CAT_LEARN,      "label": "Agent Learning & Improvement",  "icon": "📈"},
@@ -1038,6 +1392,10 @@ ALL_CHECKS: list = [
     check_data_partition, check_root_disk,
     check_api_server, check_odysseus_service,
     check_live_updater, check_network,
+    # OS Services & Boot Health
+    check_foulfox_services, check_first_run_complete, check_kiosk_session, check_foulfox_patcher,
+    # AI Performance (GPU / Ollama)
+    check_nvidia_inference, check_ollama_config, check_swap, check_ollama_running_model,
     # Voice Forge
     check_stt, check_tts, check_audio_hw,
     # Llama Llama Studio
@@ -1050,8 +1408,10 @@ ALL_CHECKS: list = [
     check_agent_bash, check_agent_file_io, check_agent_web_fetch,
     # VM Backups
     check_backup_dir, check_backup_age,
+    # Browser Automation (CDP)
+    check_chromium_cdp, check_firefox_cdp, check_app_runtime_ports, check_guest_cdp,
     # Voice + Agent Integration
-    check_voice_agent_loop, check_voice_model, check_chromium_cdp,
+    check_voice_agent_loop, check_voice_model,
     # Agent Memory & Lessons
     check_agent_lessons, check_agent_notes, check_agent_memory_db, check_semantic_search,
     # Agent Learning & Improvement

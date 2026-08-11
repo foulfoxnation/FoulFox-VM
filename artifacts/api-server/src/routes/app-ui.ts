@@ -133,6 +133,35 @@ function runtimeShim(): string {
   }
   ensureStorage("localStorage");
   ensureStorage("sessionStorage");
+  // ── FoulFox dialog polyfill ──────────────────────────────────────────────────
+  // Chrome 75+ blocks window.prompt / window.confirm / window.alert in
+  // cross-origin iframes. FoulFox apps run on a separate loopback origin, making
+  // every app iframe cross-origin to the shell. The app bundle is patched to call
+  // window._ff_prompt / window._ff_confirm instead of the native blocked versions.
+  // These use a native <dialog> element which works fine across all iframe origins.
+  function _ffDialog(msg, inputDefault, isConfirm) {
+    return new Promise(function(resolve) {
+      var d = document.createElement('dialog');
+      d.style.cssText = 'z-index:2147483647;padding:24px;border-radius:12px;border:1px solid #444;background:#1c1c1e;color:#e8e8e8;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;min-width:320px;max-width:460px;box-shadow:0 8px 40px rgba(0,0,0,.8)';
+      var btnLabel = isConfirm ? 'Confirm' : 'OK';
+      var html = '<p style="margin:0 0 16px;font-size:14px;font-weight:500;line-height:1.4">' + msg + '</p>';
+      if (!isConfirm) { html += '<input id="_ffinp" style="width:100%;box-sizing:border-box;padding:10px 12px;border-radius:6px;border:1px solid #555;background:#2a2a2e;color:#e8e8e8;font-size:14px" value="' + (inputDefault || '') + '">'; }
+      html += '<div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end"><button id="_ffcancel" style="padding:8px 20px;border-radius:6px;border:1px solid #555;background:#2a2a2e;color:#e8e8e8;cursor:pointer;font-size:13px">Cancel</button><button id="_ffok" style="padding:8px 20px;border-radius:6px;border:none;background:#0a84ff;color:#fff;cursor:pointer;font-size:13px;font-weight:600">' + btnLabel + '</button></div>';
+      d.innerHTML = html;
+      document.body.appendChild(d);
+      try { d.showModal(); } catch(e) { document.body.contains(d) && document.body.removeChild(d); resolve(null); return; }
+      var inp = d.querySelector('#_ffinp');
+      if (inp) { inp.focus(); inp.select(); }
+      function ok() { var v = inp ? inp.value : true; try { d.close(); } catch(e) {} document.body.contains(d) && document.body.removeChild(d); resolve(isConfirm ? true : (v || null)); }
+      function cancel() { try { d.close(); } catch(e) {} document.body.contains(d) && document.body.removeChild(d); resolve(null); }
+      d.querySelector('#_ffok').onclick = ok;
+      d.querySelector('#_ffcancel').onclick = cancel;
+      d.addEventListener('cancel', cancel);
+      if (inp) { inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') ok(); if (e.key === 'Escape') cancel(); }); }
+    });
+  }
+  window._ff_prompt = function(msg, def) { return _ffDialog(msg, def, false); };
+  window._ff_confirm = function(msg) { return _ffDialog(msg, null, true).then(function(v) { return v !== null; }); };
 })();</script>`;
 }
 
