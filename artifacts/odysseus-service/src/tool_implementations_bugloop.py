@@ -67,43 +67,76 @@ async def do_host_browser(
     content: str = "",
     owner: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Control the kiosk Chromium via CDP."""
+    """Control a browser via CDP.
+
+    Defaults to Firefox on port 9223 (the external browser used for web browsing
+    and Replit access). Pass {"port": 9222} in the JSON to target the kiosk
+    Chromium instead.
+
+    Actions:
+      screenshot          — take a screenshot; returns it to the vision model
+      navigate            — go to a URL; requires {"url": "..."}
+      get_url / get_title / get_text — read page state
+      click               — click at {"x": N, "y": N} pixel coords
+                            (use coordinates from the most recent screenshot)
+      insert_text         — type text at the current focus point; requires {"text": "..."}
+      key                 — press a key; requires {"key": "Enter"|"Tab"|"Escape"|...}
+      focus               — focus a CSS selector; requires {"selector": "..."}
+      set_value           — set an input value via JS; requires {"selector","text"}
+    """
     try:
-        from src.host_browser import HostBrowser
+        from src.host_browser import HostBrowser, CDP_PORT
     except ImportError as e:
         return {"error": f"host_browser module unavailable: {e}", "exit_code": 1}
 
     try:
         args: Dict[str, Any] = json.loads(content) if content.strip().startswith("{") else {}
     except (json.JSONDecodeError, TypeError):
-        return {"error": "content must be a JSON object", "exit_code": 1}
+        return {"error": "content must be a JSON object with an 'action' field", "exit_code": 1}
 
     action   = args.get("action", "")
     url      = args.get("url", "")
     selector = args.get("selector", "")
     text     = args.get("text", "")
     key_name = args.get("key", "")
+    # Default to Firefox (9223); pass port=9222 for the kiosk Chromium
+    port: int = int(args.get("port", 9223))
 
     if not action:
         return {"error": "action is required", "exit_code": 1}
 
     try:
-        async with HostBrowser() as browser:
-            if action == "navigate":
+        async with HostBrowser(debug_port=port) as browser:
+            if action == "screenshot":
+                img_b64 = await browser.screenshot()
+                cur = await browser.get_url()
+                title = await browser.get_title()
+                return {
+                    # Return in the standard images format so the vision model
+                    # can SEE the screenshot and reason about where to click/type.
+                    "images": [{"data": img_b64, "mimeType": "image/png"}],
+                    "output": (
+                        f"Screenshot of Firefox (port {port}) captured. "
+                        f"Current URL: {cur} | Title: {title}\n"
+                        "Examine the screenshot to identify element positions "
+                        "before clicking. Use x/y pixel coordinates from the image."
+                    ),
+                    "exit_code": 0,
+                }
+
+            elif action == "navigate":
                 if not url:
                     return {"error": "url is required for navigate", "exit_code": 1}
-                await browser.navigate(url)
-                await browser.wait_for_load()
-                current = await browser.get_url()
-                return {"output": f"Navigated to {current}", "exit_code": 0}
+                await browser.navigate(url, wait_load=True, timeout=30)
+                await __import__("asyncio").sleep(2)   # SPA hydration
+                cur = await browser.get_url()
+                return {"output": f"Navigated to: {cur}", "exit_code": 0}
 
             elif action == "get_url":
-                result = await browser.get_url()
-                return {"output": result, "exit_code": 0}
+                return {"output": await browser.get_url(), "exit_code": 0}
 
             elif action == "get_title":
-                result = await browser.get_title()
-                return {"output": result, "exit_code": 0}
+                return {"output": await browser.get_title(), "exit_code": 0}
 
             elif action == "get_text":
                 result = await browser.get_text()
@@ -112,16 +145,17 @@ async def do_host_browser(
             elif action == "focus":
                 if not selector:
                     return {"error": "selector is required for focus", "exit_code": 1}
-                await browser.focus(selector)
-                return {"output": f"Focused {selector}", "exit_code": 0}
+                await browser.focus_selector(selector)
+                return {"output": f"Focused: {selector}", "exit_code": 0}
 
             elif action == "insert_text":
                 if not text:
                     return {"error": "text is required for insert_text", "exit_code": 1}
                 if selector:
-                    await browser.focus(selector)
+                    await browser.focus_selector(selector)
+                    await __import__("asyncio").sleep(0.2)
                 await browser.insert_text(text)
-                return {"output": f"Inserted {len(text)} chars", "exit_code": 0}
+                return {"output": f"Inserted {len(text)} chars of text", "exit_code": 0}
 
             elif action == "set_value":
                 if not selector:
@@ -130,29 +164,43 @@ async def do_host_browser(
                 return {"output": f"Set value of {selector}", "exit_code": 0}
 
             elif action == "click":
-                if not selector:
-                    return {"error": "selector is required for click", "exit_code": 1}
-                await browser.click(selector)
-                return {"output": f"Clicked {selector}", "exit_code": 0}
+                # Click at pixel coordinates from the most recent screenshot
+                x = args.get("x")
+                y = args.get("y")
+                if x is not None and y is not None:
+                    # Direct coordinate click (from visual inspection of screenshot)
+                    session = browser._session
+                    assert session
+                    for evt in ("mousePressed", "mouseReleased"):
+                        await session.send("Input.dispatchMouseEvent", {
+                            "type": evt, "x": float(x), "y": float(y),
+                            "button": "left", "clickCount": 1,
+                        })
+                        await __import__("asyncio").sleep(0.05)
+                    return {"output": f"Clicked at ({x}, {y})", "exit_code": 0}
+                elif selector:
+                    await browser.click_selector(selector)
+                    return {"output": f"Clicked: {selector}", "exit_code": 0}
+                else:
+                    return {"error": "click requires {x, y} coordinates or a {selector}", "exit_code": 1}
 
             elif action == "key":
                 if not key_name:
                     return {"error": "key is required for key action", "exit_code": 1}
                 await browser.key(key_name)
-                return {"output": f"Sent key {key_name}", "exit_code": 0}
-
-            elif action == "screenshot":
-                img_b64 = await browser.screenshot()
-                return {"output": f"Screenshot taken ({len(img_b64)} chars base64)", "image": img_b64, "exit_code": 0}
+                return {"output": f"Pressed key: {key_name}", "exit_code": 0}
 
             else:
-                return {"error": f"Unknown action: {action}", "exit_code": 1}
+                return {"error": f"Unknown action: {action!r}. "
+                        "Valid actions: screenshot, navigate, get_url, get_title, "
+                        "get_text, click, insert_text, key, focus, set_value", "exit_code": 1}
 
     except ConnectionRefusedError:
+        browser_name = "Firefox" if port == 9223 else "Chromium"
         return {
             "error": (
-                "Cannot connect to Chromium CDP on port 9222. "
-                "Check that the kiosk is running with --remote-debugging-port=9222."
+                f"Cannot connect to {browser_name} CDP on port {port}. "
+                f"Ensure {browser_name} is running with --remote-debugging-port={port}."
             ),
             "exit_code": 1,
         }

@@ -1463,32 +1463,53 @@ FUNCTION_TOOL_SCHEMAS = [
         "function": {
             "name": "host_browser",
             "description": (
-                "Control the FoulFox OS kiosk Chromium browser via Chrome DevTools "
-                "Protocol (CDP). Chromium must have been started with "
-                "--remote-debugging-port=9222 (enabled by default in the kiosk). "
-                "Use this to navigate to URLs, fill in forms, click buttons, or get "
-                "the page text. The primary use case is navigating to Replit and "
-                "pasting bug reports into the AI agent chat. "
-                "Actions: navigate | get_url | get_text | get_title | "
-                "focus | insert_text | set_value | click | key | screenshot"
+                "Control a browser on the FoulFox OS host via Chrome DevTools Protocol (CDP). "
+                "Defaults to Firefox on port 9223 (used for external web browsing and Replit). "
+                "Pass port=9222 to control the kiosk Chromium instead.\n\n"
+                "WORKFLOW for visual tasks (e.g. sending a report to Replit):\n"
+                "1. action=screenshot — the image is fed directly to your vision so you can SEE "
+                "what is on screen. Look at it carefully.\n"
+                "2. action=navigate if not on the right page.\n"
+                "3. action=screenshot again — identify the chat input or button BY LOOKING at "
+                "the screenshot. Note the pixel coordinates (x, y) of the element.\n"
+                "4. action=click with the x/y coordinates you saw in the screenshot.\n"
+                "5. action=insert_text to type content.\n"
+                "6. action=screenshot to confirm, then action=click the submit button.\n\n"
+                "IMPORTANT: Never guess CSS selectors — use x/y pixel coordinates from screenshots. "
+                "Actions: screenshot | navigate | get_url | get_title | get_text | "
+                "click | insert_text | key | focus | set_value"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["navigate", "get_url", "get_text", "get_title",
-                                 "focus", "insert_text", "set_value", "click",
-                                 "key", "screenshot"],
-                        "description": "What to do in the browser.",
+                        "enum": ["screenshot", "navigate", "get_url", "get_title", "get_text",
+                                 "click", "insert_text", "key", "focus", "set_value"],
+                        "description": (
+                            "screenshot — capture what the browser is showing (returned as a vision image); "
+                            "navigate — go to a URL; "
+                            "click — click at pixel {x, y} from the screenshot (preferred) or CSS {selector}; "
+                            "insert_text — type text at the current focus point; "
+                            "key — press a keyboard key (Enter, Tab, Escape, etc.); "
+                            "focus/set_value — CSS-selector-based focus and value-set."
+                        ),
                     },
                     "url": {
                         "type": "string",
                         "description": "URL to navigate to (action=navigate).",
                     },
+                    "x": {
+                        "type": "number",
+                        "description": "X pixel coordinate to click (action=click, from screenshot).",
+                    },
+                    "y": {
+                        "type": "number",
+                        "description": "Y pixel coordinate to click (action=click, from screenshot).",
+                    },
                     "selector": {
                         "type": "string",
-                        "description": "CSS selector for focus/set_value/click actions.",
+                        "description": "CSS selector — use only for focus/set_value; prefer x/y for click.",
                     },
                     "text": {
                         "type": "string",
@@ -1496,7 +1517,11 @@ FUNCTION_TOOL_SCHEMAS = [
                     },
                     "key": {
                         "type": "string",
-                        "description": "Key name to press (action=key), e.g. 'Enter', 'Tab', 'Escape'.",
+                        "description": "Key to press (action=key): 'Enter', 'Tab', 'Escape', 'ArrowDown', etc.",
+                    },
+                    "port": {
+                        "type": "integer",
+                        "description": "CDP port: 9223 = Firefox (default, external browser), 9222 = kiosk Chromium.",
                     },
                 },
                 "required": ["action"],

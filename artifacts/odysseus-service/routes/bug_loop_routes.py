@@ -15,7 +15,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.bug_loop import get_state, start_loop, stop_loop, run_single_report
-from src.host_browser import paste_report_via_firefox
+from src.bug_loop import _agent_send_report
 
 router = APIRouter()
 
@@ -67,14 +67,14 @@ async def send_to_replit(request: Request):
     except Exception:
         body = {}
     replit_url = body.get("replitUrl", state.replit_url)
-    result = await paste_report_via_firefox(state.last_report["markdown"], replit_url)
+    state.replit_url = replit_url   # let agent know the target
+    result = await _agent_send_report(state, state.last_report)
     if result["ok"]:
         state.last_sent_at = time.time()
-        state.emit(f"Report manually sent to Replit: {result['detail']}")
+        state.emit(f"Report sent by agent: {result['detail'][:200]}")
     return JSONResponse({
-        "ok": result["ok"],
+        "ok":    result["ok"],
         "detail": result["detail"],
-        "screenshot": result.get("screenshot"),
     })
 
 

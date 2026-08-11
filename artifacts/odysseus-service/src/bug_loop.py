@@ -415,35 +415,154 @@ async def _trigger_reboot(state: LoopState) -> None:
     await asyncio.sleep(30)
 
 
-# ── Post-reboot report + Firefox paste ────────────────────────────────────────
+# ── Agent-driven report submission ────────────────────────────────────────────
+#
+# The agent uses host_browser to physically navigate Firefox, take screenshots,
+# see the Replit page, locate the chat input VISUALLY, click it, type the
+# report, and submit — exactly like a human sitting at the desk.
+# No hardcoded CSS selectors. The vision model decides where to click.
 
-async def _send_report_via_firefox(state: LoopState, report: dict) -> None:
+async def _agent_send_report(state: LoopState, report: dict) -> dict:
     """
-    Navigate Firefox to Replit autonomously (via CDP) and paste *report*.
-    Falls back to saving the report to disk if Firefox paste fails.
+    Invoke the AI agent to send the diagnostic report to Replit.
+
+    The agent is given the host_browser tool and instructed to:
+      1. Take a screenshot of Firefox to see what's on screen
+      2. Navigate to the Replit URL if needed
+      3. Look at the screenshot to identify the agent chat input
+      4. Click the input, type the report, click submit
+
+    Returns {"ok": bool, "detail": str}.
+    """
+    try:
+        from src.endpoint_resolver import resolve_endpoint
+        from src.agent_loop import stream_agent_loop
+    except ImportError as exc:
+        return {"ok": False, "detail": f"Agent loop unavailable: {exc}"}
+
+    url, model, headers = resolve_endpoint("default")
+    if not url or not model:
+        return {"ok": False, "detail": "No LLM endpoint configured — cannot run agent"}
+
+    replit_url = state.replit_url
+    markdown   = report.get("markdown", "")
+    summary    = report.get("summary", {})
+
+    system_prompt = (
+        "You are an autonomous browser agent running on FoulFox OS. "
+        "Your ONLY job right now is to deliver a diagnostic report to the Replit AI agent chat.\n\n"
+        "You have ONE tool: host_browser. Use it like this:\n"
+        "1. host_browser {action: screenshot} — see what Firefox is showing RIGHT NOW.\n"
+        "2. If not on the Replit project page, host_browser {action: navigate, url: <url>}.\n"
+        "3. host_browser {action: screenshot} — look at the page carefully. "
+        "Identify the AI agent chat input field (usually a text area at the bottom of the right panel). "
+        "Note its pixel coordinates (x, y) in the screenshot.\n"
+        "4. host_browser {action: click, x: <x>, y: <y>} — click the input field you saw.\n"
+        "5. host_browser {action: insert_text, text: <report>} — paste the report.\n"
+        "6. host_browser {action: screenshot} — verify the text is in the input.\n"
+        "7. Find the send/submit button in the screenshot. "
+        "host_browser {action: click, x: <x>, y: <y>} — click it.\n"
+        "8. host_browser {action: screenshot} — confirm the message was sent.\n\n"
+        "RULES:\n"
+        "- Always take a screenshot first. Never guess — look at the image and act on what you see.\n"
+        "- Use pixel coordinates (x, y) from screenshots for clicking, not CSS selectors.\n"
+        "- If the chat panel is collapsed, look for the AI/Agent tab button and click it to open it.\n"
+        "- If asked to log in, stop and report that login is required.\n"
+        "- Report success only after you see the message appear in the chat.\n"
+        "- Do NOT navigate away from Replit to other sites."
+    )
+
+    ok_count   = summary.get("ok", 0)
+    warn_count = summary.get("warn", 0)
+    fail_count = summary.get("fail", 0)
+
+    user_message = (
+        f"Navigate Firefox to this Replit project and submit the diagnostic report in the AI agent chat:\n"
+        f"URL: {replit_url}\n\n"
+        f"Summary: {ok_count} OK · {warn_count} warn · {fail_count} fail\n\n"
+        f"REPORT (paste this entire text into the Replit agent chat input and submit it):\n"
+        f"---\n{markdown[:12000]}\n---\n\n"
+        f"Start by taking a screenshot so you can see what is currently on screen."
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user",   "content": user_message},
+    ]
+
+    full_text   = ""
+    last_action = ""
+
+    try:
+        async for event_str in stream_agent_loop(
+            endpoint_url=url,
+            model=model,
+            messages=messages,
+            headers=headers,
+            max_rounds=20,
+            session_id=None,
+            owner=None,
+            relevant_tools={"host_browser"},
+        ):
+            if event_str.startswith("data: [DONE]"):
+                break
+            if not event_str.startswith("data: "):
+                continue
+            try:
+                data = json.loads(event_str[6:])
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+            if "delta" in data and data["delta"].strip():
+                chunk = data["delta"].strip()
+                full_text += data["delta"]
+                state.emit(f"  Agent: {chunk[:120]}")
+
+            elif data.get("type") == "tool_start":
+                tool    = data.get("tool", "")
+                command = str(data.get("command") or "")[:120]
+                last_action = f"{tool}: {command}"
+                state.emit(f"🔧 {last_action}")
+
+            elif data.get("type") == "tool_output":
+                out = str(data.get("output") or data.get("result") or "")[:200]
+                if out:
+                    state.emit(f"  → {out}")
+
+        return {
+            "ok":    True,
+            "detail": (full_text.strip() or last_action or "Agent completed browser task"),
+        }
+
+    except Exception as exc:
+        return {"ok": False, "detail": str(exc)}
+
+
+async def _send_report_via_agent(state: LoopState, report: dict) -> None:
+    """
+    Have the AI agent physically navigate Firefox to Replit and submit the report.
+    Falls back to saving locally if the agent run fails.
     """
     state.phase = "reporting"
-    state.emit(f"📋 Pasting report to Replit via Firefox ({state.replit_url})…")
+    state.emit(f"🤖 Agent navigating Firefox to {state.replit_url} to submit report…")
     state._broadcast()
 
     try:
-        from .host_browser import paste_report_via_firefox
         result = await asyncio.wait_for(
-            paste_report_via_firefox(
-                report["markdown"],
-                state.replit_url,
-                expected_project="Odysseus VM",
-            ),
-            timeout=150,
+            _agent_send_report(state, report),
+            timeout=300,   # 5 min — agent may need several screenshot→act cycles
         )
         if result["ok"]:
             state.last_sent_at = time.time()
-            state.emit(f"✅ Report sent: {result['detail']}")
+            state.emit(f"✅ Report submitted by agent: {result['detail'][:200]}")
         else:
-            state.emit(f"⚠️  Firefox send failed: {result['detail']}")
+            state.emit(f"⚠️  Agent send failed: {result['detail']}")
             _save_report_locally(state, report)
+    except asyncio.TimeoutError:
+        state.emit("⚠️  Agent timed out after 5 minutes — saving report locally")
+        _save_report_locally(state, report)
     except Exception as exc:
-        state.emit(f"⚠️  Firefox send error: {exc}")
+        state.emit(f"⚠️  Agent send error: {exc}")
         _save_report_locally(state, report)
 
 
@@ -510,7 +629,7 @@ async def _post_reboot_report_and_send(state: LoopState) -> None:
         state.all_passed = True
 
     # Send via Firefox
-    await _send_report_via_firefox(state, report)
+    await _send_report_via_agent(state, report)
 
     _clear_sentinel()
     state.phase = "done"
@@ -586,7 +705,7 @@ async def _run_loop(state: LoopState, max_iterations: int = 20) -> None:
 
                 # Send success report via Firefox
                 if state.auto_send:
-                    await _send_report_via_firefox(state, report)
+                    await _send_report_via_agent(state, report)
 
                 state.running = False
                 break
@@ -606,7 +725,7 @@ async def _run_loop(state: LoopState, max_iterations: int = 20) -> None:
                     f"Sending diagnostic report without triggering update."
                 )
                 if state.auto_send:
-                    await _send_report_via_firefox(state, report)
+                    await _send_report_via_agent(state, report)
 
                 # Wait 5 minutes before the next diagnostic cycle (issues may
                 # resolve on their own or a new build may land).
