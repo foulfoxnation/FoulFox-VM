@@ -177,7 +177,8 @@ export const GetSessionInfoResponse = zod.object({
 })),
   "logsStreamUrl": zod.string().describe('SSE endpoint for streaming logs'),
   "shellWsPath": zod.string().describe('WebSocket path for interactive shell (append ?token=...)'),
-  "displayWsPath": zod.string().describe('WebSocket path for VM display (append ?vm=...&token=...)')
+  "displayWsPath": zod.string().describe('WebSocket path for VM display (append ?vm=...&token=...)'),
+  "hostDisplayWsPath": zod.string().optional().describe('WebSocket path for the host desktop display via x11vnc (append ?token=...)')
 })
 
 

@@ -68,9 +68,10 @@ router.get("/session/info", async (req: Request, res: Response) => {
     totalDiskGb:    caps.totalDiskGb,
     freeDiskGb:     caps.freeDiskGb,
     vms,
-    logsStreamUrl:  "/api/shell/logs/stream",
-    shellWsPath:    "/api/shell/ws",
-    displayWsPath:  "/api/vm/ws/display",
+    logsStreamUrl:      "/api/shell/logs/stream",
+    shellWsPath:        "/api/shell/ws",
+    displayWsPath:      "/api/vm/ws/display",
+    hostDisplayWsPath:  "/api/host/ws/display",
   });
 });
 

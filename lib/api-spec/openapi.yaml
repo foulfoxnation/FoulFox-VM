@@ -568,6 +568,9 @@ components:
         displayWsPath:
           type: string
           description: WebSocket path for VM display (append ?vm=...&token=...)
+        hostDisplayWsPath:
+          type: string
+          description: WebSocket path for the host desktop display via x11vnc (append ?token=...)
       required: [machineName, platform, arch, vms, logsStreamUrl, shellWsPath, displayWsPath]
 
     ViewToken:

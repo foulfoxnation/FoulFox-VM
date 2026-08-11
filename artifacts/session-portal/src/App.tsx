@@ -13,8 +13,8 @@ import { LogStream } from '@/components/LogStream';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Copy, Terminal as TerminalIcon, ScrollText, Share, MonitorPlay, Check, Loader2 } from 'lucide-react';
-import { apiUrl } from '@/lib/api-url';
+import { Terminal as TerminalIcon, ScrollText, Share, MonitorPlay, Monitor, Check, Loader2 } from 'lucide-react';
+import { apiUrl, apiWsUrl } from '@/lib/api-url';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false, retry: false } }
@@ -32,7 +32,8 @@ function Portal() {
   const viewTokenParam = searchParams.get('token');
 
   const [shellToken, setShellToken] = useState<string | null>(null);
-  const [activeVmId, setActiveVmId] = useState<string | null>(null);
+  // "host" = the host desktop via x11vnc; any other string = a VM id
+  const [activeDisplayId, setActiveDisplayId] = useState<string>("host");
 
   // Fetch the shell session token first; inject it as a default header for
   // all api-client requests (enables createViewToken mutation, etc.).
@@ -62,12 +63,7 @@ function Portal() {
     }
   );
 
-  // Set default active VM when info arrives
-  useEffect(() => {
-    if (sessionInfo?.vms && sessionInfo.vms.length > 0 && !activeVmId) {
-      setActiveVmId(sessionInfo.vms[0].id);
-    }
-  }, [sessionInfo, activeVmId]);
+  // No auto-select needed — host desktop is the default view.
 
   const createToken = useCreateViewToken();
   const [copied, setCopied] = useState(false);
@@ -92,9 +88,24 @@ function Portal() {
     );
   }
 
-  const activeVm = sessionInfo?.vms.find(vm => vm.id === activeVmId);
-  const displayToken = viewTokenParam || activeVm?.displayToken || null;
+  const activeVm = sessionInfo?.vms.find(vm => vm.id === activeDisplayId);
   const sseToken = viewTokenParam || shellToken;
+
+  // Compute the VNC WebSocket URL for whatever is currently selected.
+  // "host" → host desktop via x11vnc; anything else → VM display proxy.
+  function buildDisplayWsUrl(): string | null {
+    const tok = viewTokenParam || shellToken;
+    if (!tok) return null;
+    if (activeDisplayId === "host") {
+      return apiWsUrl(`/api/host/ws/display?token=${tok}`);
+    }
+    const vm = sessionInfo?.vms.find(v => v.id === activeDisplayId);
+    if (!vm || vm.state !== "running") return null;
+    const displayToken = viewTokenParam || vm.displayToken;
+    if (!displayToken) return null;
+    return apiWsUrl(`/api/vm/ws/display?vm=${vm.id}&token=${displayToken}`);
+  }
+  const displayWsUrl = buildDisplayWsUrl();
 
   return (
     <div className="flex flex-col h-screen w-full bg-[#09090b] text-zinc-200 overflow-hidden font-sans">
@@ -143,41 +154,56 @@ function Portal() {
           {/* Left Panel - VNC */}
           <Panel defaultSize={65} minSize={30}>
             <div className="flex flex-col h-full bg-zinc-950 border-r border-zinc-800">
-              {/* VM Tabs */}
-              <div className="flex-none flex px-2 pt-2 gap-1 bg-[#09090b] border-b border-zinc-800">
+              {/* Display source tabs: Host Desktop first, then each VM */}
+              <div className="flex-none flex px-2 pt-2 gap-1 bg-[#09090b] border-b border-zinc-800 overflow-x-auto">
+                {/* Host Desktop tab */}
+                <button
+                  onClick={() => setActiveDisplayId("host")}
+                  className={`px-4 py-2 text-xs font-medium rounded-t border-t border-x transition-colors flex items-center gap-2 outline-none shrink-0
+                    ${activeDisplayId === "host"
+                      ? 'bg-black border-zinc-800 text-zinc-100 z-10 translate-y-[1px]'
+                      : 'bg-[#09090b] border-transparent text-zinc-500 hover:text-zinc-300'}`}
+                >
+                  <Monitor className="w-3.5 h-3.5" />
+                  Host Desktop
+                  <span className="w-1.5 h-1.5 rounded-full ml-1 bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.5)]" />
+                </button>
+
+                {/* One tab per VM */}
                 {sessionInfo?.vms.map(vm => (
                   <button
                     key={vm.id}
-                    onClick={() => setActiveVmId(vm.id)}
-                    className={`px-4 py-2 text-xs font-medium rounded-t border-t border-x transition-colors flex items-center gap-2 outline-none
-                      ${activeVmId === vm.id 
-                        ? 'bg-black border-zinc-800 text-zinc-100 z-10 translate-y-[1px]' 
+                    onClick={() => setActiveDisplayId(vm.id)}
+                    className={`px-4 py-2 text-xs font-medium rounded-t border-t border-x transition-colors flex items-center gap-2 outline-none shrink-0
+                      ${activeDisplayId === vm.id
+                        ? 'bg-black border-zinc-800 text-zinc-100 z-10 translate-y-[1px]'
                         : 'bg-[#09090b] border-transparent text-zinc-500 hover:text-zinc-300'}`}
                   >
                     <MonitorPlay className="w-3.5 h-3.5" />
                     {vm.name}
-                    <span className={`w-1.5 h-1.5 rounded-full ml-1 ${vm.state === 'running' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'}`} />
+                    <span className={`w-1.5 h-1.5 rounded-full ml-1 ${
+                      vm.state === 'running'
+                        ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]'
+                        : 'bg-zinc-600'
+                    }`} />
                   </button>
                 ))}
-                {(!sessionInfo?.vms || sessionInfo.vms.length === 0) && (
-                  <div className="px-4 py-2 text-xs font-medium text-zinc-500">No VMs discovered</div>
-                )}
               </div>
-              
-              <div className="flex-1 min-h-0 bg-black">
-                {activeVm ? (
-                  activeVm.state !== 'running' ? (
-                    <div className="flex h-full w-full items-center justify-center flex-col gap-2">
-                      <div className="text-zinc-600 text-lg">{activeVm.name} is Stopped</div>
-                    </div>
-                  ) : (
-                    <VncViewer vmId={activeVm.id} displayToken={displayToken} />
-                  )
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center">
-                    <div className="text-zinc-600 text-sm">Select a VM</div>
-                  </div>
-                )}
+
+              {/* VNC canvas */}
+              <div className="flex-1 min-h-0 bg-black flex">
+                <VncViewer
+                  wsUrl={displayWsUrl}
+                  label={
+                    activeDisplayId === "host"
+                      ? "Host Desktop — start x11vnc on the machine"
+                      : activeVm
+                        ? activeVm.state !== "running"
+                          ? `${activeVm.name} is Stopped`
+                          : undefined
+                        : "Select a display source above"
+                  }
+                />
               </div>
             </div>
           </Panel>

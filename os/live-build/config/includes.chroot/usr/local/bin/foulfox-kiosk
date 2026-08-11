@@ -106,6 +106,27 @@ sleep 2
 # fullscreen) so Alt+Tab works; Shift+F12 releases the captured cursor.
 /usr/local/bin/foulfox-open-vm-viewer &
 
+# ── x11vnc: host desktop display for Session Portal ─────────────────────────
+# Exposes the live Openbox/Chromium kiosk display on TCP 127.0.0.1:5900 so the
+# api-server WS proxy (/api/host/ws/display) can relay it to noVNC.
+# Auth is handled entirely by the api-server shell-token gate; no VNC password
+# is needed. -localhost: loopback-only (never exposed to LAN).
+# -noxdamage: skips the DAMAGE extension which can stall on some GPU drivers.
+# -forever: keeps x11vnc running after a client disconnects.
+# -shared: allow more than one simultaneous viewer (agent + human).
+( while true; do
+    x11vnc \
+      -display :0 \
+      -localhost \
+      -nopw \
+      -forever \
+      -shared \
+      -noxdamage \
+      -logfile /var/log/foulfox/x11vnc.log \
+      2>/dev/null || true
+    sleep 3
+  done ) &
+
 # ── PulseAudio (required for Voice Forge mic + speaker access) ───────────────
 # Start PulseAudio as a user-mode daemon for the foulfox kiosk session.
 # Chromium uses PulseAudio for getUserMedia (microphone) and audio output

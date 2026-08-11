@@ -24,4 +24,6 @@ export interface SessionInfo {
   shellWsPath: string;
   /** WebSocket path for VM display (append ?vm=...&token=...) */
   displayWsPath: string;
+  /** WebSocket path for the host desktop display via x11vnc (append ?token=...) */
+  hostDisplayWsPath?: string;
 }

@@ -257,26 +257,46 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", router);
 
-// ── Static shell serving (appliance / packaged mode) ──────────────────────────
-// In the Replit dev workspace the shell is served by Vite, so this stays off.
-// FoulFox OS sets SERVE_SHELL_STATIC=1 so a single origin serves the built
-// shell + the /api routes + the Odysseus proxy (keeping same-origin /api calls
-// working without the Vite dev proxy). SHELL_STATIC_DIR overrides the location.
+// ── Static serving (appliance / packaged mode) ────────────────────────────────
+// In the Replit dev workspace both apps are served by separate Vite servers, so
+// this block stays off. FoulFox OS sets SERVE_SHELL_STATIC=1; the single
+// api-server origin serves the shell at /, the session portal at /session-portal/,
+// and all /api/* routes — keeping same-origin calls working without a Vite proxy.
 if (process.env["SERVE_SHELL_STATIC"]) {
+  // ── Session portal at /session-portal/ ──────────────────────────────────
+  // Built with BASE_PATH=/session-portal/ so all asset references are absolute
+  // paths under /session-portal/. Mount before the shell so the shell's SPA
+  // catch-all does not intercept /session-portal/* requests.
+  const portalDir =
+    process.env["PORTAL_STATIC_DIR"] ??
+    path.resolve(__dirname, "../../session-portal/dist/public");
+  if (fs.existsSync(path.join(portalDir, "index.html"))) {
+    app.use("/session-portal", express.static(portalDir));
+    // SPA fallback: any /session-portal/* path that doesn't map to a real file
+    // returns the portal's index.html so client-side routing works.
+    app.get(/^\/session-portal(\/.*)?$/, (_req: Request, res: Response) => {
+      res.sendFile(path.join(portalDir, "index.html"));
+    });
+    logger.info({ portalDir }, "Serving session portal from api-server");
+  } else {
+    logger.warn({ portalDir }, "Session portal build not found; skipping (run stage-app.sh to build it)");
+  }
+
+  // ── FoulFox shell at / ──────────────────────────────────────────────────
   const shellDir =
     process.env["SHELL_STATIC_DIR"] ??
     path.resolve(__dirname, "../../odysseus-shell/dist/public");
   if (fs.existsSync(path.join(shellDir, "index.html"))) {
     app.use(express.static(shellDir));
-    // SPA fallback: any non-/api GET returns index.html so client routing works.
-    app.get(/^\/(?!api\/).*/, (_req: Request, res: Response) => {
+    // SPA fallback: any non-/api, non-/session-portal GET returns shell index.html.
+    app.get(/^\/(?!api\/|session-portal).*/, (_req: Request, res: Response) => {
       res.sendFile(path.join(shellDir, "index.html"));
     });
     logger.info({ shellDir }, "Serving built shell from api-server");
   } else {
     logger.warn(
       { shellDir },
-      "SERVE_SHELL_STATIC is set but no index.html was found; build the shell first",
+      "SERVE_SHELL_STATIC is set but no shell index.html found; build the shell first",
     );
   }
 }

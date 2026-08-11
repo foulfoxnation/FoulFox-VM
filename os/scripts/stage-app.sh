@@ -33,6 +33,11 @@ echo "[stage-app] Building the shell (BASE_PATH=/ for same-origin serving)..."
 # the Vite dev server), and the bundle is large -- give Node extra heap headroom.
 NODE_OPTIONS=--max-old-space-size=4096 BASE_PATH=/ pnpm --filter @workspace/odysseus-shell run build
 
+echo "[stage-app] Building the session portal (BASE_PATH=/session-portal/)..."
+# The session portal serves at /session-portal/ on the machine — same api-server
+# origin, so /api/* calls are same-origin and the shell token works automatically.
+NODE_OPTIONS=--max-old-space-size=4096 BASE_PATH=/session-portal/ pnpm --filter @workspace/session-portal run build
+
 echo "[stage-app] Building the api-server..."
 pnpm --filter @workspace/api-server run build
 
@@ -52,5 +57,6 @@ rsync -a --delete \
   "$REPO_ROOT/" "$STAGE/"
 
 echo "[stage-app] Done. Staged app at: $STAGE"
-echo "[stage-app] Shell:  $STAGE/artifacts/odysseus-shell/dist/public"
-echo "[stage-app] API:    $STAGE/artifacts/api-server/dist/index.mjs"
+echo "[stage-app] Shell:   $STAGE/artifacts/odysseus-shell/dist/public"
+echo "[stage-app] Portal:  $STAGE/artifacts/session-portal/dist/public"
+echo "[stage-app] API:     $STAGE/artifacts/api-server/dist/index.mjs"

@@ -8,6 +8,7 @@ import { ensureDefaultVm } from "./lib/vm-registry";
 import { reconcileOrphans } from "./lib/vm-launch";
 import { backfillVmSshKeys } from "./lib/vm-provision";
 import { createDisplayWss } from "./lib/vm-display";
+import { createHostDisplayWss } from "./lib/host-display";
 import { autostartApps, stopAllApps } from "./lib/app-runner";
 import { seedDefaultApps } from "./lib/default-apps";
 
@@ -33,6 +34,9 @@ createShellWss(server);
 
 // Attach the per-VM display (noVNC) WebSocket proxy.
 createDisplayWss(server);
+
+// Attach the host desktop display WebSocket proxy (proxies to x11vnc port 5900).
+createHostDisplayWss(server);
 
 // Bootstrap the multi-VM registry: ensure a "default" VM exists (migrating any
 // legacy single-VM config) and reconcile orphaned QEMU processes left behind by
