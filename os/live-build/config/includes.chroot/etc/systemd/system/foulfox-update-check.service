@@ -1,0 +1,13 @@
+[Unit]
+Description=FoulFox automatic update check (applies new app bundles via foulfox-patcher)
+# Only meaningful once the app stack is provisioned; ordering (not Requires)
+# so a failed prepare never blocks the timer from retrying later boots.
+After=foulfox-prepare.service network.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/foulfox/foulfox.env
+ExecStart=/usr/local/sbin/foulfox-update-autocheck
+# The check itself is quick (manifest fetch, 20s curl timeout); the actual
+# apply detaches into the transient foulfox-update unit and is not bounded here.
+TimeoutStartSec=2min

@@ -1,0 +1,16 @@
+[Unit]
+Description=Periodic FoulFox automatic update check
+
+[Timer]
+# First check shortly after boot (once the stack has settled), then every
+# 30 minutes. Randomized delay spreads load across devices; the manifest is
+# fetched from GitHub release downloads (not the rate-limited API).
+OnBootSec=10min
+OnUnitActiveSec=30min
+RandomizedDelaySec=5min
+# Appliance may be off for long stretches; don't pile up missed runs.
+Persistent=false
+Unit=foulfox-update-check.service
+
+[Install]
+WantedBy=timers.target

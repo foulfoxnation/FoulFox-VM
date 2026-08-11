@@ -50,6 +50,7 @@ UPDATES_DIR="$FF_HOME/updates"
 STATUS_FILE="$UPDATES_DIR/status.json"
 PREVIOUS_FILE="$UPDATES_DIR/previous"
 PENDING_FILE="$UPDATES_DIR/pending"
+REJECTED_FILE="$UPDATES_DIR/rejected"
 
 KEEP="${FOULFOX_APP_RELEASES_KEEP:-2}"
 API_PORT="${PORT:-8080}"
@@ -193,6 +194,41 @@ mark_pending() {
 clear_pending() {
   rm -f "$PENDING_FILE"
   sync
+}
+
+# ── Failed-version quarantine ────────────────────────────────────────────────────
+# When a release fails its post-flip verification (restart or health check) we
+# record its version durably. `check` then reports that version as "held"
+# (available=false) so the automatic update timer cannot reapply the same bad
+# release every tick — without this, a broken bundle would restart the app
+# services every ~30 minutes forever. A manual `apply` deliberately ignores the
+# marker (explicit human retry), and any apply that succeeds — or a manifest
+# advertising a *different* version — clears/naturally bypasses it.
+mark_rejected() { atomic_write "$REJECTED_FILE" "$1" || log "could not record rejected version $1"; }
+clear_rejected() { rm -f "$REJECTED_FILE" 2>/dev/null || true; }
+rejected_version() { cat "$REJECTED_FILE" 2>/dev/null || printf ''; }
+
+# ── Manifest fetch: primary (GitHub release download) then mirror ────────────────
+# Shared by check and apply so both make the SAME availability decision — a
+# device that can't reach GitHub but can reach the published-site mirror must
+# still see (and auto-apply) updates. $1 = dest file; $2 = "status" to emit
+# user-visible status writes (apply path) or omitted/quiet (check path).
+# Returns: 0 fetched, 2 unconfigured, 1 download failed everywhere.
+fetch_manifest() {
+  local dest="$1" mode="${2:-quiet}" murl mirror
+  murl="$(resolve_manifest_url)" || return 2
+  curl -fsSL --max-time 30 -o "$dest" "$murl" 2>/dev/null && return 0
+  mirror="${FOULFOX_UPDATE_MIRROR:-}"
+  case "$mirror" in
+    https://*)
+      log "primary manifest failed; trying mirror $mirror"
+      if [ "$mode" = "status" ]; then
+        write_status "checking" "running" "Primary update server unreachable — trying mirror…"
+      fi
+      curl -fsSL --max-time 30 -o "$dest" "$mirror" 2>/dev/null && return 0
+      ;;
+  esac
+  return 1
 }
 
 # Refuse if any updater dir was replaced by a symlink. Checked WITHOUT writing
@@ -342,29 +378,13 @@ do_apply() {
     esac
   fi
 
-  local murl
-  murl="$(resolve_manifest_url)" \
-    || fail "No update source configured (set FOULFOX_GITHUB_REPO or FOULFOX_APP_MANIFEST_URL)." "unconfigured"
-
   write_status "checking" "running" "Fetching update manifest…"
-  local mf="$STAGING_DIR/manifest.json"
-  if ! curl -fsSL --max-time 30 -o "$mf" "$murl"; then
-    # Primary source (GitHub) unreachable/rate-limited — fall back to the
-    # published-site mirror (FOULFOX_UPDATE_MIRROR, https manifest URL). The
-    # mirror rewrites bundleUrl to itself, so the whole download avoids GitHub.
-    local mirror="${FOULFOX_UPDATE_MIRROR:-}"
-    case "$mirror" in
-      https://*)
-        log "primary manifest failed; trying mirror $mirror"
-        write_status "checking" "running" "Primary update server unreachable — trying mirror…"
-        curl -fsSL --max-time 30 -o "$mf" "$mirror" \
-          || fail "Could not download the update manifest (primary and mirror)." "manifest-download"
-        ;;
-      *)
-        fail "Could not download the update manifest." "manifest-download"
-        ;;
-    esac
-  fi
+  local mf="$STAGING_DIR/manifest.json" rc=0
+  fetch_manifest "$mf" "status" || rc=$?
+  case "$rc" in
+    2) fail "No update source configured (set FOULFOX_GITHUB_REPO or FOULFOX_APP_MANIFEST_URL)." "unconfigured" ;;
+    1) fail "Could not download the update manifest (primary and mirror)." "manifest-download" ;;
+  esac
 
   local meta
   meta="$(python3 -c 'import json,sys
@@ -497,6 +517,7 @@ PY
   fi
 
   if ! restart_services; then
+    mark_rejected "$TARGET_VER"
     write_status "rolling-back" "running" "Restart failed — rolling back…"
     if set_current "$prev_target"; then
       clear_pending
@@ -511,11 +532,15 @@ PY
   write_status "health-check" "running" "Verifying $TARGET_VER…"
   if wait_health; then
     clear_pending
+    clear_rejected
     write_status "success" "success" "Updated to $TARGET_VER."
     prune_releases
     return 0
   fi
 
+  # Quarantine this version BEFORE attempting rollback so even a degraded
+  # rollback path can't leave the bad release eligible for automatic retry.
+  mark_rejected "$TARGET_VER"
   write_status "rolling-back" "running" "New version failed its health check — rolling back…"
   if set_current "$prev_target"; then
     clear_pending
@@ -581,24 +606,32 @@ do_boot_recover() {
 
 # ── check (read-only; safe to run unprivileged) ─────────────────────────────────
 do_check() {
-  local murl cur="" latest="" available="false" status="unconfigured"
+  local cur="" latest="" available="false" status="unconfigured" rc=0
   cur="$(current_version)"
-  if murl="$(resolve_manifest_url)"; then
-    local mf; mf="$(mktemp)"
-    if curl -fsSL --max-time 20 -o "$mf" "$murl" 2>/dev/null; then
-      latest="$(python3 -c 'import json,sys
+  local mf; mf="$(mktemp)"
+  fetch_manifest "$mf" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    latest="$(python3 -c 'import json,sys
 try: print(json.load(open(sys.argv[1])).get("version","") or "")
 except Exception: print("")' "$mf" 2>/dev/null || true)"
-      if [ -n "$latest" ]; then
-        if [ -n "$cur" ] && [ "$cur" = "$latest" ]; then status="current"; else status="available"; available="true"; fi
+    if [ -n "$latest" ]; then
+      if [ -n "$cur" ] && [ "$cur" = "$latest" ]; then
+        status="current"
+      elif [ "$latest" = "$(rejected_version)" ]; then
+        # This exact version already failed post-apply verification on this
+        # device: hold it back from automatic retry. A manual `apply` still
+        # works (explicit human retry), and a NEW version clears the hold.
+        status="held"
       else
-        status="building"
+        status="available"; available="true"
       fi
     else
       status="building"
     fi
-    rm -f "$mf"
+  elif [ "$rc" -eq 1 ]; then
+    status="building"
   fi
+  rm -f "$mf"
   python3 -c 'import json,sys
 print(json.dumps({
  "available": sys.argv[1]=="true",

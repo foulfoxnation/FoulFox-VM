@@ -1,0 +1,73 @@
+#!/bin/bash
+# foulfox-update-autocheck — periodic automatic update check + apply.
+#
+# Run by foulfox-update-check.timer (as root). Thin policy wrapper around
+# foulfox-patcher: the patcher already owns atomicity, sha256 verification,
+# health checks, rollback, and the anti-brick pending marker — this script
+# ONLY decides whether to kick it off.
+#
+# Rate-limit note: `foulfox-patcher check` downloads the manifest from
+# github.com/<repo>/releases/download/... which is NOT the api.github.com
+# rate-limited API, so a 30-minute cadence is safe even without a token.
+set -uo pipefail
+
+# shellcheck disable=SC1091
+[ -f /etc/foulfox/foulfox.env ] && . /etc/foulfox/foulfox.env
+
+log() { echo "[foulfox-update-autocheck] $*"; }
+
+# Opt-out switch (set FOULFOX_AUTO_UPDATE=0 in /etc/foulfox/foulfox.env to
+# disable automatic updates; the manual UI button keeps working either way).
+case "${FOULFOX_AUTO_UPDATE:-1}" in
+  0|false|no|off)
+    log "automatic updates disabled (FOULFOX_AUTO_UPDATE=${FOULFOX_AUTO_UPDATE})"
+    exit 0
+    ;;
+esac
+
+# Respect the post-boot internet quiet period (FOULFOX_NET_QUIET_SECONDS):
+# no outbound update chatter while WiFi is still settling. The timer's
+# OnBootSec normally clears this anyway; this guards against config changes.
+quiet="${FOULFOX_NET_QUIET_SECONDS:-180}"
+case "$quiet" in *[!0-9]*) quiet=180;; esac
+uptime_s="$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)"
+if [ "$quiet" -gt 0 ] && [ "$uptime_s" -lt "$quiet" ]; then
+  log "inside post-boot quiet period (${uptime_s}s < ${quiet}s); skipping"
+  exit 0
+fi
+
+# Never race a manual/in-flight update. The patcher also guards this, but
+# checking here avoids clobbering the visible status.json mid-apply.
+if systemctl is-active --quiet foulfox-update.service 2>/dev/null; then
+  log "an update is already in progress; skipping this check"
+  exit 0
+fi
+
+check_json="$(/usr/local/sbin/foulfox-patcher check 2>/dev/null)" || {
+  log "patcher check failed; will retry on the next timer tick"
+  exit 0
+}
+
+# Pipe JSON to python3 -c (NOT a heredoc — heredocs steal stdin).
+available="$(printf '%s' "$check_json" | python3 -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+    print("yes" if d.get("available") else "no")
+    print(d.get("currentVersion") or "?", d.get("latestVersion") or "?", file=sys.stderr)
+except Exception:
+    print("no")')"
+
+if [ "$available" != "yes" ]; then
+  log "no update available: $check_json"
+  exit 0
+fi
+
+log "update available: $check_json — applying"
+# `apply` detaches into the transient foulfox-update unit and returns
+# immediately; the patcher handles health-check + auto-rollback from there.
+out="$(/usr/local/sbin/foulfox-patcher apply)" || {
+  log "failed to start updater: $out"
+  exit 0
+}
+log "updater started: $out"
+exit 0
