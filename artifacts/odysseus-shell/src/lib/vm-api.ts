@@ -86,6 +86,10 @@ export interface VmCapabilities {
   appleHost: boolean;
   totalRamGb: number;
   cpuCount: number;
+  /** Total disk in ODYSSEUS_DATA_DIR filesystem (0 = unknown / Replit dev). */
+  totalDiskGb: number;
+  /** Free disk in ODYSSEUS_DATA_DIR filesystem (0 = unknown). */
+  freeDiskGb: number;
   osSupport: Record<OsKind, OsSupport>;
 }
 
