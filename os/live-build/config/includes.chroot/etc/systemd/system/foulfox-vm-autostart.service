@@ -4,8 +4,10 @@ After=foulfox-api.service
 Requires=foulfox-api.service
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+# simple (not oneshot): first-boot provisioning may download the Windows ISO
+# from Microsoft (multi-GB). The boot must never wait on that — the kiosk and
+# shell come up immediately while this runs in the background.
+Type=simple
 EnvironmentFile=/etc/foulfox/foulfox.env
 ExecStart=/usr/local/bin/foulfox-vm-autostart
 

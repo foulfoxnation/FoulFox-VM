@@ -48,8 +48,12 @@ if [ -z "$VM_ID" ]; then
   exit 0
 fi
 if [ "$HAS_ISO" != "yes" ] && [ "$HAS_DISK" != "yes" ]; then
-  log "no ISO or disk configured yet; skipping"
-  exit 0
+  # No media at all — this is the fresh-appliance case. Do NOT skip: the
+  # api-server's Windows provisioning path can fetch the official ISO straight
+  # from Microsoft (after the post-boot network quiet period), scan the USB
+  # frontload staging dir, create the guest disk and build the unattend CD.
+  # Skipping here was why a fresh machine never got a Windows VM at all.
+  log "no ISO or disk configured yet — requesting full provisioning (frontload scan + Microsoft ISO auto-download)"
 fi
 
 # The /vm/* mutation routes are CSRF-guarded with a per-process token served on
@@ -74,8 +78,9 @@ curl -sf -X POST "$BASE/api/vm/$VM_ID/provision" \
   -d '{}' >/dev/null 2>&1 || log "provision request failed; continuing"
 
 # Poll provisioning until it settles (ready/failed) before starting, so the
-# unattend CD exists when the installer boots. Bounded so a stuck download can't
-# wedge the boot forever; on timeout we start best-effort.
+# unattend CD exists when the installer boots. The bound must cover a multi-GB
+# ISO download on slow home internet (~4h); the unit is Type=simple so this
+# never blocks boot. On timeout we start best-effort.
 prov_status() {
   curl -sf "$BASE/api/vm/$VM_ID/status" 2>/dev/null | python3 -c 'import sys, json
 try:
@@ -84,14 +89,25 @@ except Exception:
     pass' 2>/dev/null || true
 }
 s=""
-for _ in $(seq 1 900); do
+for _ in $(seq 1 2880); do
   s="$(prov_status)"
   case "$s" in
     ready|failed|"") break ;;
   esac
-  sleep 1
+  sleep 5
 done
 log "provisioning status: ${s:-unknown}"
+
+# Re-read media state: if provisioning could not produce an ISO or disk (e.g.
+# offline machine, Microsoft download blocked), starting would just fail —
+# leave an honest log line and let the user frontload an ISO instead.
+INFO="$(vm_info)"
+HAS_ISO="$(printf '%s\n' "$INFO" | sed -n 2p)"
+HAS_DISK="$(printf '%s\n' "$INFO" | sed -n 3p)"
+if [ "$HAS_ISO" != "yes" ] && [ "$HAS_DISK" != "yes" ]; then
+  log "provisioning finished without media (no ISO could be obtained); not starting. Add a Windows ISO via File Explorer → USB Frontload → ISOs."
+  exit 0
+fi
 
 # Start the VM.
 curl -sf -X POST "$BASE/api/vm/$VM_ID/start" \
