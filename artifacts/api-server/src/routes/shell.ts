@@ -356,7 +356,8 @@ router.get("/shell/logs/sources", (req: Request, res: Response) => {
 
 // Cap concurrent log streams so a leaked/shared token can't fork-bomb the
 // appliance with per-connection journalctl/tail/ssh processes.
-const MAX_LOG_STREAMS = 16;
+// (High enough for the diag relay's full source set plus several human viewers.)
+const MAX_LOG_STREAMS = 48;
 let activeLogStreams = 0;
 
 router.get("/shell/logs/stream", (req: Request, res: Response) => {

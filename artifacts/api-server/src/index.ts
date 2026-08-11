@@ -5,6 +5,7 @@ import { logger } from "./lib/logger";
 import appUiRouter from "./routes/app-ui";
 import { createShellWss } from "./routes/shell";
 import { ensureDefaultVm } from "./lib/vm-registry";
+import { createDiagRelayWss, startDiagRelayClient } from "./lib/diag-relay";
 import { reconcileOrphans } from "./lib/vm-launch";
 import { backfillVmSshKeys } from "./lib/vm-provision";
 import { createDisplayWss } from "./lib/vm-display";
@@ -37,6 +38,14 @@ createDisplayWss(server);
 
 // Attach the host desktop display WebSocket proxy (proxies to x11vnc port 5900).
 createHostDisplayWss(server);
+
+// Live log relay: in the dev workspace this receives the appliance's outbound
+// log stream; on the appliance the client below connects out and forwards every
+// Logs-viewer source (one-way, read-only).
+createDiagRelayWss(server);
+if (process.env["SERVE_SHELL_STATIC"]) {
+  startDiagRelayClient(port);
+}
 
 // Bootstrap the multi-VM registry: ensure a "default" VM exists (migrating any
 // legacy single-VM config) and reconcile orphaned QEMU processes left behind by
