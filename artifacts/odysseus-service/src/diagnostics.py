@@ -71,6 +71,31 @@ async def _json_get(url: str, timeout: float = 5.0) -> Optional[Any]:
         pass
     return None
 
+def _http_post(url: str, payload: Any = None, timeout: float = 10.0) -> tuple[int, bytes]:
+    """POST url with JSON body → (http_status, body_bytes).  Raises on connection error."""
+    import urllib.request, urllib.error
+    data = json.dumps(payload or {}).encode()
+    req  = urllib.request.Request(url, data=data,
+                                  headers={"Content-Type": "application/json"})
+    try:
+        r = urllib.request.urlopen(req, timeout=timeout)
+        return r.status, r.read(131072)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(4096)
+    except Exception as exc:
+        raise exc
+
+async def _json_post(url: str, payload: Any = None, timeout: float = 10.0) -> Optional[Any]:
+    """POST url with JSON body → parsed JSON response or None on any error."""
+    loop = asyncio.get_event_loop()
+    try:
+        status, body = await loop.run_in_executor(None, lambda: _http_post(url, payload, timeout))
+        if status < 400:
+            return json.loads(body)
+    except Exception:
+        pass
+    return None
+
 DATA_DIR = os.environ.get("ODYSSEUS_DATA_DIR", "/var/lib/foulfox")
 
 # ── Service base URLs (read env vars so they work on both the appliance and dev) ─
@@ -424,29 +449,37 @@ CAT_AGENT_VM = "agent_vm_socket"
 async def check_agent_vm_key() -> dict:
     """Check whether an SSH key is provisioned for the Windows VM.
 
-    Keys are stored per-VM at <vmDiskDir>/<vm_id>/agent_ed25519 — NOT at
-    DATA_DIR/keys. The VM API exposes sshKeyPath on each VM config after
-    backfillVmSshKeys() runs at api-server boot.
+    Keys are stored per-VM at <vmDiskDir>/<vm_id>/agent_ed25519. When missing,
+    this check self-heals by calling POST /api/vm/:id/generate-keys — no manual
+    action required from the user.
     """
     vms = await _get_vms()
     vm_dir_root = os.path.join(DATA_DIR, ".odysseus-vms")
+
+    if vms is None:
+        _, find_out, _ = await _cmd(
+            ["bash", "-c",
+             f"find {DATA_DIR} -name 'agent_ed25519' 2>/dev/null | head -10"])
+        return _fail("agent_vm_key", CAT_AGENT_VM, "Agent→VM SSH Key",
+                     "VM list unavailable — cannot check SSH key status",
+                     {"filesystem_scan": find_out[:400] or "none found"})
+
     keyed_vms, unkeyed_vms = [], []
-    for vm in (vms or []):
-        vm_id   = vm.get("id", "")
+    for vm in vms:
+        vm_id    = vm.get("id", "")
         key_path = vm.get("sshKeyPath")
         auth_mode = vm.get("authMode", "none")
         # Primary: sshKeyPath from API config
         if key_path and os.path.isfile(key_path):
             keyed_vms.append({"id": vm_id, "key_path": key_path, "auth_mode": auth_mode})
             continue
-        # Fallback: check the known default location
+        # Fallback: check the known default filesystem location
         candidate = os.path.join(vm_dir_root, vm_id, "agent_ed25519")
         if os.path.isfile(candidate):
             keyed_vms.append({"id": vm_id, "key_path": candidate,
                               "auth_mode": auth_mode, "source": "fallback_scan"})
             continue
         unkeyed_vms.append({"id": vm_id, "auth_mode": auth_mode,
-                             "sshKeyPath_from_api": key_path,
                              "checked_path": candidate})
 
     if keyed_vms:
@@ -455,21 +488,28 @@ async def check_agent_vm_key() -> dict:
                    f"SSH key provisioned for {desc}",
                    {"keyed_vms": keyed_vms, "unkeyed_vms": unkeyed_vms})
 
-    if vms is None:
-        # VM list not available — do a filesystem scan as last resort
-        _, find_out, _ = await _cmd(
-            ["bash", "-c",
-             f"find {DATA_DIR} -name 'agent_ed25519' 2>/dev/null | head -10"])
-        return _fail("agent_vm_key", CAT_AGENT_VM, "Agent→VM SSH Key",
-                     "VM list unavailable — cannot check SSH key status",
-                     {"filesystem_scan": find_out[:400] or "none found"})
+    # ── Self-heal: call the generate-keys endpoint for each VM that lacks a key ──
+    healed, heal_errors = [], []
+    for info in unkeyed_vms:
+        vm_id = info["id"]
+        result = await _json_post(f"{API}/api/vm/{vm_id}/generate-keys", timeout=15)
+        if result and result.get("sshKeyPath"):
+            healed.append({"id": vm_id, "key_path": result["sshKeyPath"]})
+        else:
+            heal_errors.append({"id": vm_id, "response": result})
+
+    if healed:
+        desc = ", ".join(f"'{v['id']}'" for v in healed)
+        return _ok("agent_vm_key", CAT_AGENT_VM, "Agent→VM SSH Key",
+                   f"SSH key generated automatically for {desc} — agent can now authenticate",
+                   {"auto_generated": healed, "errors": heal_errors})
 
     return _fail("agent_vm_key", CAT_AGENT_VM, "Agent→VM SSH Key",
-                 "No SSH key found for any VM — backfillVmSshKeys() hasn't completed. "
-                 "Restart the api-server to trigger key generation.",
+                 "Could not generate SSH key — ssh-keygen may be missing "
+                 "(install openssh-client on FoulFox OS)",
                  {"unkeyed_vms": unkeyed_vms,
-                  "vm_dir_root": vm_dir_root,
-                  "action": "sudo systemctl restart foulfox-api"})
+                  "generate_errors": heal_errors,
+                  "vm_dir_root": vm_dir_root})
 
 async def check_agent_vm_shell() -> dict:
     """Check if the VM shell bridge endpoint is configured and working."""
