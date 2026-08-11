@@ -6,7 +6,9 @@ import {
   listVms,
   updateVm,
   isCloneSource,
+  vmDiskDir,
 } from "./vm-registry";
+import path from "path";
 import {
   selectAccelerator,
   qemuSystemBinary,
@@ -212,13 +214,59 @@ export function startVm(vm: VmRecord): StartResult {
     // instead of a silent stopped→stopped cycle. Reading the pipe also prevents
     // a full pipe buffer from blocking QEMU.
     let stderrTail = "";
+
+    // Persist QEMU's output to <vm dir>/qemu.log so the Session Portal's log
+    // viewer can show why a VM failed even after the process is gone. Rotate
+    // by truncation at ~5 MB (single-writer append; rotation loss is fine).
+    const qemuLogPath = path.join(vmDiskDir(vm.id), "qemu.log");
+    const LOG_CAP = 5 * 1024 * 1024;
+    let logStream: fs.WriteStream | null = null;
+    let logBytes = 0;
+    const closeLog = (marker?: string) => {
+      try {
+        if (marker) logStream?.write(marker);
+        logStream?.end();
+      } catch { /* ignore */ }
+      logStream = null;
+    };
+    try {
+      fs.mkdirSync(vmDiskDir(vm.id), { recursive: true });
+      try {
+        logBytes = fs.statSync(qemuLogPath).size;
+        if (logBytes > LOG_CAP) { fs.truncateSync(qemuLogPath, 0); logBytes = 0; }
+      } catch { /* no existing log */ }
+      logStream = fs.createWriteStream(qemuLogPath, { flags: "a" });
+      logStream.on("error", () => { logStream = null; });
+      logStream.write(`\n===== QEMU launch ${new Date().toISOString()} (vm=${vm.id}) =====\n`);
+    } catch { /* logging is best-effort; never block a launch on it */ }
+    const logWrite = (d: Buffer) => {
+      if (!logStream) return;
+      logBytes += d.length;
+      if (logBytes > LOG_CAP) {
+        // Rotate mid-run: truncate and reopen so a chatty guest can't fill the disk.
+        closeLog();
+        try {
+          fs.truncateSync(qemuLogPath, 0);
+          logBytes = 0;
+          logStream = fs.createWriteStream(qemuLogPath, { flags: "a" });
+          logStream.on("error", () => { logStream = null; });
+          logStream.write(`===== log rotated (5MB cap) ${new Date().toISOString()} =====\n`);
+        } catch { logStream = null; return; }
+      }
+      try { logStream?.write(d); } catch { /* ignore */ }
+    };
+
     rt.process.stderr?.on("data", (d: Buffer) => {
       stderrTail = (stderrTail + d.toString()).slice(-4000);
+      logWrite(d);
     });
-    rt.process.stdout?.resume(); // drain the stdio monitor so it can't block
+    rt.process.stdout?.on("data", (d: Buffer) => {
+      logWrite(d);
+    });
 
     rt.process.on("error", (err: NodeJS.ErrnoException) => {
       logger.error({ err, vm: vm.id }, "QEMU process error");
+      closeLog(`===== QEMU spawn error: ${err.message} =====\n`);
       rt.state = "error";
       rt.lastError = `Failed to run QEMU: ${err.message}`;
       rt.process = null;
@@ -226,6 +274,7 @@ export function startVm(vm: VmRecord): StartResult {
     });
     rt.process.on("exit", (code) => {
       const ranMs = Date.now() - launchedAt;
+      closeLog(`===== QEMU exited code=${code} after ${Math.round(ranMs / 1000)}s =====\n`);
       logger.info({ code, ranMs, vm: vm.id }, "QEMU process exited");
       // A non-zero exit, or any exit within seconds of launch, is a failed
       // boot — mark it as an error with the stderr tail so the user sees why.

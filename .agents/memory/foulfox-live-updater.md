@@ -48,3 +48,10 @@ first-run re-runs fully from the top so failing fast before its chown block is s
 - **FF_HOME sticky-bit**: residual parent-rename TOCTOU (needs prior `foulfox` RCE on a
   single-user appliance). Complete fix = root-owned sticky-bit (1777) FF_HOME, deferred
   for on-hardware lightdm/X kiosk validation (black-screen risk > the vector it closes).
+
+## Automatic updates (added Aug 2026)
+`foulfox-update-check.timer` → `foulfox-update-autocheck` (root) runs `patcher check` every ~30min and kicks `apply` when available. Policy lives in the wrapper; safety stays in the patcher.
+- **Quarantine invariant:** any release failing post-flip verification is recorded in `$UPDATES_DIR/rejected`; `check` reports it as status `"held"` (available=false) so the timer can't reapply a bad build every tick. Manual `apply` bypasses (human retry); a successful apply or a NEW manifest version clears it.
+- `fetch_manifest()` (primary GitHub release download → mirror) is shared by check AND apply so both make the same availability decision — check-only-primary starved auto-updates on GitHub-blocked devices.
+- Opt-out: `FOULFOX_AUTO_UPDATE=0`; wrapper also honors `FOULFOX_NET_QUIET_SECONDS`.
+- Deferred (task proposed then cancelled by user): manifest signature verification — unattended root apply still trusts the https manifest.

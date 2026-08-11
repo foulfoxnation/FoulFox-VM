@@ -40,7 +40,7 @@ router.get("/session/info", async (req: Request, res: Response) => {
   } catch {
     caps = {
       totalRamGb: 0, cpuCount: 0, totalDiskGb: 0, freeDiskGb: 0,
-      accelerator: { accel: "none", hardware: false, reason: "unknown" },
+      accelerator: { accel: "tcg", hardware: false, reason: "unknown" },
       platform: process.platform, arch: process.arch,
       qemuSystem: false, qemuImg: false, appleHost: false,
       osSupport: {} as any,

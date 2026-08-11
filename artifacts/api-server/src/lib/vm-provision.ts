@@ -284,7 +284,7 @@ async function provisionWindows(vmId: string, signal?: AbortSignal): Promise<voi
   if (!isoPath) {
     const frontloadRoot = process.env["FRONTLOAD_STAGING_DIR"]
       ? path.join(process.env["FRONTLOAD_STAGING_DIR"], "isos")
-      : path.join(DATA_DIR, ".odysseus-vms", "frontload", "isos");
+      : path.join(VM_DATA_DIR, "frontload", "isos");
     try {
       if (fs.existsSync(frontloadRoot)) {
         const candidates = fs.readdirSync(frontloadRoot)

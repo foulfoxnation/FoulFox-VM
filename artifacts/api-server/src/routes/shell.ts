@@ -5,8 +5,8 @@ import * as pty from "node-pty";
 import { spawn } from "child_process";
 import { URL } from "url";
 import { ExecShellCommandBody, ExecShellCommandResponse } from "@workspace/api-zod";
-import { getVm, getRuntime } from "../lib/vm-registry";
-import { buildSshArgs } from "../lib/vm-ssh";
+import { getVm, getRuntime, listVms, vmDiskDir } from "../lib/vm-registry";
+import { buildSshArgs, runSshCommand } from "../lib/vm-ssh";
 import { logger } from "../lib/logger";
 import { SHELL_SESSION_TOKEN } from "../lib/shell-token";
 import path from "path";
@@ -273,16 +273,90 @@ router.get("/shell/history", (_req: Request, res: Response) => {
 });
 
 // ── SSE: Live log stream ──────────────────────────────────────────────────────
-// Streams the last 100 lines of system journal (or odysseus log as fallback),
-// then continues tailing new output. Accepts both the shell session token and
-// view-only session tokens so the session portal can connect with either.
-router.get("/shell/logs/stream", (req: Request, res: Response) => {
+// Whole-system log viewer. Sources:
+//   system            host/FoulFox OS journal (default; all services)
+//   unit:<name>       a single systemd unit's journal (foulfox-api, ollama…)
+//   odysseus          the Odysseus service log file
+//   vm:<id>:qemu      QEMU output for a VM (persisted to <vm dir>/qemu.log)
+//   vm:<id>:windows   Windows guest System+Application event logs over SSH
+// Accepts both the shell session token and view-only session tokens so the
+// session portal can connect with either.
+
+function logStreamAuthed(req: Request): boolean {
   const { isValidViewToken } = require("../lib/view-tokens");
   const provided = (req.headers["x-shell-token"] ?? req.query["token"]) as string | undefined;
-  if (provided !== SHELL_SESSION_TOKEN && !isValidViewToken(provided)) {
+  return provided === SHELL_SESSION_TOKEN || isValidViewToken(provided);
+}
+
+const UNIT_NAME_RE = /^[A-Za-z0-9@:._-]{1,128}$/;
+// Units worth offering even when systemctl can't be queried (dev container).
+const KNOWN_UNITS = [
+  "foulfox-api.service",
+  "foulfox-prepare.service",
+  "foulfox-kiosk.service",
+  "foulfox-vm-autostart.service",
+  "foulfox-update-check.service",
+  "ollama.service",
+];
+
+// REST: list the log sources this machine can stream right now.
+router.get("/shell/logs/sources", (req: Request, res: Response) => {
+  if (!logStreamAuthed(req)) {
     res.status(401).json({ error: "Missing or invalid session token" });
     return;
   }
+  const sources: Array<{ id: string; label: string; group: string }> = [
+    { id: "system", label: "System journal (all services)", group: "FoulFox OS" },
+  ];
+
+  const finish = () => {
+    sources.push({ id: "odysseus", label: "Odysseus service log", group: "FoulFox OS" });
+    for (const vm of listVms()) {
+      sources.push({ id: `vm:${vm.id}:qemu`, label: `${vm.name} — QEMU / console`, group: "Virtual machines" });
+      if ((vm.osKind ?? "").toLowerCase().includes("win")) {
+        sources.push({ id: `vm:${vm.id}:windows`, label: `${vm.name} — Windows event log`, group: "Virtual machines" });
+      }
+    }
+    res.json({ sources });
+  };
+
+  // Discover live foulfox/ollama units; fall back to the static list.
+  const child = spawn("systemctl", ["list-units", "--all", "--no-legend", "--plain", "foulfox-*.service", "ollama*.service"], { stdio: ["ignore", "pipe", "ignore"] });
+  let out = "";
+  let settled = false;
+  const settle = (units: string[]) => {
+    if (settled) return;
+    settled = true;
+    for (const u of units) {
+      if (UNIT_NAME_RE.test(u)) sources.push({ id: `unit:${u}`, label: u.replace(/\.service$/, ""), group: "Services" });
+    }
+    finish();
+  };
+  const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* ignore */ } settle(KNOWN_UNITS); }, 2000);
+  child.stdout?.on("data", (d: Buffer) => { out += d.toString(); });
+  child.on("error", () => { clearTimeout(timer); settle(KNOWN_UNITS); });
+  child.on("close", (code) => {
+    clearTimeout(timer);
+    const units = out.split("\n").map((l) => l.trim().split(/\s+/)[0]).filter((u): u is string => !!u && u.endsWith(".service"));
+    settle(code === 0 && units.length > 0 ? units : KNOWN_UNITS);
+  });
+});
+
+// Cap concurrent log streams so a leaked/shared token can't fork-bomb the
+// appliance with per-connection journalctl/tail/ssh processes.
+const MAX_LOG_STREAMS = 16;
+let activeLogStreams = 0;
+
+router.get("/shell/logs/stream", (req: Request, res: Response) => {
+  if (!logStreamAuthed(req)) {
+    res.status(401).json({ error: "Missing or invalid session token" });
+    return;
+  }
+  if (activeLogStreams >= MAX_LOG_STREAMS) {
+    res.status(429).json({ error: "Too many concurrent log streams — close other viewers first" });
+    return;
+  }
+  const source = typeof req.query["source"] === "string" ? req.query["source"] : "system";
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -290,41 +364,160 @@ router.get("/shell/logs/stream", (req: Request, res: Response) => {
   res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering on appliance
   res.flushHeaders();
 
-  // Try journalctl first; fall back to tailing the Odysseus log file.
-  const cmd =
-    "journalctl -f -n 100 --output=short-precise 2>/dev/null || " +
-    "tail -f ${ODYSSEUS_DATA_DIR:-/tmp}/odysseus.log 2>/dev/null || " +
-    "echo 'No log source available — run on FoulFox OS for full logs'";
-
-  const child = spawn("bash", ["-c", cmd], { stdio: ["ignore", "pipe", "pipe"] });
-
-  const sendLine = (line: string, level = "info") => {
-    const payload = JSON.stringify({ ts: Date.now(), level, text: line.trimEnd() });
-    res.write(`data: ${payload}\n\n`);
+  const sendLine = (line: string, level = "info", ts?: number) => {
+    const payload = JSON.stringify({ ts: ts ?? Date.now(), level, text: line.trimEnd() });
+    try { res.write(`data: ${payload}\n\n`); } catch { /* client gone */ }
   };
-
-  const onData = (chunk: Buffer, level: string) => {
-    const lines = chunk.toString().split("\n");
-    for (const line of lines) {
-      if (line.trim()) sendLine(line, level);
-    }
-  };
-
-  child.stdout?.on("data", (c: Buffer) => onData(c, "info"));
-  child.stderr?.on("data", (c: Buffer) => onData(c, "warn"));
 
   // Keep the connection alive while idle.
+  activeLogStreams++;
   const heartbeat = setInterval(() => { try { res.write(": ping\n\n"); } catch { /* ignore */ } }, 15_000);
-
+  let cleaned = false;
+  const cleanups: Array<() => void> = [() => clearInterval(heartbeat)];
   const cleanup = () => {
-    clearInterval(heartbeat);
-    try { child.kill("SIGTERM"); } catch { /* ignore */ }
+    if (cleaned) return; // idempotent — close/error/exit can all fire
+    cleaned = true;
+    activeLogStreams--;
+    for (const fn of cleanups.splice(0)) { try { fn(); } catch { /* ignore */ } }
   };
   req.on("close", cleanup);
   req.on("error", cleanup);
-  child.on("exit", () => {
+
+  // ── Child-process based sources (journal / file tails) ──
+  // detached:true puts bash + its foreground journalctl/tail into their own
+  // process group so teardown (kill(-pid)) can't leave orphans behind.
+  const streamCommand = (cmd: string) => {
+    const child = spawn("bash", ["-c", cmd], { stdio: ["ignore", "pipe", "pipe"], detached: true });
+    const onData = (chunk: Buffer, level: string) => {
+      for (const line of chunk.toString().split("\n")) {
+        if (line.trim()) sendLine(line, level);
+      }
+    };
+    child.stdout?.on("data", (c: Buffer) => onData(c, "info"));
+    child.stderr?.on("data", (c: Buffer) => onData(c, "warn"));
+    child.on("error", () => { cleanup(); try { res.end(); } catch { /* ignore */ } });
+    child.on("exit", () => { cleanup(); try { res.end(); } catch { /* ignore */ } });
+    cleanups.push(() => {
+      const pid = child.pid;
+      if (!pid) return;
+      try { process.kill(-pid, "SIGTERM"); } catch { try { child.kill("SIGTERM"); } catch { /* ignore */ } }
+      // Force-kill the group after a grace period if anything survived.
+      const force = setTimeout(() => { try { process.kill(-pid, "SIGKILL"); } catch { /* ignore */ } }, 3000);
+      force.unref?.();
+    });
+  };
+
+  // ── Windows guest event-log polling over SSH ──
+  const streamWindowsEvents = (vmId: string) => {
+    // Cursor starts 15 minutes back so the first batch shows recent history.
+    // Queries overlap the cursor by 5s and dedupe on (log, record id) so
+    // same-timestamp events are never dropped between polls.
+    let cursor = new Date(Date.now() - 15 * 60 * 1000);
+    let lastErr = "";
+    let inFlight = false;
+    let stopped = false;
+    const seen = new Set<string>();
+    const seenOrder: string[] = [];
+    const remember = (key: string): boolean => {
+      if (seen.has(key)) return false;
+      seen.add(key);
+      seenOrder.push(key);
+      if (seenOrder.length > 2000) { const old = seenOrder.splice(0, 1000); for (const k of old) seen.delete(k); }
+      return true;
+    };
+    const poll = async () => {
+      if (inFlight || stopped) return;
+      const vm = getVm(vmId);
+      if (!vm) { sendLine(`VM '${vmId}' no longer exists`, "error"); return; }
+      const rt = getRuntime(vmId);
+      if (rt.state !== "running") {
+        if (lastErr !== "not-running") { sendLine(`${vm.name} is not running — waiting for it to start…`, "warn"); lastErr = "not-running"; }
+        return;
+      }
+      inFlight = true;
+      try {
+        const startIso = new Date(cursor.getTime() - 5000).toISOString(); // inclusive overlap
+        const ps =
+          `Get-WinEvent -FilterHashtable @{LogName=@('System','Application');StartTime=[datetime]::Parse('${startIso}')} -MaxEvents 300 -ErrorAction SilentlyContinue | ` +
+          `Sort-Object TimeCreated | ForEach-Object { '{0:o}\u0001{1}\u0001{2}\u0001{3}\u0001{4}\u0001{5}' -f $_.TimeCreated,$_.LevelDisplayName,$_.ProviderName,$_.LogName,$_.RecordId,(($_.Message | Out-String) -replace \"\\r?\\n\",' ').Trim() }`;
+        const encoded = Buffer.from(ps, "utf16le").toString("base64");
+        const r = await runSshCommand(vm, `powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`, 25_000);
+        if (stopped) return; // viewer disconnected while the SSH poll ran
+        if (!r.ok) {
+          const msg = (r.stderr || "SSH command failed").trim().split("\n")[0] ?? "SSH command failed";
+          if (msg !== lastErr) { sendLine(`Windows event log unavailable: ${msg}`, "warn"); lastErr = msg; }
+          return;
+        }
+        lastErr = "";
+        let newest = cursor;
+        for (const line of r.stdout.split("\n")) {
+          const parts = line.split("\u0001");
+          if (parts.length < 6) continue;
+          const when = new Date(parts[0] ?? "");
+          if (isNaN(when.getTime())) continue;
+          if (!remember(`${parts[3]}#${parts[4]}`)) continue; // (log, record id) dedupe
+          if (when > newest) newest = when;
+          const lvlName = (parts[1] ?? "").toLowerCase();
+          const level = lvlName.includes("error") || lvlName.includes("critical") ? "error" : lvlName.includes("warn") ? "warn" : "info";
+          sendLine(`[${parts[2]}] ${parts[5]}`, level, when.getTime());
+        }
+        cursor = newest;
+      } finally {
+        inFlight = false;
+      }
+    };
+    sendLine("Streaming Windows System + Application event logs (polled every 10s over SSH)…", "info");
+    void poll();
+    const interval = setInterval(() => { void poll(); }, 10_000);
+    cleanups.push(() => { stopped = true; clearInterval(interval); });
+  };
+
+  // ── Route the requested source ──
+  // NB: `tail -F` on a missing file retries forever without exiting, so `||
+  // echo fallback` chains never fire. Test availability explicitly, print an
+  // honest status line, and let `tail -F` pick the file up when it appears.
+  if (source === "system") {
+    streamCommand(
+      'if command -v journalctl >/dev/null 2>&1 && journalctl -n 1 >/dev/null 2>&1; then ' +
+      '  journalctl -f -n 100 --output=short-precise; ' +
+      'else ' +
+      '  LOG="${ODYSSEUS_DATA_DIR:-/tmp}/odysseus.log"; ' +
+      '  [ -e "$LOG" ] || echo "System journal unavailable on this host — following Odysseus log ($LOG) when it appears"; ' +
+      '  tail -F -n 100 "$LOG" 2>/dev/null; ' +
+      'fi',
+    );
+  } else if (source === "odysseus") {
+    streamCommand(
+      'LOG="${ODYSSEUS_DATA_DIR:-/tmp}/odysseus.log"; ' +
+      '[ -e "$LOG" ] || echo "Odysseus log file not found yet ($LOG) — waiting for it to appear"; ' +
+      'tail -F -n 200 "$LOG" 2>/dev/null',
+    );
+  } else if (source.startsWith("unit:")) {
+    const unit = source.slice(5);
+    if (!UNIT_NAME_RE.test(unit)) { sendLine(`Invalid unit name`, "error"); res.end(); return; }
+    streamCommand(
+      'if command -v journalctl >/dev/null 2>&1 && journalctl -n 1 >/dev/null 2>&1; then ' +
+      `  journalctl -f -n 100 --output=short-precise -u ${unit}; ` +
+      'else ' +
+      '  echo "journalctl unavailable on this host (per-service logs require FoulFox OS)"; ' +
+      'fi',
+    );
+  } else if (/^vm:[A-Za-z0-9._-]+:qemu$/.test(source)) {
+    const vmId = source.split(":")[1]!;
+    const vm = getVm(vmId);
+    if (!vm) { sendLine(`Unknown VM '${vmId}'`, "error"); res.end(); return; }
+    const logPath = path.join(vmDiskDir(vmId), "qemu.log");
+    streamCommand(
+      `LOG=${JSON.stringify(logPath)}; ` +
+      '[ -e "$LOG" ] || echo "No QEMU log yet — it appears after the VM is started"; ' +
+      'tail -F -n 300 "$LOG" 2>/dev/null',
+    );
+  } else if (/^vm:[A-Za-z0-9._-]+:windows$/.test(source)) {
+    streamWindowsEvents(source.split(":")[1]!);
+  } else {
+    sendLine(`Unknown log source '${source}'`, "error");
     try { res.end(); } catch { /* ignore */ }
-  });
+  }
 });
 
 // ── WebSocket handler ─────────────────────────────────────────────────────────
