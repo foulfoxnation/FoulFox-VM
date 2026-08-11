@@ -420,6 +420,11 @@ export function autostartApps(): void {
       startApp(a.id).catch((err) =>
         logger.error({ err, appId: a.id }, "autostart failed"),
       );
+    } else if (a.manifest.autostart) {
+      // Never skip silently — this is the only breadcrumb explaining why an
+      // autostart app isn't running (e.g. its install failed on-device).
+      logger.warn({ appId: a.id, status: a.status, error: a.error ?? undefined },
+        "autostart skipped: app not in 'installed' state");
     }
   }
 }

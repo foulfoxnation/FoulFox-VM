@@ -75,8 +75,17 @@ def _http_post(url: str, payload: Any = None, timeout: float = 10.0) -> tuple[in
     """POST url with JSON body → (http_status, body_bytes).  Raises on connection error."""
     import urllib.request, urllib.error
     data = json.dumps(payload or {}).encode()
-    req  = urllib.request.Request(url, data=data,
-                                  headers={"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json"}
+    # State-changing api-server endpoints (e.g. the generate-keys self-heal)
+    # require auth. Send our internal bridge token — the api-server accepts it
+    # as X-Odysseus-Internal-Token. Without this every self-heal POST is
+    # rejected with "invalid token" and the check can never actually heal.
+    try:
+        from core.middleware import INTERNAL_TOOL_TOKEN, INTERNAL_TOOL_HEADER
+        headers[INTERNAL_TOOL_HEADER] = INTERNAL_TOOL_TOKEN
+    except Exception:
+        pass
+    req  = urllib.request.Request(url, data=data, headers=headers)
     try:
         r = urllib.request.urlopen(req, timeout=timeout)
         return r.status, r.read(131072)

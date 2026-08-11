@@ -533,7 +533,13 @@ router.get("/shell/logs/stream", (req: Request, res: Response) => {
     const appId = source.slice(4);
     const { getApp } = require("../lib/app-registry");
     const { runLog, runSummary } = require("../lib/app-runner");
-    if (!getApp(appId)) { sendLine(`Unknown app '${appId}'`, "error"); try { res.end(); } catch { /* ignore */ } return; }
+    const appRec = getApp(appId);
+    if (!appRec) { sendLine(`Unknown app '${appId}'`, "error"); try { res.end(); } catch { /* ignore */ } return; }
+    // Surface install/registry state up front — a stopped app with an empty
+    // run buffer is undiagnosable without knowing WHY it never started
+    // (e.g. install failed, so autostart skipped it silently).
+    sendLine(`Registry: status=${appRec.status} autostart=${appRec.manifest?.autostart ?? false} version=${appRec.version}`, "info");
+    if (appRec.error) sendLine(`Registry error: ${appRec.error}`, "error");
     let last: string[] = [];
     const emitNew = () => {
       const lines = runLog(appId).split("\n").filter((l: string) => l.length > 0);
