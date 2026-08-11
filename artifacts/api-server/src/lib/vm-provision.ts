@@ -1140,7 +1140,7 @@ export async function backfillVmSshKeys(): Promise<void> {
 // The private key stays on the host (referenced by vm.config.sshKeyPath); the
 // public key is injected into the guest at provision time. Returns null if
 // ssh-keygen is unavailable so provisioning degrades to password/manual setup.
-async function ensureVmSshKey(vmId: string): Promise<{ keyPath: string; pubKey: string } | null> {
+export async function ensureVmSshKey(vmId: string): Promise<{ keyPath: string; pubKey: string } | null> {
   const keyPath = path.join(vmDiskDir(vmId), "agent_ed25519");
   const pubPath = keyPath + ".pub";
   try {

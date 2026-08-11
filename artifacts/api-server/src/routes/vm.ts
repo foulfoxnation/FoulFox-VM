@@ -35,7 +35,7 @@ import {
   isOsKind,
   type OsKind,
 } from "../lib/vm-capabilities";
-import { startProvisioning, startCloneProvisioning, subscribeProvisioning, cancelProvisioning, buildWindowsDevSetupScript } from "../lib/vm-provision";
+import { startProvisioning, startCloneProvisioning, subscribeProvisioning, cancelProvisioning, buildWindowsDevSetupScript, ensureVmSshKey } from "../lib/vm-provision";
 import { authMode, checkAgentHealth, runSshCommand, runScpPull, runScpPush } from "../lib/vm-ssh";
 import { OS_IMAGES, toPublic, getOsImage, isOsImageId } from "../lib/os-catalog";
 import { logger } from "../lib/logger";
@@ -568,6 +568,28 @@ router.post("/vm/:id/provision/cancel", (req: Request, res: Response) => {
   const vm = requireVm(req, res); if (!vm) return;
   cancelProvisioning(vm.id);
   res.json({ success: true });
+});
+
+// POST /vm/:id/generate-keys — generate (or regenerate) the per-VM ed25519 SSH
+// keypair used by the agent to authenticate into the Windows guest.
+// backfillVmSshKeys() runs once at api-server boot, but VMs created after boot
+// (or installs that pre-date the key backfill feature) will have sshKeyPath=null.
+// This endpoint lets the diagnostic tool trigger key generation on demand.
+router.post("/vm/:id/generate-keys", async (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  try {
+    const result = await ensureVmSshKey(vm.id);
+    if (!result) {
+      return res.status(500).json({ error: "ssh-keygen unavailable — install openssh-client" });
+    }
+    // Persist the key path in the VM config so subsequent list calls show authMode=key
+    updateVmConfig(vm.id, { sshKeyPath: result.keyPath });
+    logger.info({ vm: vm.id, keyPath: result.keyPath }, "Agent SSH keypair generated on demand");
+    return res.json({ sshKeyPath: result.keyPath, pubKey: result.pubKey });
+  } catch (err) {
+    logger.error({ err, vm: vm.id }, "generate-keys failed");
+    return res.status(500).json({ error: String(err) });
+  }
 });
 
 // GET /vm/:id/dev-setup — download a PowerShell script that installs the full

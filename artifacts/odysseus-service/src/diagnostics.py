@@ -860,8 +860,9 @@ async def check_model_configured() -> dict:
     setup_complete = bool(suite.get("setup_complete")) if isinstance(suite, dict) else False
     if models_by_role:
         desc = ", ".join(f"{r}={m}" for r, m in list(models_by_role.items())[:3])
+        extra = f" (+{configured_count - 3} more)" if configured_count > 3 else ""
         return _ok("model_config", CAT_AWARE, "AI Model Configuration",
-                   f"{configured_count}/3 role(s) configured: {desc}", models_by_role)
+                   f"{configured_count} role(s) configured{extra}: {desc}", models_by_role)
     if setup_complete:
         return _ok("model_config", CAT_AWARE, "AI Model Configuration",
                    f"Suite setup complete with {len(members)} role(s) — model info requires crew member lookup",
@@ -1250,27 +1251,55 @@ async def check_ollama_running_model() -> dict:
 CAT_BROWSER = "browser_automation"
 
 async def check_firefox_cdp() -> dict:
-    """Firefox CDP on :9223 — agent's secondary browser target.
-    Firefox ESR may not implement /json/version — try /json/list and /json too."""
-    for path in ["/json/version", "/json/list", "/json"]:
-        data = await _json_get(f"http://127.0.0.1:9223{path}", timeout=3)
-        if data is not None:
-            if isinstance(data, list):
-                browser = data[0].get("title", "Firefox") if data else "Firefox"
-            else:
-                browser = data.get("Browser", data.get("title", "Firefox"))
-            return _ok("firefox_cdp", CAT_BROWSER, "Firefox Browser CDP",
-                       f"CDP available on :9223{path} — {browser}",
-                       {"path": path, "browser": browser, "response": data})
+    """Firefox remote debugger on :9223.
+
+    Firefox ESR uses FRDP (Firefox Remote Debug Protocol) — a WebSocket-only
+    protocol. Unlike Chrome/Chromium, it does NOT expose HTTP REST endpoints
+    (/json/version, /json/list). Trying those always times out even when Firefox
+    is healthy and accepting debugger connections.
+
+    Strategy: check whether the port is listening + confirm the process has
+    --remote-debugging-port=9223 in its cmdline. That is sufficient evidence
+    the debugger is ready.
+    """
+    _, ss_out, _ = await _cmd(
+        ["bash", "-c", "ss -tlnp 2>/dev/null | grep ':9223'"])
+    port_listening = bool(ss_out.strip())
     _, ps_out, _ = await _cmd(
+        ["bash", "-c",
+         "ps aux | grep -E 'firefox' | grep 'remote-debugging-port' | grep -v grep | head -3"])
+    process_found = bool(ps_out.strip())
+
+    if port_listening and process_found:
+        # Extract pid from ss output for extra confidence
+        pid_hint = ""
+        if "pid=" in ss_out:
+            pid_hint = ss_out.split("pid=")[-1].split(",")[0].split(")")[0]
+        return _ok("firefox_cdp", CAT_BROWSER, "Firefox Browser CDP",
+                   "Firefox remote debugger ready on :9223 (FRDP/WebSocket protocol — "
+                   "HTTP /json endpoints not applicable to Firefox ESR)",
+                   {"port_listening": True, "process_running": True,
+                    "pid": pid_hint or "see ps",
+                    "note": "Connect via WebSocket ws://127.0.0.1:9223"})
+
+    if port_listening and not process_found:
+        return _warn("firefox_cdp", CAT_BROWSER, "Firefox Browser CDP",
+                     "Port :9223 is listening but no firefox process with --remote-debugging-port found",
+                     {"port_listening": True, "process_found": False,
+                      "ss_out": ss_out.strip()[:300]})
+
+    # Port not listening — check if Firefox is even running
+    _, all_fx, _ = await _cmd(
         ["bash", "-c", "ps aux | grep -E 'firefox' | grep -v grep | head -3"])
-    _, port_check, _ = await _cmd(
-        ["bash", "-c", "ss -tlnp 2>/dev/null | grep ':9223' || echo 'port not listening'"])
+    if all_fx.strip():
+        return _warn("firefox_cdp", CAT_BROWSER, "Firefox Browser CDP",
+                     "Firefox is running but NOT with --remote-debugging-port=9223 "
+                     "— kiosk startup script may need updating",
+                     {"port_listening": False, "firefox_running": True,
+                      "processes": all_fx.strip()[:400]})
     return _warn("firefox_cdp", CAT_BROWSER, "Firefox Browser CDP",
-                 "CDP not responding on :9223 — Firefox running but CDP not accepting connections "
-                 "(may still be initializing, or CDP disabled)",
-                 {"port_9223": port_check.strip(),
-                  "firefox_procs": ps_out[:500] or "none found"})
+                 "Firefox not running — remote debugger unavailable",
+                 {"port_listening": False, "firefox_running": False})
 
 async def check_app_runtime_ports() -> dict:
     """Check if any FoulFox apps are running on their dedicated port range (27000–27199)."""
@@ -1404,26 +1433,55 @@ async def check_kiosk_session() -> dict:
                   "firefox_procs": ps_ff[:200] or "none"})
 
 async def check_foulfox_patcher() -> dict:
-    """Live updater (foulfox-patcher) status — is the OTA stack healthy?"""
-    data = await _json_get(f"{ODYSSEUS}/api/os/patcher/status", timeout=4)
-    if data is None:
-        data = await _json_get(f"{API}/api/os/patcher/status", timeout=4)
-    if data is None:
-        return _unk("patcher", CAT_SERVICES, "Live Updater (OTA Patcher)",
-                    "Patcher status endpoint unavailable",
-                    {"tried": [f"{ODYSSEUS}/api/os/patcher/status",
-                               f"{API}/api/os/patcher/status"]})
-    state = data.get("state", data.get("status", "?"))
-    pending = data.get("pending_update", data.get("pendingUpdate", False))
-    version = data.get("current_version", data.get("version", "?"))
-    if state == "ok" or state == "idle":
-        msg = f"Patcher healthy — v{version}"
+    """Live updater (foulfox-patcher) status — is the OTA stack healthy?
+
+    The patcher runs as a one-shot systemd service + timer (no long-running HTTP
+    server), so there is no REST endpoint to query. Check via systemctl instead.
+    """
+    # Primary: check the patcher timer/service via systemctl
+    rc_timer, timer_out, _ = await _cmd(
+        ["bash", "-c", "systemctl is-active foulfox-patcher.timer 2>&1; "
+                       "systemctl status foulfox-patcher.timer 2>&1 | "
+                       "grep -E 'Trigger:|Last trigger:|Active:|Result:' | head -5"])
+    rc_svc, svc_out, _ = await _cmd(
+        ["bash", "-c",
+         "systemctl show foulfox-patcher.service "
+         "--property=ActiveState,Result,ExecMainStatus 2>&1 | head -5"])
+    # Check if the patcher script itself exists
+    patcher_exists = os.path.isfile("/usr/local/sbin/foulfox-patcher.sh")
+    staging_dir    = os.path.join(DATA_DIR, "update-staging")
+    staging_exists = os.path.isdir(staging_dir)
+    pending = False
+    if staging_exists:
+        try:
+            pending = bool(os.listdir(staging_dir))
+        except Exception:
+            pass
+    if not patcher_exists:
+        return _warn("patcher", CAT_SERVICES, "Live Updater (OTA Patcher)",
+                     "Patcher script not found at /usr/local/sbin/foulfox-patcher.sh — "
+                     "OTA system not installed (pre-build-138 OS)",
+                     {"patcher_script": False, "staging_dir": staging_exists})
+    timer_active = "active" in timer_out.lower() or "running" in timer_out.lower()
+    if timer_active:
+        msg = "OTA patcher timer active"
         if pending:
             return _warn("patcher", CAT_SERVICES, "Live Updater (OTA Patcher)",
-                         msg + " (update pending — will apply on next boot)", data)
-        return _ok("patcher", CAT_SERVICES, "Live Updater (OTA Patcher)", msg, data)
-    return _warn("patcher", CAT_SERVICES, "Live Updater (OTA Patcher)",
-                 f"Patcher state: {state}", data)
+                         msg + " — staged update ready (will apply on next boot)",
+                         {"timer": timer_out[:300], "pending_in_staging": True})
+        return _ok("patcher", CAT_SERVICES, "Live Updater (OTA Patcher)",
+                   msg + " — no pending updates",
+                   {"timer": timer_out[:300], "staging_dir_empty": not pending,
+                    "service_state": svc_out[:200]})
+    # Timer not active — patcher installed but not scheduled (normal on disk installs
+    # if the timer was not enabled; the patcher still runs at boot via the service unit)
+    last_result = "success" if "Result=success" in svc_out or "ExecMainStatus=0" in svc_out else "?"
+    return _ok("patcher", CAT_SERVICES, "Live Updater (OTA Patcher)",
+               "OTA patcher installed — timer not active (runs at boot via service unit); "
+               f"last run: {last_result}",
+               {"patcher_script": True, "timer_active": False,
+                "service_last_result": svc_out[:200] or "unavailable",
+                "pending_updates": pending})
 
 
 # ════════════════════════════════════════════════════════════════════════════════
