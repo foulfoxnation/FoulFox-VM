@@ -168,7 +168,7 @@ async def do_send_report_to_replit(
     """Generate a full system report and send it to Replit via browser automation."""
     try:
         from src.diagnostics import build_report
-        from src.host_browser import paste_report_to_replit
+        from src.host_browser import paste_report_via_firefox
     except ImportError as e:
         return {"error": f"Module unavailable: {e}", "exit_code": 1}
 
@@ -195,9 +195,10 @@ async def do_send_report_to_replit(
     if extra_context:
         markdown = f"**Additional context from agent:**\n{extra_context}\n\n---\n\n{markdown}"
 
-    # 2. Send via browser
+    # 2. Send via browser — Firefox (port 9223) physically navigates to the URL,
+    #    opens the AI chat panel, types the report, and clicks submit.
     try:
-        result = await paste_report_to_replit(markdown, replit_url)
+        result = await paste_report_via_firefox(markdown, replit_url)
     except Exception as exc:
         return {"error": f"Browser automation failed: {exc}", "exit_code": 1}
 
