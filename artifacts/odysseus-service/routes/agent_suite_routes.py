@@ -23,10 +23,33 @@ def setup_agent_suite_routes() -> APIRouter:
 
     @router.get("/state")
     def get_state(request: Request):
-        """Return the caller's active suite (or null) plus the role catalog."""
+        """Return the caller's active suite (or null) plus the role catalog.
+
+        Each member in suite.members[] is enriched with model and endpoint_id
+        from the linked CrewMember so diagnostics can see what model each role
+        uses without a separate lookup.
+        """
+        from core.database import SessionLocal, CrewMember as _CrewMember
         owner = effective_user(request)
+        suite_dict = agent_suite.get_suite(owner)
+        if suite_dict and isinstance(suite_dict.get("members"), list):
+            db = SessionLocal()
+            try:
+                for m in suite_dict["members"]:
+                    crew_id = m.get("crew_member_id")
+                    if crew_id:
+                        crew = db.query(_CrewMember).filter(
+                            _CrewMember.id == crew_id
+                        ).first()
+                        if crew:
+                            m["model"]       = getattr(crew, "model", None)
+                            m["endpoint_id"] = getattr(crew, "endpoint_id", None)
+            except Exception:
+                pass
+            finally:
+                db.close()
         return {
-            "suite": agent_suite.get_suite(owner),
+            "suite": suite_dict,
             "roles": agent_suite.role_catalog(),
         }
 

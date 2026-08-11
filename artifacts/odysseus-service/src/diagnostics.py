@@ -26,8 +26,8 @@ def _r(id: str, cat: str, name: str, status: str, detail: str, value: Any = None
 def _ok(id, cat, name, detail, value=None):    return _r(id, cat, name, "ok",      detail, value)
 def _warn(id, cat, name, detail, value=None):  return _r(id, cat, name, "warn",    detail, value)
 def _fail(id, cat, name, detail, value=None):  return _r(id, cat, name, "fail",    detail, value)
-def _unk(id, cat, name, detail="check could not run"):
-    return _r(id, cat, name, "unknown", detail, None)
+def _unk(id, cat, name, detail="check could not run", value=None):
+    return _r(id, cat, name, "unknown", detail, value)
 
 # ── Subprocess helper ───────────────────────────────────────────────────────────
 
@@ -246,7 +246,19 @@ async def check_tts() -> dict:
                f"Active — provider: {provider}", data)
 
 async def check_audio_hw() -> dict:
-    rc, pactl_out, pactl_err = await _cmd(["pactl", "info"])
+    # PulseAudio runs as a user-mode daemon. The diagnostic service may not
+    # inherit XDG_RUNTIME_DIR or DBUS_SESSION_BUS_ADDRESS from the graphical
+    # session, so pactl reports "Connection refused" even when the daemon is up.
+    # Derive the uid at runtime and set all three env vars explicitly.
+    uid_rc, uid_out, _ = await _cmd(["id", "-u"])
+    uid = uid_out.strip() if uid_rc == 0 and uid_out.strip().isdigit() else "1000"
+    xdg = f"/run/user/{uid}"
+    pactl_env = (
+        f"XDG_RUNTIME_DIR={xdg} "
+        f"DBUS_SESSION_BUS_ADDRESS=unix:path={xdg}/bus "
+        f"PULSE_RUNTIME_PATH={xdg}/pulse "
+    )
+    rc, pactl_out, _ = await _cmd(["bash", "-c", f"{pactl_env}pactl info 2>&1"])
     if rc == 0 and "Server Name" in pactl_out:
         sink = "unknown"
         for line in pactl_out.splitlines():
@@ -254,21 +266,23 @@ async def check_audio_hw() -> dict:
                 sink = line.split(":", 1)[1].strip()
         return _ok("audio_hw", CAT_VOICE, "Audio Hardware (PulseAudio)",
                    f"Running — default sink: {sink}",
-                   {"sink": sink, "pactl_info": pactl_out[:600]})
-    # Capture rich failure context
+                   {"sink": sink, "xdg": xdg, "pactl_snippet": pactl_out[:400]})
+    # Socket unreachable — collect rich context for debugging
     _, ps_out, _ = await _cmd(["bash", "-c", "ps aux | grep -i pulse | grep -v grep"])
-    _, svc_out, svc_err = await _cmd(
-        ["bash", "-c", "systemctl --user status pulseaudio.service 2>&1 | tail -15 || "
-                       "journalctl --user -u pulseaudio.service -n 10 --no-pager 2>&1 | tail -10"])
-    _, svc_sys, _ = await _cmd(
-        ["bash", "-c", "systemctl status pulseaudio.service 2>&1 | tail -10 || true"])
+    _, socket_ls, _ = await _cmd(
+        ["bash", "-c", f"ls -la {xdg}/pulse/ 2>/dev/null || echo '(directory missing)'"])
+    _, journal, _ = await _cmd(
+        ["bash", "-c",
+         "journalctl _SYSTEMD_USER_UNIT=pulseaudio.service -n 10 --no-pager 2>&1 | tail -10 || "
+         "journalctl -u pulseaudio -n 10 --no-pager 2>&1 | tail -10"])
     return _fail("audio_hw", CAT_VOICE, "Audio Hardware (PulseAudio)",
-                 "PulseAudio not running — microphone and speaker unavailable",
+                 "PulseAudio socket unreachable — microphone and speaker unavailable",
                  {"pactl_rc": rc,
-                  "pactl_error": (pactl_err or pactl_out or "no output")[:400],
-                  "pulse_processes": ps_out[:300] or "none found",
-                  "user_service_status": svc_out[:500] or svc_err[:300] or "unavailable",
-                  "system_service_status": svc_sys[:300] or "unavailable"})
+                  "pactl_output": pactl_out[:400] or "no output",
+                  "xdg_runtime": xdg,
+                  "pulse_socket_dir": socket_ls[:300],
+                  "pulse_processes": ps_out[:400] or "none found",
+                  "journal": journal[:400] or "unavailable"})
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -408,36 +422,54 @@ async def check_windows_vm_display() -> dict:
 CAT_AGENT_VM = "agent_vm_socket"
 
 async def check_agent_vm_key() -> dict:
-    """Check whether an SSH key is provisioned for the Windows VM."""
-    keys_dir = os.path.join(DATA_DIR, "keys")
-    if not os.path.isdir(keys_dir):
-        # Check if backfillVmSshKeys generated keys in a VM-specific location
+    """Check whether an SSH key is provisioned for the Windows VM.
+
+    Keys are stored per-VM at <vmDiskDir>/<vm_id>/agent_ed25519 — NOT at
+    DATA_DIR/keys. The VM API exposes sshKeyPath on each VM config after
+    backfillVmSshKeys() runs at api-server boot.
+    """
+    vms = await _get_vms()
+    vm_dir_root = os.path.join(DATA_DIR, ".odysseus-vms")
+    keyed_vms, unkeyed_vms = [], []
+    for vm in (vms or []):
+        vm_id   = vm.get("id", "")
+        key_path = vm.get("sshKeyPath")
+        auth_mode = vm.get("authMode", "none")
+        # Primary: sshKeyPath from API config
+        if key_path and os.path.isfile(key_path):
+            keyed_vms.append({"id": vm_id, "key_path": key_path, "auth_mode": auth_mode})
+            continue
+        # Fallback: check the known default location
+        candidate = os.path.join(vm_dir_root, vm_id, "agent_ed25519")
+        if os.path.isfile(candidate):
+            keyed_vms.append({"id": vm_id, "key_path": candidate,
+                              "auth_mode": auth_mode, "source": "fallback_scan"})
+            continue
+        unkeyed_vms.append({"id": vm_id, "auth_mode": auth_mode,
+                             "sshKeyPath_from_api": key_path,
+                             "checked_path": candidate})
+
+    if keyed_vms:
+        desc = ", ".join(f"'{v['id']}'" for v in keyed_vms[:3])
+        return _ok("agent_vm_key", CAT_AGENT_VM, "Agent→VM SSH Key",
+                   f"SSH key provisioned for {desc}",
+                   {"keyed_vms": keyed_vms, "unkeyed_vms": unkeyed_vms})
+
+    if vms is None:
+        # VM list not available — do a filesystem scan as last resort
         _, find_out, _ = await _cmd(
-            ["bash", "-c", f"find {DATA_DIR} -name 'id_ed25519' 2>/dev/null | head -10"])
+            ["bash", "-c",
+             f"find {DATA_DIR} -name 'agent_ed25519' 2>/dev/null | head -10"])
         return _fail("agent_vm_key", CAT_AGENT_VM, "Agent→VM SSH Key",
-                     f"No keys directory at {keys_dir} — VM agent auth not set up",
-                     {"data_dir": DATA_DIR,
-                      "keys_dir_exists": False,
-                      "ed25519_search": find_out[:400] or "none found"})
-    # Deep scan: keys may be in subdirs (one per VM id)
-    all_entries = []
-    for entry in os.listdir(keys_dir):
-        full = os.path.join(keys_dir, entry)
-        if os.path.isdir(full):
-            sub = os.listdir(full)
-            all_entries.append(f"{entry}/: {sub}")
-            if "id_ed25519" in sub:
-                return _ok("agent_vm_key", CAT_AGENT_VM, "Agent→VM SSH Key",
-                           f"SSH key provisioned for VM '{entry}'",
-                           {"vm_id": entry, "keys_dir": keys_dir})
-        elif os.path.isfile(full) and ("ed25519" in entry or entry.endswith(".pem")):
-            all_entries.append(entry)
-            return _ok("agent_vm_key", CAT_AGENT_VM, "Agent→VM SSH Key",
-                       f"Key file present: {entry}", {"file": entry})
+                     "VM list unavailable — cannot check SSH key status",
+                     {"filesystem_scan": find_out[:400] or "none found"})
+
     return _fail("agent_vm_key", CAT_AGENT_VM, "Agent→VM SSH Key",
-                 "Keys directory exists but empty — backfillVmSshKeys() has not run yet",
-                 {"keys_dir": keys_dir,
-                  "directory_contents": all_entries or ["(empty)"]})
+                 "No SSH key found for any VM — backfillVmSshKeys() hasn't completed. "
+                 "Restart the api-server to trigger key generation.",
+                 {"unkeyed_vms": unkeyed_vms,
+                  "vm_dir_root": vm_dir_root,
+                  "action": "sudo systemctl restart foulfox-api"})
 
 async def check_agent_vm_shell() -> dict:
     """Check if the VM shell bridge endpoint is configured and working."""
@@ -613,14 +645,24 @@ async def check_voice_model() -> dict:
         return _unk("voice_model", CAT_VOICE_AGENT, "AI Model for Voice Responses",
                     "Agent suite endpoint unavailable",
                     {"endpoint": f"{ODYSSEUS}/api/agent-suite/state"})
-    suite = data.get("suite", {})
-    chat_model = (suite.get("chat") or {}).get("model") or (suite.get("worker") or {}).get("model")
-    if chat_model:
+    suite = data.get("suite") or {}
+    # Model lives on the CrewMember linked via each member's crew_member_id.
+    # The /state response now includes model on each member after the route fix.
+    members = suite.get("members", [])
+    models_by_role = {m.get("role"): m.get("model") for m in members if m.get("model")}
+    if models_by_role:
+        desc = ", ".join(f"{r}={m}" for r, m in list(models_by_role.items())[:3])
         return _ok("voice_model", CAT_VOICE_AGENT, "AI Model for Voice Responses",
-                   f"Model configured: {chat_model}", {"model": chat_model, "suite_state": suite})
+                   f"Models configured: {desc}", {"models": models_by_role})
+    if suite.get("setup_complete"):
+        return _ok("voice_model", CAT_VOICE_AGENT, "AI Model for Voice Responses",
+                   "Suite setup complete — model provisioned",
+                   {"setup_complete": True, "members": len(members)})
     return _fail("voice_model", CAT_VOICE_AGENT, "AI Model for Voice Responses",
-                 "No AI model set — voice responses cannot be generated; configure a model in Setup",
-                 {"suite_state": suite})
+                 "Setup wizard not complete — voice agent has no model assigned. "
+                 "Open Setup, pick Ollama, select llama3.1:8b-instruct-q4_K_M",
+                 {"setup_complete": False, "members": len(members),
+                  "hint": "Settings → Setup → pick Local Ollama → llama3.1:8b-instruct-q4_K_M"})
 
 async def check_chromium_cdp() -> dict:
     data = await _json_get("http://127.0.0.1:9222/json/version", timeout=3)
@@ -810,23 +852,27 @@ async def check_model_configured() -> dict:
         return _unk("model_config", CAT_AWARE, "AI Model Configuration",
                     "Unexpected response format from agent suite endpoint",
                     {"response_type": type(data).__name__, "raw": str(data)[:300]})
-    suite = data.get("suite", {}) or {}
-    if not isinstance(suite, dict):
-        suite = {}
-    models = {
-        role: (info.get("model") if isinstance(info, dict) else None)
-        for role, info in suite.items()
-    }
-    configured = {r: m for r, m in models.items() if m}
-    if not configured:
-        return _fail("model_config", CAT_AWARE, "AI Model Configuration",
-                     "No AI model configured — complete the Setup wizard to pick a model",
-                     {"full_suite_state": data,
-                      "all_roles": list(suite.keys()),
-                      "hint": "Run Setup, pick Ollama → llama3.1:8b-instruct-q4_K_M"})
-    desc = ", ".join(f"{r}={m}" for r, m in list(configured.items())[:3])
-    return _ok("model_config", CAT_AWARE, "AI Model Configuration",
-               f"{len(configured)}/3 role(s) configured: {desc}", configured)
+    suite = data.get("suite") or {}
+    # Members array contains {role, crew_member_id, model (if route is enriched)}
+    members = suite.get("members", []) if isinstance(suite, dict) else []
+    models_by_role = {m.get("role"): m.get("model") for m in members if m.get("model")}
+    configured_count = len(models_by_role)
+    setup_complete = bool(suite.get("setup_complete")) if isinstance(suite, dict) else False
+    if models_by_role:
+        desc = ", ".join(f"{r}={m}" for r, m in list(models_by_role.items())[:3])
+        return _ok("model_config", CAT_AWARE, "AI Model Configuration",
+                   f"{configured_count}/3 role(s) configured: {desc}", models_by_role)
+    if setup_complete:
+        return _ok("model_config", CAT_AWARE, "AI Model Configuration",
+                   f"Suite setup complete with {len(members)} role(s) — model info requires crew member lookup",
+                   {"setup_complete": True, "roles": [m.get("role") for m in members]})
+    return _fail("model_config", CAT_AWARE, "AI Model Configuration",
+                 "Setup wizard not complete — no model assigned to any role. "
+                 "Open Setup and pick Ollama → llama3.1:8b-instruct-q4_K_M",
+                 {"setup_complete": False,
+                  "member_count": len(members),
+                  "roles_present": [m.get("role") for m in members],
+                  "hint": "Settings → Setup → Local Ollama → llama3.1:8b-instruct-q4_K_M"})
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -848,21 +894,23 @@ async def check_subagent_tool() -> dict:
 
 async def check_subagent_usage() -> dict:
     """Has the agent actually used sub-agents? Look at MTM task history."""
-    data = await _json_get(f"{ODYSSEUS}/api/mtm/state")
+    data = await _json_get(f"{ODYSSEUS}/api/mtm/tasks", timeout=4)
     if data is None:
         return _unk("sa_usage", CAT_SA_SPEED, "Sub-Agent Usage History",
-                    "MTM unavailable — cannot read task history")
-    tasks = data.get("tasks", [])
+                    "MTM tasks endpoint unavailable — cannot read task history",
+                    {"tried": f"{ODYSSEUS}/api/mtm/tasks"})
+    tasks = data if isinstance(data, list) else data.get("tasks", [])
     sub_tasks = [t for t in tasks
                  if str(t.get("kind", "")).lower() in ("worker", "explorer", "subagent")
                     or t.get("parent_id")]
     if sub_tasks:
         return _ok("sa_usage", CAT_SA_SPEED, "Sub-Agent Usage History",
                    f"{len(sub_tasks)} sub-agent task(s) in history — agent is delegating work",
-                   len(sub_tasks))
+                   {"count": len(sub_tasks), "total_tasks": len(tasks)})
     return _warn("sa_usage", CAT_SA_SPEED, "Sub-Agent Usage History",
-                 "No sub-agent tasks in history — agent has been working solo; "
-                 "ask it to break large tasks into parallel sub-agents")
+                 "No sub-agent tasks in history yet — ask the agent to break a large task "
+                 "into parallel sub-agents to see them here",
+                 {"total_tasks": len(tasks)})
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1119,10 +1167,13 @@ async def check_nvidia_inference() -> dict:
                 {"OLLAMA_NUM_GPU": gpu_val, "nvidia_smi": gpu_name})
 
 async def check_ollama_config() -> dict:
-    """Read the Ollama tuning variables from foulfox.env."""
+    """Read Ollama tuning variables from foulfox.env, ollama-hw.env, AND os.environ.
+    The running environment has vars loaded from foulfox.env at boot, so even if the
+    file predates the tuning additions, the live env vars reveal the effective config."""
     env_path = "/etc/foulfox/foulfox.env"
     hw_env   = "/etc/foulfox/ollama-hw.env"
     config = {}
+    # 1. Read from env files (static config)
     for path in [env_path, hw_env]:
         if os.path.isfile(path):
             try:
@@ -1134,11 +1185,19 @@ async def check_ollama_config() -> dict:
                             config[k] = v.strip().strip('"')
             except Exception:
                 pass
+    # 2. Overlay with live environment (higher priority — what Ollama actually sees)
+    for k, v in os.environ.items():
+        if k.startswith("OLLAMA_"):
+            config[k] = v
+    # 3. Probe the Ollama API for its running config
+    ollama_config = await _json_get("http://127.0.0.1:11434/api/version", timeout=3)
     if not config:
         return _warn("ollama_cfg", CAT_PERF, "Ollama Tuning Config",
-                     f"No Ollama tuning vars found (looked in {env_path}, {hw_env})",
-                     {"env_exists": os.path.isfile(env_path),
-                      "hw_env_exists": os.path.isfile(hw_env)})
+                     "No OLLAMA_* vars found in config files or environment "
+                     "(pre-build-142 OS — update to latest ISO to get GPU/memory tuning)",
+                     {"env_file_exists": os.path.isfile(env_path),
+                      "hw_env_exists": os.path.isfile(hw_env),
+                      "ollama_version": ollama_config or "not reachable"})
     ctx = config.get("OLLAMA_CONTEXT_LENGTH", "default")
     fa  = config.get("OLLAMA_FLASH_ATTENTION", "?")
     kv  = config.get("OLLAMA_KV_CACHE_TYPE", "?")
@@ -1191,18 +1250,27 @@ async def check_ollama_running_model() -> dict:
 CAT_BROWSER = "browser_automation"
 
 async def check_firefox_cdp() -> dict:
-    """Firefox CDP on :9223 — agent's secondary browser target."""
-    data = await _json_get("http://127.0.0.1:9223/json/version", timeout=3)
-    if data is not None:
-        browser = data.get("Browser", "?")
-        return _ok("firefox_cdp", CAT_BROWSER, "Firefox Browser CDP",
-                   f"CDP available on :9223 — {browser}",
-                   {"browser": browser, "full": data})
+    """Firefox CDP on :9223 — agent's secondary browser target.
+    Firefox ESR may not implement /json/version — try /json/list and /json too."""
+    for path in ["/json/version", "/json/list", "/json"]:
+        data = await _json_get(f"http://127.0.0.1:9223{path}", timeout=3)
+        if data is not None:
+            if isinstance(data, list):
+                browser = data[0].get("title", "Firefox") if data else "Firefox"
+            else:
+                browser = data.get("Browser", data.get("title", "Firefox"))
+            return _ok("firefox_cdp", CAT_BROWSER, "Firefox Browser CDP",
+                       f"CDP available on :9223{path} — {browser}",
+                       {"path": path, "browser": browser, "response": data})
     _, ps_out, _ = await _cmd(
         ["bash", "-c", "ps aux | grep -E 'firefox' | grep -v grep | head -3"])
+    _, port_check, _ = await _cmd(
+        ["bash", "-c", "ss -tlnp 2>/dev/null | grep ':9223' || echo 'port not listening'"])
     return _warn("firefox_cdp", CAT_BROWSER, "Firefox Browser CDP",
-                 "CDP not available on :9223 — Firefox may not be running or not started with --remote-debugging-port",
-                 {"firefox_procs": ps_out[:400] or "none found"})
+                 "CDP not responding on :9223 — Firefox running but CDP not accepting connections "
+                 "(may still be initializing, or CDP disabled)",
+                 {"port_9223": port_check.strip(),
+                  "firefox_procs": ps_out[:500] or "none found"})
 
 async def check_app_runtime_ports() -> dict:
     """Check if any FoulFox apps are running on their dedicated port range (27000–27199)."""
