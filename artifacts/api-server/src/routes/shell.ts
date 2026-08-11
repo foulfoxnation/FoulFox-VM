@@ -290,12 +290,16 @@ function logStreamAuthed(req: Request): boolean {
 
 const UNIT_NAME_RE = /^[A-Za-z0-9@:._-]{1,128}$/;
 // Units worth offering even when systemctl can't be queried (dev container).
+// Must match the unit files shipped in os/live-build includes.chroot.
 const KNOWN_UNITS = [
   "foulfox-api.service",
   "foulfox-prepare.service",
   "foulfox-kiosk.service",
   "foulfox-vm-autostart.service",
   "foulfox-update-check.service",
+  "foulfox-seed-ollama.service",
+  "foulfox-gpu-fallback.service",
+  "odysseus-service.service",
   "ollama.service",
 ];
 
@@ -311,6 +315,14 @@ router.get("/shell/logs/sources", (req: Request, res: Response) => {
 
   const finish = () => {
     sources.push({ id: "odysseus", label: "Odysseus service log", group: "FoulFox OS" });
+    // Installed apps (Voice Forge etc.) run under the app runner, so their
+    // output is NOT in the journal — expose each app's run log directly.
+    try {
+      const { listApps } = require("../lib/app-registry");
+      for (const app of listApps()) {
+        sources.push({ id: `app:${app.id}`, label: `${app.name ?? app.id} (app)`, group: "Apps" });
+      }
+    } catch { /* app registry unavailable */ }
     for (const vm of listVms()) {
       sources.push({ id: `vm:${vm.id}:qemu`, label: `${vm.name} — QEMU / console`, group: "Virtual machines" });
       if ((vm.osKind ?? "").toLowerCase().includes("win")) {
@@ -514,6 +526,36 @@ router.get("/shell/logs/stream", (req: Request, res: Response) => {
     );
   } else if (/^vm:[A-Za-z0-9._-]+:windows$/.test(source)) {
     streamWindowsEvents(source.split(":")[1]!);
+  } else if (/^app:[A-Za-z0-9._-]+$/.test(source)) {
+    // Installed-app run log (in-memory ring buffer in the app runner). Dump
+    // the current buffer, then poll for new lines every 2s.
+    const appId = source.slice(4);
+    const { getApp } = require("../lib/app-registry");
+    const { runLog, runSummary } = require("../lib/app-runner");
+    if (!getApp(appId)) { sendLine(`Unknown app '${appId}'`, "error"); try { res.end(); } catch { /* ignore */ } return; }
+    let last: string[] = [];
+    const emitNew = () => {
+      const lines = runLog(appId).split("\n").filter((l: string) => l.length > 0);
+      // Find where the previous snapshot's tail sits in the new buffer so ring
+      // trimming doesn't cause replays; emit only what follows it.
+      let startIdx = 0;
+      if (last.length > 0) {
+        const anchor = last[last.length - 1]!;
+        for (let i = lines.length - 1; i >= 0; i--) {
+          if (lines[i] === anchor) { startIdx = i + 1; break; }
+        }
+      }
+      for (const line of lines.slice(startIdx)) {
+        const lower = line.toLowerCase();
+        sendLine(line, lower.includes("error") ? "error" : lower.includes("warn") ? "warn" : "info");
+      }
+      last = lines;
+    };
+    const summary = runSummary(appId);
+    sendLine(`App '${appId}' is ${summary.phase ?? "not running"} — showing its run log`, "info");
+    emitNew();
+    const interval = setInterval(emitNew, 2000);
+    cleanups.push(() => clearInterval(interval));
   } else {
     sendLine(`Unknown log source '${source}'`, "error");
     try { res.end(); } catch { /* ignore */ }
