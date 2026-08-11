@@ -21,6 +21,7 @@ import powerRouter from "./power";
 import serviceRestartRouter from "./service-restart";
 import windowsRouter from "./windows";
 import updatesMirrorRouter from "./updates";
+import sessionRouter from "./session";
 
 const router: IRouter = Router();
 
@@ -46,5 +47,6 @@ router.use(setupHealRouter);
 router.use(appsRouter);
 router.use(odysseusLifecycleRouter);
 router.use(odysseusProxyRouter);
+router.use(sessionRouter);
 
 export default router;

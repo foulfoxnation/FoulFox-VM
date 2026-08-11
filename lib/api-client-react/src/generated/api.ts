@@ -24,12 +24,15 @@ import type {
   DriveInfo,
   FrontloadInput,
   FrontloadResult,
+  GetSessionInfoParams,
   HealthStatus,
   ListDirectoryParams,
+  SessionInfo,
   ShellCommandInput,
   ShellCommandResult,
   ShellHistoryEntry,
   SnapshotInput,
+  ViewToken,
   VmActionResult,
   VmConfig,
   VmConfigUpdate,
@@ -778,6 +781,160 @@ export function useGetShellHistory<TData = Awaited<ReturnType<typeof getShellHis
 
 
 
+
+export const getGetSessionInfoUrl = (params?: GetSessionInfoParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/session/info?${stringifiedParams}` : `/api/session/info`
+}
+
+/**
+ * @summary Get machine info, active VMs and display tokens for the session portal
+ */
+export const getSessionInfo = async (params?: GetSessionInfoParams, options?: RequestInit): Promise<SessionInfo> => {
+
+  return customFetch<SessionInfo>(getGetSessionInfoUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSessionInfoQueryKey = (params?: GetSessionInfoParams,) => {
+    return [
+    `/api/session/info`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetSessionInfoQueryOptions = <TData = Awaited<ReturnType<typeof getSessionInfo>>, TError = ErrorType<unknown>>(params?: GetSessionInfoParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSessionInfo>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSessionInfoQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSessionInfo>>> = ({ signal }) => getSessionInfo(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSessionInfo>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSessionInfoQueryResult = NonNullable<Awaited<ReturnType<typeof getSessionInfo>>>
+export type GetSessionInfoQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get machine info, active VMs and display tokens for the session portal
+ */
+
+export function useGetSessionInfo<TData = Awaited<ReturnType<typeof getSessionInfo>>, TError = ErrorType<unknown>>(
+ params?: GetSessionInfoParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSessionInfo>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSessionInfoQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getCreateViewTokenUrl = () => {
+
+
+
+
+  return `/api/session/view-token`
+}
+
+/**
+ * @summary Generate a shareable read-only session token (valid 2 hours)
+ */
+export const createViewToken = async ( options?: RequestInit): Promise<ViewToken> => {
+
+  return customFetch<ViewToken>(getCreateViewTokenUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getCreateViewTokenMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createViewToken>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createViewToken>>, TError,void, TContext> => {
+
+const mutationKey = ['createViewToken'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createViewToken>>, void> = () => {
+
+
+          return  createViewToken(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateViewTokenMutationResult = NonNullable<Awaited<ReturnType<typeof createViewToken>>>
+
+    export type CreateViewTokenMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Generate a shareable read-only session token (valid 2 hours)
+ */
+export const useCreateViewToken = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createViewToken>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createViewToken>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getCreateViewTokenMutationOptions(options));
+    }
 
 export const getListDirectoryUrl = (params?: ListDirectoryParams,) => {
   const normalizedParams = new URLSearchParams();

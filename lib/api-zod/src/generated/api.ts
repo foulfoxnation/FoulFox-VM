@@ -153,6 +153,45 @@ export const GetShellHistoryResponse = zod.array(GetShellHistoryResponseItem)
 
 
 /**
+ * @summary Get machine info, active VMs and display tokens for the session portal
+ */
+export const GetSessionInfoQueryParams = zod.object({
+  "token": zod.coerce.string().optional().describe('View-only session token (alternative to X-Shell-Token header)')
+})
+
+export const GetSessionInfoResponse = zod.object({
+  "machineName": zod.string(),
+  "platform": zod.string(),
+  "arch": zod.string(),
+  "uptimeSeconds": zod.number().nullish(),
+  "totalRamGb": zod.number().optional(),
+  "cpuCount": zod.number().optional(),
+  "totalDiskGb": zod.number().optional(),
+  "freeDiskGb": zod.number().optional(),
+  "vms": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "osKind": zod.string(),
+  "state": zod.string(),
+  "displayToken": zod.string().nullish()
+})),
+  "logsStreamUrl": zod.string().describe('SSE endpoint for streaming logs'),
+  "shellWsPath": zod.string().describe('WebSocket path for interactive shell (append ?token=...)'),
+  "displayWsPath": zod.string().describe('WebSocket path for VM display (append ?vm=...&token=...)')
+})
+
+
+/**
+ * @summary Generate a shareable read-only session token (valid 2 hours)
+ */
+export const CreateViewTokenResponse = zod.object({
+  "token": zod.string(),
+  "expiresAt": zod.string().describe('ISO 8601 expiry timestamp'),
+  "sessionUrl": zod.string().describe('Full shareable URL for this session')
+})
+
+
+/**
  * @summary List entries in a directory
  */
 export const ListDirectoryQueryParams = zod.object({

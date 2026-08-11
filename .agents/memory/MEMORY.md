@@ -61,3 +61,4 @@
 - [FoulFox desktop apps](foulfox-desktop-apps.md) — launch path for Firefox/Chromium/Discord over the kiosk; chromium needs --disable-gpu-compositing everywhere; rc.xml rules must ban fullscreen traps.
 - [App UI proxy Origin 403](app-ui-origin-403.md) — Vite crossorigin module scripts send shell's Origin; app AUTH_MODE=local guard rejects it → 403 on all assets; fix = delete fwdHeaders["origin"] in app-ui.ts.
 - [Odysseus sidebar in iframe](odysseus-sidebar-iframe.md) — narrow iframe (<768px) triggers mobile path; resize loop causes blinking; fix = re-entry guard + debounce + clear _wasAutoCollapsed on explicit close + skip force-right when embedded.
+- [FoulFox Session Portal](session-portal.md) — auth chain, backend endpoints, view-token store, noVNC pin, x11vnc, console tab in main shell.

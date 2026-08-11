@@ -272,6 +272,61 @@ router.get("/shell/history", (_req: Request, res: Response) => {
   res.json(shellHistory.slice(0, 50));
 });
 
+// ── SSE: Live log stream ──────────────────────────────────────────────────────
+// Streams the last 100 lines of system journal (or odysseus log as fallback),
+// then continues tailing new output. Accepts both the shell session token and
+// view-only session tokens so the session portal can connect with either.
+router.get("/shell/logs/stream", (req: Request, res: Response) => {
+  const { isValidViewToken } = require("../lib/view-tokens");
+  const provided = (req.headers["x-shell-token"] ?? req.query["token"]) as string | undefined;
+  if (provided !== SHELL_SESSION_TOKEN && !isValidViewToken(provided)) {
+    res.status(401).json({ error: "Missing or invalid session token" });
+    return;
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering on appliance
+  res.flushHeaders();
+
+  // Try journalctl first; fall back to tailing the Odysseus log file.
+  const cmd =
+    "journalctl -f -n 100 --output=short-precise 2>/dev/null || " +
+    "tail -f ${ODYSSEUS_DATA_DIR:-/tmp}/odysseus.log 2>/dev/null || " +
+    "echo 'No log source available — run on FoulFox OS for full logs'";
+
+  const child = spawn("bash", ["-c", cmd], { stdio: ["ignore", "pipe", "pipe"] });
+
+  const sendLine = (line: string, level = "info") => {
+    const payload = JSON.stringify({ ts: Date.now(), level, text: line.trimEnd() });
+    res.write(`data: ${payload}\n\n`);
+  };
+
+  const onData = (chunk: Buffer, level: string) => {
+    const lines = chunk.toString().split("\n");
+    for (const line of lines) {
+      if (line.trim()) sendLine(line, level);
+    }
+  };
+
+  child.stdout?.on("data", (c: Buffer) => onData(c, "info"));
+  child.stderr?.on("data", (c: Buffer) => onData(c, "warn"));
+
+  // Keep the connection alive while idle.
+  const heartbeat = setInterval(() => { try { res.write(": ping\n\n"); } catch { /* ignore */ } }, 15_000);
+
+  const cleanup = () => {
+    clearInterval(heartbeat);
+    try { child.kill("SIGTERM"); } catch { /* ignore */ }
+  };
+  req.on("close", cleanup);
+  req.on("error", cleanup);
+  child.on("exit", () => {
+    try { res.end(); } catch { /* ignore */ }
+  });
+});
+
 // ── WebSocket handler ─────────────────────────────────────────────────────────
 export function handleShellWebSocket(ws: WebSocket, req: IncomingMessage) {
   const reqUrl = new URL(req.url ?? "/", "http://localhost");

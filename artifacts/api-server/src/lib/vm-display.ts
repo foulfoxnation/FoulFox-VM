@@ -6,6 +6,7 @@ import { URL } from "url";
 import { WebSocketServer, type WebSocket } from "ws";
 import { getVm, getRuntime } from "./vm-registry";
 import { isValidVmId } from "./vm-capabilities";
+import { isValidViewToken } from "./view-tokens";
 import { logger } from "./logger";
 
 const DISPLAY_PATH = "/api/vm/ws/display";
@@ -78,9 +79,12 @@ export function createDisplayWss(server: Server): WebSocketServer {
       return;
     }
     const vm = getVm(vmId);
-    // Per-VM display token gates access; constant-time compare avoids leaks.
-    if (!vm || !token || !timingSafeEqual(token, vm.displayToken)) {
-      logger.warn({ vm: vmId }, "Rejected display WebSocket upgrade: invalid per-VM token");
+    // Accept either the per-VM display token OR a valid view-only session token.
+    const tokenValid =
+      (vm && token && timingSafeEqual(token, vm.displayToken)) ||
+      isValidViewToken(token);
+    if (!tokenValid) {
+      logger.warn({ vm: vmId }, "Rejected display WebSocket upgrade: invalid per-VM or view token");
       netSocket.write("HTTP/1.1 401 Unauthorized\r\nContent-Length: 12\r\n\r\nUnauthorized");
       netSocket.destroy();
       return;

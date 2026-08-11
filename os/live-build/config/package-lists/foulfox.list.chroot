@@ -161,6 +161,13 @@ tint2
 # unavailable — but a minimized Discord/Firefox would be unreachable.
 wmctrl
 
+# ── Host desktop VNC ──────────────────────────────────────────────────────────
+# x11vnc: exposes the live X11 display (the kiosk desktop itself) over VNC.
+# The Session Portal connects to this via the api-server WS proxy at
+# /api/vm/ws/display (using a view or display token). Start before Chromium:
+#   x11vnc -display :0 -localhost -nopw -forever -bg
+x11vnc
+
 # ── Screenshots ──────────────────────────────────────────────────────────────
 # scrot: lightweight X11 screenshotter used by foulfox-screenshot (PrintScreen
 # key binding). libnotify-bin: the notify-send binary that shows the "Screenshot

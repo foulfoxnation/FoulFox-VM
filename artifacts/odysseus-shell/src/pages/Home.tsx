@@ -19,6 +19,7 @@ import { AppsTab } from "@/components/AppsTab";
 import { AgentTasksPanel } from "@/components/AgentTasksPanel";
 import { VoiceForgeWidget } from "@/components/VoiceForgeWidget";
 import { DiagnosticPanel } from "@/components/DiagnosticPanel";
+import { Terminal } from "@/components/Terminal";
 import foxLogo from "@assets/FoxQuest_Logo_1781378611335.png";
 import { useHealthCheck } from "@workspace/api-client-react";
 import { useShellToken } from "@/hooks/use-shell-token";
@@ -38,6 +39,7 @@ import {
   Sparkles,
   Activity,
   ShieldCheck,
+  SquareTerminal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -235,6 +237,11 @@ export default function Home() {
               <DiagnosticPanel />
             </div>
           </Body>
+          <Body show={activeTab === "console"}>
+            <div className="h-full flex flex-col bg-zinc-950">
+              <Terminal />
+            </div>
+          </Body>
           {vms.map((vm) => (
             <Body key={vm.id} show={activeTab === `vm:${vm.id}`}>
               <VmTab
@@ -302,6 +309,14 @@ export default function Home() {
           label="Diagnostics"
           onClick={() => setActiveTab("diagnostics")}
           testId="tab-diagnostics"
+        />
+        <TaskbarButton
+          id="console"
+          active={activeTab === "console"}
+          icon={<SquareTerminal className="h-4 w-4" />}
+          label="Console"
+          onClick={() => setActiveTab("console")}
+          testId="tab-console"
         />
 
         {/* VM buttons — one per running/stopped VM */}

@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/session-portal/"
+title = "FoulFox Session Portal"
+description = "Remote Desktop Portal for FoulFox OS — shows a live VNC display of the active VM or host desktop, an interactive bash console, a real-time log stream, and session sharing via a one-time URL token. Designed for developers and AI agents to observe and control the machine directly."
+version = "1.0.0"
+id = "artifacts/session-portal"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/session-portal/" ]
+localPort = 22594
+
+[services.development]
+run = "pnpm --filter @workspace/session-portal run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/session-portal", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/session-portal/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22594"
+BASE_PATH = "/session-portal/"

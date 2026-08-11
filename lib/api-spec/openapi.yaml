@@ -165,6 +165,39 @@ paths:
                 items:
                   $ref: "#/components/schemas/ShellHistoryEntry"
 
+  /session/info:
+    get:
+      operationId: getSessionInfo
+      tags: [session]
+      summary: Get machine info, active VMs and display tokens for the session portal
+      parameters:
+        - name: token
+          in: query
+          required: false
+          description: View-only session token (alternative to X-Shell-Token header)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session information
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionInfo"
+
+  /session/view-token:
+    post:
+      operationId: createViewToken
+      tags: [session]
+      summary: Generate a shareable read-only session token (valid 2 hours)
+      responses:
+        "200":
+          description: View-only token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ViewToken"
+
   /files/list:
     get:
       operationId: listDirectory
@@ -487,6 +520,68 @@ components:
       required:
         - source
         - error
+
+    SessionVm:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        osKind:
+          type: string
+        state:
+          type: string
+        displayToken:
+          type: ["string", "null"]
+      required: [id, name, osKind, state]
+
+    SessionInfo:
+      type: object
+      properties:
+        machineName:
+          type: string
+        platform:
+          type: string
+        arch:
+          type: string
+        uptimeSeconds:
+          type: ["integer", "null"]
+        totalRamGb:
+          type: number
+        cpuCount:
+          type: integer
+        totalDiskGb:
+          type: number
+        freeDiskGb:
+          type: number
+        vms:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionVm"
+        logsStreamUrl:
+          type: string
+          description: SSE endpoint for streaming logs
+        shellWsPath:
+          type: string
+          description: WebSocket path for interactive shell (append ?token=...)
+        displayWsPath:
+          type: string
+          description: WebSocket path for VM display (append ?vm=...&token=...)
+      required: [machineName, platform, arch, vms, logsStreamUrl, shellWsPath, displayWsPath]
+
+    ViewToken:
+      type: object
+      properties:
+        token:
+          type: string
+        expiresAt:
+          type: string
+          description: ISO 8601 expiry timestamp
+        sessionUrl:
+          type: string
+          description: Full shareable URL for this session
+      required: [token, expiresAt, sessionUrl]
 
     FrontloadResult:
       type: object

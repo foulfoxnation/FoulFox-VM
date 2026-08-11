@@ -202,11 +202,54 @@ export interface FrontloadFailure {
   error: string;
 }
 
+export interface SessionVm {
+  id: string;
+  name: string;
+  osKind: string;
+  state: string;
+  /** @nullable */
+  displayToken?: string | null;
+}
+
+export interface SessionInfo {
+  machineName: string;
+  platform: string;
+  arch: string;
+  /** @nullable */
+  uptimeSeconds?: number | null;
+  totalRamGb?: number;
+  cpuCount?: number;
+  totalDiskGb?: number;
+  freeDiskGb?: number;
+  vms: SessionVm[];
+  /** SSE endpoint for streaming logs */
+  logsStreamUrl: string;
+  /** WebSocket path for interactive shell (append ?token=...) */
+  shellWsPath: string;
+  /** WebSocket path for VM display (append ?vm=...&token=...) */
+  displayWsPath: string;
+}
+
+export interface ViewToken {
+  token: string;
+  /** ISO 8601 expiry timestamp */
+  expiresAt: string;
+  /** Full shareable URL for this session */
+  sessionUrl: string;
+}
+
 export interface FrontloadResult {
   stagingPath: string;
   copied: CopiedItem[];
   failed: FrontloadFailure[];
 }
+
+export type GetSessionInfoParams = {
+/**
+ * View-only session token (alternative to X-Shell-Token header)
+ */
+token?: string;
+};
 
 export type ListDirectoryParams = {
 /**
