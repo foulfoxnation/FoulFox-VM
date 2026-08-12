@@ -64,4 +64,5 @@
 - [FoulFox log viewer](foulfox-log-viewer.md) — where each log really lives (apps NOT in journal; QEMU→qemu.log; Windows via SSH polling) + tail -F/orphan/SSE gotchas.
 - [FoulFox diag relay](foulfox-diag-relay.md) — appliance streams viewer log sources OUT via WS to workspace sink (.local/machine-logs/); one-way; generation guard prevents orphan followers.
 - [Odysseus↔api-server bridge token](odysseus-bridge-token.md) — internal mutations need X-Odysseus-Internal-Token (env wins over file, scope header to loopback API only); missing wiring = silent 5-min self-heal 401 loop.
+- [Windows VM blank-disk gate](foulfox-vm-blank-disk.md) — "provisioning: ready" ≠ OS installed; blank qcow2 (host alloc <1GiB) + no ISO must trigger installer download, never a UEFI-shell boot.
 - [FoulFox Session Portal](session-portal.md) — auth chain, backend endpoints, view-token store, noVNC pin, x11vnc, console tab in main shell.
