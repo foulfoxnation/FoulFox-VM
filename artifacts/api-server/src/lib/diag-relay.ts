@@ -198,11 +198,37 @@ export function startDiagRelayClient(port: number): void {
       const wanted = (sources as Array<{ id: string }>).map((s) => s.id)
         .filter((id, i, arr) => arr.indexOf(id) === i)
         .slice(0, MAX_RELAY_FOLLOWERS);
+      // Backpressure queue: when the socket's send buffer is full (typical at
+      // (re)connect, when all followers dump their buffers at once), park lines
+      // instead of dropping them. Silent drops previously lost the one-line
+      // diagnostic breadcrumbs from quiet sources (e.g. an app's
+      // "Registry: status=..." line) because high-volume sources filled the
+      // buffer first — exactly the lines needed to debug a stopped app.
+      const MAX_PENDING = 2000;
+      const pending: string[] = [];
+      let flusher: NodeJS.Timeout | null = null;
+      const flush = () => {
+        while (pending.length > 0) {
+          if (gen !== generation || sock.readyState !== WebSocket.OPEN) { pending.length = 0; break; }
+          if (sock.bufferedAmount >= 512 * 1024) return; // still congested — retry next tick
+          const p = pending.shift()!;
+          try { sock.send(p); } catch { /* ignore */ }
+        }
+        if (pending.length === 0 && flusher) { clearInterval(flusher); flusher = null; }
+      };
+      followers.push({ stop: () => { if (flusher) { clearInterval(flusher); flusher = null; } pending.length = 0; } });
       for (const id of wanted) {
         followers.push(followLocalSse(port, tok, id, (e) => {
-          if (gen === generation && sock.readyState === WebSocket.OPEN && sock.bufferedAmount < 512 * 1024) {
-            try { sock.send(JSON.stringify({ source: id, ...e })); } catch { /* ignore */ }
+          if (gen !== generation || sock.readyState !== WebSocket.OPEN) return;
+          const payload = JSON.stringify({ source: id, ...e });
+          if (sock.bufferedAmount >= 512 * 1024 || pending.length > 0) {
+            // Congested: queue (drop OLDEST on overflow so fresh lines win).
+            if (pending.length >= MAX_PENDING) pending.shift();
+            pending.push(payload);
+            if (!flusher) flusher = setInterval(flush, 250);
+            return;
           }
+          try { sock.send(payload); } catch { /* ignore */ }
         }));
       }
       logger.info({ count: wanted.length, target }, "diag relay client: streaming sources");

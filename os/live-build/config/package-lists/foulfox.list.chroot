@@ -63,6 +63,11 @@ dosfstools
 # (partx/findmnt/flock come from util-linux and mkfs.ext4 from e2fsprogs, both
 # Priority: required, so they are always present in the base.)
 parted
+# ssh-keygen + ssh client — the api-server generates per-VM ed25519 agent
+# keys with ssh-keygen and logs into guests over ssh. Without this package
+# the 5-minute VM key self-heal fails forever with "ssh-keygen is not
+# installed" (a pure-Node fallback exists, but the real client is preferred).
+openssh-client
 # gdisk provides sgdisk — GPT manipulation used by foulfox-install-to-disk to
 # create the EFI + root partition table when installing to an internal disk.
 gdisk

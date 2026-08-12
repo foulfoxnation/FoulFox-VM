@@ -1115,8 +1115,6 @@ Write-Host '    Open Epic Games Launcher to install Unreal Engine.'
 `;
 }
 
-// Generate (or reuse) a dedicated ed25519 keypair for this VM's agent login.
-// The private key stays on the host (referenced by vm.config.sshKeyPath); the
 // Startup helper: generate SSH keypairs for any VMs that were provisioned
 // without one (e.g. VMs created before keygen was added, or Windows VMs whose
 // provisioning pathway didn't call ensureVmSshKey). Safe to call on every boot
@@ -1136,10 +1134,48 @@ export async function backfillVmSshKeys(): Promise<void> {
   }
 }
 
+// Pure-Node fallback for ssh-keygen: generates an ed25519 keypair and writes
+// it in OpenSSH's on-disk format (openssh-key-v1 private key + one-line
+// public key), so `ssh -i` accepts it exactly like a ssh-keygen-made key.
+function generateEd25519KeyPairOpenssh(keyPath: string, pubPath: string, comment: string): void {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  // Raw 32-byte values: JWK export gives base64url seed (d) and public (x).
+  const seed = Buffer.from((privateKey.export({ format: "jwk" }) as { d?: string }).d!, "base64url");
+  const pub = Buffer.from((publicKey.export({ format: "jwk" }) as { x?: string }).x!, "base64url");
+
+  const str = (b: Buffer | string): Buffer => {
+    const d = Buffer.isBuffer(b) ? b : Buffer.from(b, "utf8");
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(d.length, 0);
+    return Buffer.concat([len, d]);
+  };
+  const u32 = (n: number): Buffer => { const b = Buffer.alloc(4); b.writeUInt32BE(n >>> 0, 0); return b; };
+
+  const pubBlob = Buffer.concat([str("ssh-ed25519"), str(pub)]);
+  const check = crypto.randomBytes(4);
+  let priv = Buffer.concat([
+    check, check, // matching check ints = "decrypted OK" (cipher is none)
+    str("ssh-ed25519"), str(pub), str(Buffer.concat([seed, pub])), str(comment),
+  ]);
+  // Pad with 1,2,3,... to a multiple of the cipher block size (8 for "none").
+  const padLen = (8 - (priv.length % 8)) % 8;
+  priv = Buffer.concat([priv, Buffer.from(Array.from({ length: padLen }, (_, i) => i + 1))]);
+
+  const blob = Buffer.concat([
+    Buffer.from("openssh-key-v1\0", "utf8"),
+    str("none"), str("none"), str(""), // cipher, kdf, kdfoptions
+    u32(1), str(pubBlob), str(priv),
+  ]);
+  const b64 = blob.toString("base64").replace(/(.{70})/g, "$1\n").replace(/\n$/, "");
+  fs.writeFileSync(keyPath, `-----BEGIN OPENSSH PRIVATE KEY-----\n${b64}\n-----END OPENSSH PRIVATE KEY-----\n`, { mode: 0o600 });
+  fs.writeFileSync(pubPath, `ssh-ed25519 ${pubBlob.toString("base64")} ${comment}\n`);
+}
+
 // Generate (or reuse) a dedicated ed25519 keypair for this VM's agent login.
 // The private key stays on the host (referenced by vm.config.sshKeyPath); the
 // public key is injected into the guest at provision time. Returns null if
-// ssh-keygen is unavailable so provisioning degrades to password/manual setup.
+// key generation is entirely unavailable so provisioning degrades to
+// password/manual setup.
 export async function ensureVmSshKey(vmId: string): Promise<{ keyPath: string; pubKey: string } | null> {
   const keyPath = path.join(vmDiskDir(vmId), "agent_ed25519");
   const pubPath = keyPath + ".pub";
@@ -1148,7 +1184,16 @@ export async function ensureVmSshKey(vmId: string): Promise<{ keyPath: string; p
       // Clear any half-written remnants so ssh-keygen never prompts to overwrite.
       fs.rmSync(keyPath, { force: true });
       fs.rmSync(pubPath, { force: true });
-      await runTool("ssh-keygen", ["-t", "ed25519", "-N", "", "-C", `foulfox-agent@${vmId}`, "-f", keyPath]);
+      try {
+        await runTool("ssh-keygen", ["-t", "ed25519", "-N", "", "-C", `foulfox-agent@${vmId}`, "-f", keyPath]);
+      } catch (toolErr) {
+        // Disk-installed appliances built from ISOs that predate openssh-client
+        // in the package list have NO ssh-keygen, and OS packages can't be
+        // patched via app-bundle updates. Fall back to generating the keypair
+        // in pure Node (same ed25519, OpenSSH on-disk format).
+        logger.warn({ err: toolErr, vm: vmId }, "ssh-keygen unavailable — generating agent key in-process");
+        generateEd25519KeyPairOpenssh(keyPath, pubPath, `foulfox-agent@${vmId}`);
+      }
     }
     const pubKey = fs.readFileSync(pubPath, "utf-8").trim();
     try { fs.chmodSync(keyPath, 0o600); } catch { /* ignore */ }
