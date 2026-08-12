@@ -179,6 +179,9 @@ app.use("/api/browser/open", requireShellToken);
 // letting read-only GETs (capabilities/status/list/scan) through while requiring
 // the shell token for every state-changing POST (wifi connect/forget, USB
 // attach/detach, Bluetooth power/scan/pair/connect/trust/remove).
+// Hardware telemetry + benchmark results: read-only but host-topology data —
+// local shell access only, same boundary as the other hardware endpoints.
+app.use("/api/system", localhostOnly);
 app.use("/api/network", localhostOnly, requireStateChangeToken);
 app.use("/api/usb", localhostOnly, requireStateChangeToken);
 app.use("/api/bluetooth", localhostOnly, requireStateChangeToken);

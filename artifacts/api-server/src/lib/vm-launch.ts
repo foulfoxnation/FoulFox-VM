@@ -204,6 +204,7 @@ export function startVm(vm: VmRecord): StartResult {
   const args = buildQemuArgs(vm, accel);
   rt.state = "starting";
   rt.lastError = null;
+  gpuArbiter("vm-starting", vm);
 
   try {
     rt.process = spawn(bin, args, { detached: false, stdio: "pipe" });
@@ -291,6 +292,9 @@ export function startVm(vm: VmRecord): StartResult {
       }
       rt.process = null;
       rt.startTime = null;
+      // Resume Ollama only when QEMU has actually exited (not merely when a
+      // stop was requested) and no other passthrough VM still owns the GPU.
+      gpuArbiter("vm-stopped", vm);
     });
 
     // Promote to running after 3s if the process is still alive.
@@ -315,6 +319,37 @@ export function startVm(vm: VmRecord): StartResult {
       state: rt.state,
     };
   }
+}
+
+// ── GPU arbiter (appliance only, best-effort) ─────────────────────────────────
+// When a VM owns the GPU via VFIO passthrough, the host Ollama must let go of
+// VRAM first (and may resume once the VM exits). The appliance whitelists
+// exactly these two commands in sudoers; anywhere else this silently no-ops.
+export function gpuArbiter(action: "vm-starting" | "vm-stopped", vm: VmRecord): void {
+  if (!vm.config.gpuPassthrough || process.platform !== "linux") return;
+  if (!fs.existsSync("/etc/foulfox/foulfox.env")) return; // dev workspace: no-op
+  if (action === "vm-stopped") {
+    // Only resume Ollama when NO other GPU-passthrough VM is still running.
+    const stillUsingGpu = listVms().some((other) => {
+      if (other.id === vm.id || !other.config.gpuPassthrough) return false;
+      const st = getRuntime(other.id).state;
+      return st === "running" || st === "starting";
+    });
+    if (stillUsingGpu) return;
+  }
+  const verb = action === "vm-starting" ? "stop" : "start";
+  try {
+    if (action === "vm-starting") {
+      // Synchronous: QEMU must not race Ollama for VRAM — wait (bounded) for
+      // Ollama to actually release the GPU before the VM launches.
+      execSync(`sudo -n systemctl ${verb} ollama`, { stdio: "ignore", timeout: 30000 });
+    } else {
+      const p = spawn("sudo", ["-n", "systemctl", verb, "ollama"], { stdio: "ignore", detached: true });
+      p.on("error", () => { /* best-effort */ });
+      p.unref();
+    }
+    logger.info({ vm: vm.id, verb }, "GPU arbiter: handing GPU between Ollama and VM");
+  } catch { /* best-effort: sudoers rule only exists on the appliance */ }
 }
 
 export function stopVm(vm: VmRecord): StartResult {

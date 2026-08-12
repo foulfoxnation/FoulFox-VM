@@ -1,0 +1,4 @@
+# FoulFox GPU arbiter: when a VM takes the GPU via VFIO passthrough, the
+# api-server (running as foulfox) parks Ollama so VRAM is free, and resumes it
+# when the VM stops. Exactly these two commands, nothing else.
+foulfox ALL=(root) NOPASSWD: /usr/bin/systemctl stop ollama, /usr/bin/systemctl start ollama

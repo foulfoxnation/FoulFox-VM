@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -250,12 +251,24 @@ class TaskScheduler:
         self._executing_lock = asyncio.Lock()
         self._pending_notifications = []  # completed task notifications
         self._task_defer_counts = {}
-        # Parallel execution — up to 4 background tasks can run concurrently.
-        # Each task gets its own session and LLM context, so they don't
-        # interfere. The _executing set + _executing_lock prevent the same
-        # task from being double-dispatched regardless of concurrency.
-        self._run_semaphore = asyncio.Semaphore(4)
-        self._concurrency_cap = 4
+        # Parallel execution — background tasks run concurrently, scaled to the
+        # host: half the CPU threads, clamped 2–8 (a 5600's 12 threads → 6
+        # workers; a 2-core test box stays at 2). ODYSSEUS_TASK_CONCURRENCY
+        # pins an explicit value. Each task gets its own session and LLM
+        # context, so they don't interfere. The _executing set +
+        # _executing_lock prevent the same task from being double-dispatched
+        # regardless of concurrency.
+        cap = 0
+        try:
+            cap = int(os.environ.get("ODYSSEUS_TASK_CONCURRENCY", "0"))
+        except ValueError:
+            cap = 0
+        if cap >= 1:
+            cap = min(cap, 16)  # explicit override, sanity-capped
+        else:
+            cap = max(2, min(8, (os.cpu_count() or 4) // 2))
+        self._run_semaphore = asyncio.Semaphore(cap)
+        self._concurrency_cap = cap
         self._task_handles = {}
 
     def _set_run_progress(self, run_id: str, message: str):

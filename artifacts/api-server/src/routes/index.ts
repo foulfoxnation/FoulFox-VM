@@ -22,6 +22,7 @@ import serviceRestartRouter from "./service-restart";
 import windowsRouter from "./windows";
 import updatesMirrorRouter from "./updates";
 import sessionRouter from "./session";
+import systemTelemetryRouter from "./system-telemetry";
 
 const router: IRouter = Router();
 
@@ -48,5 +49,6 @@ router.use(appsRouter);
 router.use(odysseusLifecycleRouter);
 router.use(odysseusProxyRouter);
 router.use(sessionRouter);
+router.use(systemTelemetryRouter);
 
 export default router;

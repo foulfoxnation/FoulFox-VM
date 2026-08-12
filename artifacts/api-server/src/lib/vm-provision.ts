@@ -49,6 +49,11 @@ const VIRTIO_WIN_URL =
 
 const CACHE_DIR = path.join(VM_DATA_DIR, "_image-cache");
 
+// Golden base image ("vibe-coding ready" install saved by the user) per OS kind.
+export function goldenImagePath(osKind: string): string {
+  return path.join(VM_DATA_DIR, `golden-${osKind}.qcow2`);
+}
+
 // Hold VM image downloads until the post-boot internet quiet window has passed
 // (WiFi is usually still settling in the first minutes on real hardware, and a
 // half-up network turns a multi-GB download into a misleading instant failure).
@@ -300,10 +305,94 @@ async function buildCloudInitSeed(vmId: string, password: string, pubKey: string
 }
 
 // ── Windows: auto-download the official ISO + virtio drivers (hands-off) ───────────
+// Golden fast-path: clone an installed, user-saved base image instead of a
+// fresh Windows install. Returns true when the VM is fully provisioned (no
+// installer ISO, no unattend media — the cloned OS is already installed and
+// boots directly). Credentials/agent key saved alongside the golden image are
+// restored so SSH access keeps working in the clone.
+async function tryGoldenClone(vmId: string): Promise<boolean> {
+  const vm = getVm(vmId)!;
+  const diskPath = vm.config.diskPath ?? path.join(vmDiskDir(vmId), "disk.qcow2");
+  if (fs.existsSync(diskPath) && !diskLooksBlank(diskPath)) return false; // existing install wins
+  const golden = goldenImagePath("windows");
+  if (!fs.existsSync(golden) || diskLooksBlank(golden)) return false;
+
+  emit(vmId, { status: "creating-disk", progress: 10, error: null, message: "Cloning from your golden Windows image…" });
+  try {
+    fs.mkdirSync(path.dirname(diskPath), { recursive: true });
+    fs.rmSync(diskPath, { force: true }); // replace a blank stub if present
+    await runQemuImg(["convert", "-O", "qcow2", golden, diskPath]);
+    await runQemuImg(["resize", diskPath, `${vm.diskGb}G`]).catch(() => { /* keep golden size */ });
+  } catch (err) {
+    logger.warn({ vmId, err: err instanceof Error ? err.message : String(err) }, "Golden clone failed; falling back to fresh install");
+    fs.rmSync(diskPath, { force: true });
+    return false;
+  }
+
+  // Per-VM UEFI NVRAM copy (same as the fresh-install path).
+  let ovmfVarsPath: string | null = vm.config.ovmfVarsPath ?? null;
+  if (!ovmfVarsPath) {
+    const tmpl = ["/usr/share/OVMF/OVMF_VARS.fd", "/usr/share/edk2/x64/OVMF_VARS.fd"].find(fs.existsSync);
+    if (tmpl) {
+      try {
+        const destVars = path.join(vmDiskDir(vmId), "OVMF_VARS.fd");
+        fs.copyFileSync(tmpl, destVars);
+        ovmfVarsPath = destVars;
+      } catch { /* boot without persistent NVRAM */ }
+    }
+  }
+
+  // Restore the credentials + agent key the golden image was saved with — the
+  // installed guest only trusts THAT key/password, not a freshly generated one.
+  let sshUser: string | null = null;
+  let sshPassword: string | null = null;
+  let sshKeyPath: string | null = null;
+  try {
+    const cred = JSON.parse(fs.readFileSync(goldenImagePath("windows").replace(/\.qcow2$/, ".cred.json"), "utf8"));
+    sshUser = typeof cred.sshUser === "string" ? cred.sshUser : null;
+    sshPassword = typeof cred.sshPassword === "string" ? cred.sshPassword : null;
+  } catch { /* golden saved without creds */ }
+  const goldenKey = goldenImagePath("windows").replace(/\.qcow2$/, ".sshkey");
+  if (fs.existsSync(goldenKey)) {
+    try {
+      sshKeyPath = path.join(vmDiskDir(vmId), "agent_ed25519");
+      fs.copyFileSync(goldenKey, sshKeyPath);
+      fs.chmodSync(sshKeyPath, 0o600);
+      if (fs.existsSync(goldenKey + ".pub")) fs.copyFileSync(goldenKey + ".pub", sshKeyPath + ".pub");
+    } catch { sshKeyPath = null; }
+  }
+
+  updateVmConfig(vmId, {
+    diskPath,
+    ovmfVarsPath,
+    // Deliberately NO installer/unattend media: the cloned disk already has
+    // Windows installed — attaching an installer at boot priority could
+    // reinstall over it.
+    isoPath: null,
+    unattendIsoPath: null,
+    connectionMode: "ssh",
+    ...(sshUser ? { sshUser } : {}),
+    ...(sshPassword ? { sshPassword } : {}),
+    ...(sshKeyPath ? { sshKeyPath } : {}),
+  });
+  emit(vmId, {
+    status: "ready",
+    progress: 100,
+    error: null,
+    message: "Cloned from your golden Windows image — start the VM and it boots straight into the installed system (no reinstall).",
+  });
+  logger.info({ vmId }, "VM provisioned from golden image");
+  return true;
+}
+
 async function provisionWindows(vmId: string, signal?: AbortSignal): Promise<void> {
   const vm = getVm(vmId)!;
   const spec = getOsImage(vm.imageId);
   const label = spec?.label ?? "Windows";
+
+  // 0. Golden image fast-path: an installed base saved by the user beats a
+  //    from-scratch install (minutes instead of an hour, no ISO download).
+  if (await tryGoldenClone(vmId)) return;
 
   // 1. Honor a user-supplied ISO (USB frontload / VM settings) if present.
   let isoPath = vm.config.isoPath && fs.existsSync(vm.config.isoPath) ? vm.config.isoPath : null;

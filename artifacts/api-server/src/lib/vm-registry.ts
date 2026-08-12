@@ -1,4 +1,5 @@
 import fs from "fs";
+import os from "os";
 import path from "path";
 import crypto from "crypto";
 import { type ChildProcess } from "child_process";
@@ -109,12 +110,28 @@ export const DEFAULT_VM_ID = "default";
 // IMPORTANT: legacy default port preserved so existing setups keep working.
 const LEGACY_SSH_PORT = 5985;
 
+// Right-size the default VM to the host instead of one-size-fits-all.
+// Roughly half the machine goes to the guest, clamped so small test boxes
+// still boot and big machines don't starve the host AI stack:
+//   RAM  : half of total, clamped 4–16 GB
+//   vCPUs: half of threads, clamped 2–8
+// The OS first-run config (foulfox-first-run's adaptive sizing) wins via the
+// config merge when present; this only governs API-created defaults.
+export function recommendVmSize(): { ramGb: number; cpuCores: number } {
+  const totalRamGb = Math.round(os.totalmem() / (1024 ** 3));
+  const threads = os.cpus().length || 2;
+  const ramGb = Math.min(16, Math.max(4, Math.floor(totalRamGb / 2)));
+  const cpuCores = Math.min(8, Math.max(2, Math.floor(threads / 2)));
+  return { ramGb, cpuCores };
+}
+
 function defaultConfig(): VmConfigData {
+  const sized = recommendVmSize();
   return {
     isoPath: null,
     diskPath: null,
-    ramGb: 8,
-    cpuCores: 4,
+    ramGb: sized.ramGb,
+    cpuCores: sized.cpuCores,
     gpuPassthrough: null,
     connectionMode: "ssh",
     sshPort: LEGACY_SSH_PORT,

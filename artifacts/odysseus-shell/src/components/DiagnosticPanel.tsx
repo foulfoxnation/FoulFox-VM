@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { apiUrl } from "@/lib/api-url";
 import { authedFetch } from "@/lib/shell-token";
+import HardwareCard from "@/components/HardwareCard";
 import { useToast } from "@/hooks/use-toast";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -297,6 +298,7 @@ export function DiagnosticPanel() {
         {/* ── SYSTEMS TAB ──────────────────────────────────────────────── */}
         {activeTab === "systems" && (
           <div className="p-4 space-y-2">
+            <HardwareCard />
             {!hasReport && !loading && (
               <div className="py-12 text-center text-sm text-muted-foreground">
                 <Activity className="mx-auto mb-3 h-8 w-8 opacity-30" />

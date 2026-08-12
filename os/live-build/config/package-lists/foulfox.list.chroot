@@ -96,6 +96,9 @@ nvidia-driver
 firmware-misc-nonfree
 linux-headers-amd64
 
+# ── Hardware telemetry (Diagnostics tab: CPU temps, fans, voltages) ──────────
+lm-sensors
+
 # ── Graphical kiosk session ──────────────────────────────────────────────────
 xserver-xorg
 # Last-resort X drivers so a failed GPU driver can never mean "no screen":

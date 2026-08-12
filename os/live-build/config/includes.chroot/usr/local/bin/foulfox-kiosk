@@ -11,6 +11,16 @@
 [ -f /etc/foulfox/foulfox.env ] && . /etc/foulfox/foulfox.env
 export HOME=/var/lib/foulfox
 
+# ── Headless host mode ────────────────────────────────────────────────────────
+# FOULFOX_HEADLESS=1: keep the X session alive but start NO kiosk UI — no
+# browser, no VM viewer, no taskbar. The machine is driven remotely through the
+# Session Portal / shell. Sleeping (not exiting) prevents LightDM from
+# respawning the session in a tight loop.
+if [ "${FOULFOX_HEADLESS:-0}" = "1" ]; then
+  echo "foulfox-kiosk: FOULFOX_HEADLESS=1 — kiosk UI disabled, host is remote-controlled"
+  exec sleep infinity
+fi
+
 # Always-on appliance: no screen blanking or power management.
 xset s off -dpms s noblank 2>/dev/null || true
 

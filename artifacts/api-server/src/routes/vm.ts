@@ -22,6 +22,8 @@ import {
   createVm,
   deleteVm,
   updateVmConfig,
+  recommendVmSize,
+  VM_DATA_DIR,
   type VmRecord,
 } from "../lib/vm-registry";
 import { startVm, stopVm, writeMonitor } from "../lib/vm-launch";
@@ -35,7 +37,7 @@ import {
   isOsKind,
   type OsKind,
 } from "../lib/vm-capabilities";
-import { startProvisioning, startCloneProvisioning, subscribeProvisioning, cancelProvisioning, buildWindowsDevSetupScript, ensureVmSshKey, windowsNeedsInstaller } from "../lib/vm-provision";
+import { startProvisioning, startCloneProvisioning, subscribeProvisioning, cancelProvisioning, buildWindowsDevSetupScript, ensureVmSshKey, windowsNeedsInstaller, diskLooksBlank, goldenImagePath } from "../lib/vm-provision";
 import { authMode, checkAgentHealth, runSshCommand, runScpPull, runScpPush } from "../lib/vm-ssh";
 import { OS_IMAGES, toPublic, getOsImage, isOsImageId } from "../lib/os-catalog";
 import { logger } from "../lib/logger";
@@ -163,10 +165,15 @@ router.post("/vm/create", async (req: Request, res: Response) => {
     res.status(409).json({ error: "Maximum number of VMs reached." });
     return;
   }
-  const ramDefault = image?.defaultRamGb ?? (osKind === "windows" ? 4 : 2);
-  const diskDefault = image?.defaultDiskGb ?? (osKind === "windows" ? 64 : 32);
+  // Right-size defaults to the host: a Ryzen-class box with plenty of RAM/disk
+  // gets a genuinely usable Windows VM by default; a small test box stays
+  // conservative. Explicit request values and catalog image defaults still win.
+  const sized = recommendVmSize();
+  const bigDisk = caps.freeDiskGb >= 400; // room for a dev-tools Windows guest
+  const ramDefault = image?.defaultRamGb ?? (osKind === "windows" ? Math.max(4, sized.ramGb) : 2);
+  const diskDefault = image?.defaultDiskGb ?? (osKind === "windows" ? (bigDisk ? 256 : 64) : 32);
   const ramGb = clampInt(req.body?.ramGb, 1, Math.max(2, Math.floor(caps.totalRamGb * 0.5)), ramDefault);
-  const cpuCores = clampInt(req.body?.cpuCores, 1, Math.max(1, caps.cpuCount), 2);
+  const cpuCores = clampInt(req.body?.cpuCores, 1, Math.max(1, caps.cpuCount), Math.min(recommendVmSize().cpuCores, Math.max(1, caps.cpuCount)));
   const diskGb = clampInt(req.body?.diskGb, 8, 256, diskDefault);
 
   // Aggregate-resource guardrails across all VMs.
@@ -545,6 +552,97 @@ router.post("/vm/:id/snapshot/delete", async (req: Request, res: Response) => {
   if (!canRunOfflineImg(vm.id) || !vm.config.diskPath) { res.json({ success: false, message: `Stop the VM fully before deleting offline`, state: getRuntime(vm.id).state }); return; }
   const r = await runQemuImg(["snapshot", "-d", name, vm.config.diskPath]);
   res.json(r.ok ? { success: true, message: `Snapshot '${name}' deleted`, state: getRuntime(vm.id).state } : { success: false, message: r.error || "Failed to delete", state: getRuntime(vm.id).state });
+});
+
+// ── Agent coding-session snapshots ────────────────────────────────────────────
+// One call before each agent coding session: takes a live `agent-session-<ts>`
+// snapshot and prunes to the newest N so long-running appliances don't bloat
+// the qcow2. A sidecar JSON tracks names because a RUNNING VM cannot list
+// snapshots via qemu-img (delvm works over the monitor, list does not).
+const SESSION_SNAP_KEEP = 5;
+function sessionSnapLogPath(vmId: string): string {
+  return path.join(VM_DATA_DIR, `${vmId}-session-snapshots.json`);
+}
+function readSessionSnaps(vmId: string): string[] {
+  try { const v = JSON.parse(fs.readFileSync(sessionSnapLogPath(vmId), "utf8")); return Array.isArray(v) ? v.filter((s) => typeof s === "string") : []; } catch { return []; }
+}
+function writeSessionSnaps(vmId: string, names: string[]): void {
+  try { fs.mkdirSync(VM_DATA_DIR, { recursive: true }); fs.writeFileSync(sessionSnapLogPath(vmId), JSON.stringify(names)); } catch { /* best-effort */ }
+}
+
+router.post("/vm/:id/session-snapshot", (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  const name = `agent-session-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}`;
+  if (!writeMonitor(vm.id, `savevm ${name}`)) {
+    res.json({ success: false, message: "VM must be running to take a session snapshot", state: getRuntime(vm.id).state });
+    return;
+  }
+  const names = readSessionSnaps(vm.id);
+  names.push(name);
+  while (names.length > SESSION_SNAP_KEEP) {
+    const oldest = names.shift()!;
+    writeMonitor(vm.id, `delvm ${oldest}`); // best-effort prune
+  }
+  writeSessionSnaps(vm.id, names);
+  logger.info({ vm: vm.id, name }, "Agent session snapshot requested");
+  res.json({ success: true, message: `Session snapshot '${name}' requested`, name, kept: names });
+});
+
+// ── Golden image ("vibe-coding ready" base) ───────────────────────────────────
+// Saves a stopped, installed guest disk as the golden base image; future VMs of
+// the same OS clone from it instead of reinstalling from scratch.
+const goldenSavesInFlight = new Set<string>();
+router.post("/vm/:id/golden/save", async (req: Request, res: Response) => {
+  const vm = requireVm(req, res); if (!vm) return;
+  const disk = vm.config.diskPath;
+  if (!disk || !fs.existsSync(disk)) { res.status(409).json({ success: false, message: "This VM has no disk image yet." }); return; }
+  if (!canRunOfflineImg(vm.id)) { res.status(409).json({ success: false, message: `Stop the VM fully before saving a golden image (state: ${getRuntime(vm.id).state}).` }); return; }
+  if (diskLooksBlank(disk)) { res.status(409).json({ success: false, message: "This disk looks blank — install the OS first, then save it as the golden image." }); return; }
+  const dest = goldenImagePath(vm.osKind);
+  if (goldenSavesInFlight.has(dest)) { res.status(409).json({ success: false, message: "A golden image save is already in progress." }); return; }
+  goldenSavesInFlight.add(dest);
+  const tmp = `${dest}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    // convert flattens backing chains AND drops internal snapshots — the golden
+    // image is a clean standalone base.
+    const r = await runQemuImg(["convert", "-O", "qcow2", disk, tmp]);
+    if (!r.ok) { fs.rmSync(tmp, { force: true }); res.status(500).json({ success: false, message: r.error || "qemu-img convert failed" }); return; }
+    fs.renameSync(tmp, dest);
+    // Save the guest's credentials + agent key alongside the image: a clone of
+    // this install only trusts THESE, so provisioning restores them.
+    try {
+      const credPath = dest.replace(/\.qcow2$/, ".cred.json");
+      fs.writeFileSync(credPath, JSON.stringify({ sshUser: vm.config.sshUser ?? null, sshPassword: vm.config.sshPassword ?? null }), { mode: 0o600 });
+      if (vm.config.sshKeyPath && fs.existsSync(vm.config.sshKeyPath)) {
+        const keyDest = dest.replace(/\.qcow2$/, ".sshkey");
+        fs.copyFileSync(vm.config.sshKeyPath, keyDest);
+        fs.chmodSync(keyDest, 0o600);
+        if (fs.existsSync(vm.config.sshKeyPath + ".pub")) fs.copyFileSync(vm.config.sshKeyPath + ".pub", keyDest + ".pub");
+      }
+    } catch (err) {
+      logger.warn({ err }, "Golden image saved but credential sidecar failed — clones may need manual SSH setup");
+    }
+    logger.info({ vm: vm.id, dest }, "Golden image saved");
+    res.json({ success: true, message: `Golden ${vm.osKind} image saved — new ${vm.osKind} VMs will start from it.`, path: dest });
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    res.status(500).json({ success: false, message: err instanceof Error ? err.message : String(err) });
+  } finally {
+    goldenSavesInFlight.delete(dest);
+  }
+});
+
+router.get("/vm/golden/status", (_req: Request, res: Response) => {
+  const out: Record<string, { exists: boolean; sizeGb?: number; savedAt?: string }> = {};
+  for (const kind of ["windows", "linux"] as const) {
+    const p = goldenImagePath(kind);
+    try {
+      const st = fs.statSync(p);
+      out[kind] = { exists: true, sizeGb: Math.round((st.size / 1024 ** 3) * 10) / 10, savedAt: st.mtime.toISOString() };
+    } catch { out[kind] = { exists: false }; }
+  }
+  res.json(out);
 });
 
 // GET /vm/:id/provision/stream — SSE progress for auto-provisioning.

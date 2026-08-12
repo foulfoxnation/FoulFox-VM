@@ -1,0 +1,15 @@
+[Unit]
+Description=FoulFox first-boot hardware benchmark (vibe check)
+# After the stack is up so the Ollama tokens/sec probe can find a model; the
+# script itself is a fast no-op on every boot after results exist.
+After=foulfox-prepare.service ollama.service
+Wants=foulfox-prepare.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/foulfox-benchmark
+# The AI probe can legitimately take a couple of minutes on CPU-only boxes.
+TimeoutStartSec=10min
+
+[Install]
+WantedBy=multi-user.target

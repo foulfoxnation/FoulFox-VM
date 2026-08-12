@@ -32,6 +32,10 @@ systemctl enable foulfox-gpu-fallback.service
 # Automatic app updates: periodic check + apply via foulfox-patcher.
 chmod 0755 /usr/local/sbin/foulfox-update-autocheck
 systemctl enable foulfox-update-check.timer
+# First-boot hardware benchmark ("vibe check") — one-time, results feed the
+# Diagnostics tab via /api/system/benchmark.
+chmod 0755 /usr/local/bin/foulfox-benchmark
+systemctl enable foulfox-benchmark.service
 
 # ── Enable plug-and-play hardware daemons ────────────────────────────────────
 # NetworkManager (wired auto-DHCP + wifi management) and BlueZ (Bluetooth). The

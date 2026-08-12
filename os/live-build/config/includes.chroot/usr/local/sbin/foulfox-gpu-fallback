@@ -25,6 +25,16 @@ has_drm() {
   return 1
 }
 
+# VFIO passthrough: when the GPU is reserved for a VM (FOULFOX_VFIO_IDS set),
+# do NOT bind a host display driver to it — vfio-pci owns it. The host either
+# has a second GPU (auto-loads its own driver) or runs headless.
+# shellcheck disable=SC1091
+[ -f /etc/foulfox/foulfox.env ] && . /etc/foulfox/foulfox.env
+if [ -n "${FOULFOX_VFIO_IDS:-}" ]; then
+  log "FOULFOX_VFIO_IDS set — GPU reserved for VM passthrough, skipping host driver bind"
+  exit 0
+fi
+
 NVIDIA_GPU=0
 if command -v lspci >/dev/null 2>&1 && lspci -n 2>/dev/null | grep -qi ' 10de:'; then
   NVIDIA_GPU=1

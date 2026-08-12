@@ -13,12 +13,32 @@ import { Label } from "@/components/ui/label";
 import { Camera, Loader2 } from "lucide-react";
 import { useSnapshotVm } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
+import { authedFetch } from "@/lib/shell-token";
 
 export function SnapshotModal({ disabled }: { disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
+  const [goldenSaving, setGoldenSaving] = useState(false);
   const snapshotVm = useSnapshotVm();
   const { toast } = useToast();
+
+  const handleSaveGolden = async () => {
+    setGoldenSaving(true);
+    try {
+      const r = await authedFetch("/api/vm/default/golden/save", { method: "POST" });
+      const body = await r.json().catch(() => ({}));
+      if (r.ok && body?.success) {
+        toast({ title: "Golden image saved", description: body.message });
+        setOpen(false);
+      } else {
+        toast({ title: "Couldn't save golden image", variant: "destructive", description: body?.message || `HTTP ${r.status}` });
+      }
+    } catch (err) {
+      toast({ title: "Couldn't save golden image", variant: "destructive", description: String(err) });
+    } finally {
+      setGoldenSaving(false);
+    }
+  };
 
   const handleSnapshot = (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,6 +96,24 @@ export function SnapshotModal({ disabled }: { disabled?: boolean }) {
             </Button>
           </div>
         </form>
+        <div className="mt-2 border-t border-border pt-3">
+          <div className="mb-2 text-xs text-muted-foreground">
+            Golden image: save this installed VM as the base for new VMs — they clone
+            from it in minutes instead of reinstalling Windows. The VM must be fully
+            stopped.
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={goldenSaving}
+            onClick={handleSaveGolden}
+            data-testid="button-save-golden"
+          >
+            {goldenSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Save as golden image
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );

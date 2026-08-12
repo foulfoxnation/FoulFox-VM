@@ -1,0 +1,80 @@
+#!/bin/sh
+# FoulFox OS — first-boot hardware benchmark ("vibe check").
+# Measures what actually matters for agent coding on this machine and writes
+# one JSON file the shell's Diagnostics tab reads via /api/system/benchmark:
+#   * disk write/read throughput on the persistent data dir
+#   * a single-thread CPU score (sha256 over 256 MB of zeros)
+#   * local AI speed (Ollama tokens/sec) when a model is available
+#   * GPU presence
+# Idempotent: skips if results already exist (delete the JSON to re-run).
+# Never exits non-zero — a benchmark must not block boot.
+set -u
+
+# shellcheck disable=SC1091
+[ -f /etc/foulfox/foulfox.env ] && . /etc/foulfox/foulfox.env
+DATA_DIR="${ODYSSEUS_DATA_DIR:-/var/lib/foulfox}"
+OUT="$DATA_DIR/benchmark.json"
+TMP="$DATA_DIR/.benchmark-scratch"
+
+[ -f "$OUT" ] && { echo "foulfox-benchmark: results exist, skipping"; exit 0; }
+mkdir -p "$DATA_DIR" 2>/dev/null || exit 0
+
+json_num() { printf '%s' "${1:-0}" | grep -qE '^[0-9]+(\.[0-9]+)?$' && printf '%s' "$1" || printf '0'; }
+
+# ── Disk: 512 MB write, then read back (drop cache best-effort) ──────────────
+WRITE_MBS=0; READ_MBS=0
+if dd if=/dev/zero of="$TMP" bs=1M count=512 conv=fdatasync 2>"$TMP.log"; then
+  WRITE_MBS=$(awk '/bytes/ {print int($(NF-1)); exit}' "$TMP.log" 2>/dev/null || echo 0)
+  # dd reports "X MB/s" as the second-to-last field on GNU coreutils.
+  sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+  if dd if="$TMP" of=/dev/null bs=1M 2>"$TMP.log"; then
+    READ_MBS=$(awk '/bytes/ {print int($(NF-1)); exit}' "$TMP.log" 2>/dev/null || echo 0)
+  fi
+fi
+rm -f "$TMP" "$TMP.log" 2>/dev/null || true
+
+# ── CPU: seconds to sha256 256 MB of zeros, single thread ────────────────────
+CPU_START=$(date +%s%N 2>/dev/null || date +%s)
+dd if=/dev/zero bs=1M count=256 2>/dev/null | sha256sum >/dev/null 2>&1 || true
+CPU_END=$(date +%s%N 2>/dev/null || date +%s)
+CPU_MS=$(( (CPU_END - CPU_START) / 1000000 ))
+[ "$CPU_MS" -le 0 ] && CPU_MS=1
+
+# ── GPU presence ──────────────────────────────────────────────────────────────
+GPU_NAME=""
+command -v nvidia-smi >/dev/null 2>&1 && \
+  GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
+
+# ── Local AI: tokens/sec on the default model (bounded, best-effort) ─────────
+AI_TPS=0; AI_MODEL=""
+OLLAMA_URL="http://127.0.0.1:11434"
+if command -v curl >/dev/null 2>&1; then
+  AI_MODEL=$(curl -sf --max-time 5 "$OLLAMA_URL/api/tags" 2>/dev/null \
+    | sed -n 's/.*"name":"\([^"]*\)".*/\1/p' | head -1)
+  if [ -n "$AI_MODEL" ]; then
+    RESP=$(curl -sf --max-time 120 "$OLLAMA_URL/api/generate" \
+      -d "{\"model\":\"$AI_MODEL\",\"prompt\":\"Write a haiku about foxes.\",\"stream\":false}" 2>/dev/null || true)
+    EVAL_COUNT=$(printf '%s' "$RESP" | sed -n 's/.*"eval_count":\([0-9]*\).*/\1/p')
+    EVAL_NS=$(printf '%s' "$RESP" | sed -n 's/.*"eval_duration":\([0-9]*\).*/\1/p')
+    if [ -n "$EVAL_COUNT" ] && [ -n "$EVAL_NS" ] && [ "$EVAL_NS" -gt 0 ] 2>/dev/null; then
+      AI_TPS=$(awk "BEGIN {printf \"%.1f\", $EVAL_COUNT / ($EVAL_NS / 1000000000)}")
+    fi
+  fi
+fi
+
+CORES=$(nproc 2>/dev/null || echo 1)
+RAM_GB=$(awk '/MemTotal/ {printf "%.0f", $2/1048576}' /proc/meminfo 2>/dev/null || echo 0)
+
+cat > "$OUT" <<JSON
+{
+  "ranAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "cpu": { "cores": $(json_num "$CORES"), "sha256_256mb_ms": $(json_num "$CPU_MS") },
+  "memoryGb": $(json_num "$RAM_GB"),
+  "disk": { "writeMBps": $(json_num "$WRITE_MBS"), "readMBps": $(json_num "$READ_MBS") },
+  "gpu": "$GPU_NAME",
+  "ai": { "model": "$AI_MODEL", "tokensPerSec": $(json_num "$AI_TPS") }
+}
+JSON
+chown foulfox:foulfox "$OUT" 2>/dev/null || true
+echo "foulfox-benchmark: wrote $OUT"
+exit 0
