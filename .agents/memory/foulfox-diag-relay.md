@@ -18,3 +18,8 @@ Gotchas:
 - esbuild bundle rewrites `__dirname` to `dist/` — resolve repo-relative paths from `process.cwd()` in api-server, or files land outside the workspace.
 - Reconnect safety needs a connection-generation guard: async follower setup must abort if the socket died during source discovery, else orphan SSE followers leak and double-stream.
 - Dev-domain URL is hardcoded as default; a new workspace/domain means updating `DEFAULT_RELAY_URL` or setting `FOULFOX_RELAY_URL` on-device.
+
+## Backpressure & clock skew (Aug 2026)
+- The relay client once DROPPED lines silently when the WS send buffer hit 512KB — at (re)connect all ~30 followers dump buffers at once, so high-volume sources (system journal, busy app logs) crowded out one-line diagnostic breadcrumbs from quiet sources (e.g. `Registry: status=...` for a stopped app). Fixed with a bounded FIFO queue (cap 2000, drop-oldest, 250ms flusher) cleared on reconnect.
+- **How to apply:** if a quiet source's expected header/breadcrumb lines are missing from `.local/machine-logs/`, suspect congestion at connect, not the source.
+- Device clock can be hours behind workspace time (RTC/NTP drift, resets across reboots). Sink line prefixes carry DEVICE timestamps; file mtimes carry workspace receive time. Never compare the two directly when building timelines.

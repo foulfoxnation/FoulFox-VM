@@ -28,3 +28,6 @@ cloud-init `authorized_keys`; Windows `administrators_authorized_keys`).
   `/api/vm/list`, `/api/vm/:id/agent-health` return honest failures when the VM is
   down). Real boot-testing of Linux + Windows guests must happen on a virt-capable
   host.
+
+## ssh-keygen fallback (Aug 2026)
+- Older ISOs shipped WITHOUT openssh-client, so per-VM key generation failed forever on disk-installed machines ("ssh-keygen is not installed" every 5 min) and OS packages can't be patched via app-bundle updates. ensureVmSshKey now falls back to a pure-Node openssh-key-v1 ed25519 writer (verified against `ssh-keygen -y`); openssh-client added to the ISO package list for new builds.
