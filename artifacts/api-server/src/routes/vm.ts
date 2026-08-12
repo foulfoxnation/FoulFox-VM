@@ -35,7 +35,7 @@ import {
   isOsKind,
   type OsKind,
 } from "../lib/vm-capabilities";
-import { startProvisioning, startCloneProvisioning, subscribeProvisioning, cancelProvisioning, buildWindowsDevSetupScript, ensureVmSshKey } from "../lib/vm-provision";
+import { startProvisioning, startCloneProvisioning, subscribeProvisioning, cancelProvisioning, buildWindowsDevSetupScript, ensureVmSshKey, windowsNeedsInstaller } from "../lib/vm-provision";
 import { authMode, checkAgentHealth, runSshCommand, runScpPull, runScpPush } from "../lib/vm-ssh";
 import { OS_IMAGES, toPublic, getOsImage, isOsImageId } from "../lib/os-catalog";
 import { logger } from "../lib/logger";
@@ -80,6 +80,12 @@ function provisionThenStart(vmId: string): void {
       const fresh = getVm(vmId);
       if (!fresh) return;
       if (!fresh.config.diskPath && !fresh.config.isoPath) return; // still no media
+      // Still a blank disk with no installer (e.g. Microsoft download failed
+      // again): starting would only boot into the UEFI shell — don't.
+      if (windowsNeedsInstaller(fresh)) {
+        logger.warn({ vm: vmId }, "Provisioning finished without an installer ISO; not auto-starting a blank Windows disk");
+        return;
+      }
       const r = startVm(fresh);
       logger.info({ vm: vmId, ok: r.ok, state: r.state, message: r.message }, "Auto-start after provisioning");
     })
@@ -375,12 +381,14 @@ router.post("/vm/:id/start", (req: Request, res: Response) => {
   // provisioning pass — it re-scans the frontload staging dir, adopts the ISO,
   // creates the disk, and updates the record — instead of dead-ending with an
   // unactionable toast.
-  if (!vm.config.diskPath && !vm.config.isoPath) {
+  // Also treat "blank disk + no installer ISO" as no media: booting it would
+  // only reach the UEFI shell, so fetch the installer instead.
+  if ((!vm.config.diskPath && !vm.config.isoPath) || windowsNeedsInstaller(vm)) {
     provisionThenStart(vm.id);
     res.json({
       success: false,
       message:
-        "No disk or ISO attached yet — fetching a Windows ISO now (frontloaded files, then Microsoft download). The VM will start automatically as soon as it's ready.",
+        "No bootable Windows found yet — fetching a Windows ISO now (frontloaded files, then Microsoft download). The VM will start automatically as soon as it's ready.",
       state: "provisioning",
     });
     return;
@@ -666,12 +674,12 @@ router.post("/vm/start", (_req: Request, res: Response) => {
   if (!vm) { res.json(StartVmResponse.parse({ success: false, message: "Default VM not initialized", state: "error" })); return; }
   // Same self-heal as /vm/:id/start: no media yet → kick a provisioning pass
   // (re-scans frontloaded ISOs) instead of a dead-end error.
-  if (!vm.config.diskPath && !vm.config.isoPath) {
+  if ((!vm.config.diskPath && !vm.config.isoPath) || windowsNeedsInstaller(vm)) {
     provisionThenStart(vm.id);
     res.json(StartVmResponse.parse({
       success: false,
       message:
-        "No disk or ISO attached yet — fetching a Windows ISO now (frontloaded files, then Microsoft download). The VM will start automatically as soon as it's ready.",
+        "No bootable Windows found yet — fetching a Windows ISO now (frontloaded files, then Microsoft download). The VM will start automatically as soon as it's ready.",
       state: "provisioning",
     }));
     return;

@@ -87,6 +87,33 @@ class CancelledError extends Error {
   constructor() { super("download cancelled by user"); this.name = "CancelledError"; }
 }
 
+// A qcow2 that has never had an OS installed onto it is almost fully sparse:
+// a fresh 64G disk allocates well under 1 MiB on the host, while any real
+// Windows install allocates 10+ GiB. Use the on-disk allocation (st.blocks) —
+// not the apparent file size — to tell a blank disk from an installed one.
+export function diskLooksBlank(diskPath: string | null | undefined): boolean {
+  if (!diskPath) return true;
+  try {
+    const st = fs.statSync(diskPath);
+    return st.blocks * 512 < 1024 * 1024 * 1024; // < 1 GiB allocated → blank
+  } catch {
+    return true; // missing/unreadable disk = nothing installed
+  }
+}
+
+// A Windows VM with a blank disk and no installer ISO can only boot into the
+// UEFI shell — it needs an installer before starting is useful. Treat it the
+// same as "no media" so provisioning (frontload scan + Microsoft download)
+// keeps retrying instead of dead-ending on a ready-looking empty disk.
+export function windowsNeedsInstaller(vm: {
+  osKind: string;
+  config: { isoPath: string | null; diskPath: string | null };
+}): boolean {
+  if (vm.osKind !== "windows") return false;
+  if (vm.config.isoPath && fs.existsSync(vm.config.isoPath)) return false;
+  return diskLooksBlank(vm.config.diskPath);
+}
+
 export async function startProvisioning(vmId: string): Promise<void> {
   const existing = inFlight.get(vmId);
   if (existing) return existing;
@@ -133,7 +160,12 @@ async function doStartProvisioning(vmId: string): Promise<void> {
   if (vm.config.diskPath && vm.provisioning.status === "ready") {
     const hasUnattend = !!vm.config.unattendIsoPath && fs.existsSync(vm.config.unattendIsoPath);
     const needsUnattend = vm.osKind === "windows" && !hasUnattend;
-    if (!needsUnattend) return;
+    // A "ready" Windows VM whose disk is still blank and has no installer ISO
+    // was marked ready prematurely (e.g. the appliance pre-creates the disk, or
+    // an earlier Microsoft download failed). Fall through so the frontload scan
+    // + Microsoft download get another chance instead of no-oping forever.
+    const missingInstaller = windowsNeedsInstaller(vm);
+    if (!needsUnattend && !missingInstaller) return;
   }
 
   try {
