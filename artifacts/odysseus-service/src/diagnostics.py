@@ -80,11 +80,14 @@ def _http_post(url: str, payload: Any = None, timeout: float = 10.0) -> tuple[in
     # require auth. Send our internal bridge token — the api-server accepts it
     # as X-Odysseus-Internal-Token. Without this every self-heal POST is
     # rejected with "invalid token" and the check can never actually heal.
-    try:
-        from core.middleware import INTERNAL_TOOL_TOKEN, INTERNAL_TOOL_HEADER
-        headers[INTERNAL_TOOL_HEADER] = INTERNAL_TOOL_TOKEN
-    except Exception:
-        pass
+    # SCOPED to the known loopback api-server base only, so a future caller
+    # hitting any other URL can never leak the privileged token.
+    if url.startswith(API + "/"):
+        try:
+            from core.middleware import INTERNAL_TOOL_TOKEN, INTERNAL_TOOL_HEADER
+            headers[INTERNAL_TOOL_HEADER] = INTERNAL_TOOL_TOKEN
+        except Exception:
+            pass
     req  = urllib.request.Request(url, data=data, headers=headers)
     try:
         r = urllib.request.urlopen(req, timeout=timeout)
