@@ -492,34 +492,56 @@ async function provisionMacOs(vmId: string): Promise<void> {
   });
 }
 
-// ── Download with progress + abort support ────────────────────────────────────────
-function download(url: string, dest: string, onProgress: (pct: number) => void, signal?: AbortSignal): Promise<void> {
+// ── Download with progress, abort, resume + retry support ─────────────────────────
+// Large ISO downloads (6+ GB from Microsoft) regularly die mid-stream on flaky
+// links. One attempt: resume the .part file via HTTP Range when the server
+// supports it. On network failure the .part is KEPT so the next attempt (or a
+// whole later provisioning pass) picks up where it stopped; it is only removed
+// on cancel or a non-resumable HTTP status.
+function downloadAttempt(url: string, dest: string, onProgress: (pct: number) => void, signal?: AbortSignal, redirects = 0): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(new CancelledError()); return; }
+    if (redirects > 8) { reject(new Error("download failed: too many redirects")); return; }
     const tmp = dest + ".part";
     const client = url.startsWith("https") ? https : http;
-    const file = fs.createWriteStream(tmp);
+    let offset = 0;
+    try { offset = fs.statSync(tmp).size; } catch { /* no partial yet */ }
 
-    const cleanup = () => { try { file.close(); } catch { /**/ } fs.rmSync(tmp, { force: true }); };
-    const onAbort = () => { req.destroy(); cleanup(); reject(new CancelledError()); };
+    let file: fs.WriteStream | null = null;
+    const discardPart = () => { try { file?.close(); } catch { /**/ } fs.rmSync(tmp, { force: true }); };
+    const keepPart = () => { try { file?.close(); } catch { /**/ } };
+    const onAbort = () => { req.destroy(); discardPart(); reject(new CancelledError()); };
     signal?.addEventListener("abort", onAbort, { once: true });
+    const done = (fn: () => void) => { signal?.removeEventListener("abort", onAbort); fn(); };
 
-    const req = client.get(url, (res) => {
-      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        signal?.removeEventListener("abort", onAbort);
-        file.close();
+    const headers: Record<string, string> = {};
+    if (offset > 0) headers["range"] = `bytes=${offset}-`;
+
+    const req = client.get(url, { headers }, (res) => {
+      const code = res.statusCode ?? 0;
+      if (code >= 300 && code < 400 && res.headers.location) {
+        res.resume();
+        done(() => downloadAttempt(res.headers.location!, dest, onProgress, signal, redirects + 1).then(resolve, reject));
+        return;
+      }
+      if (offset > 0 && code === 200) {
+        // Server ignored the Range header — start over from zero.
+        offset = 0;
         fs.rmSync(tmp, { force: true });
-        download(res.headers.location, dest, onProgress, signal).then(resolve, reject);
+      } else if (offset > 0 && code === 416) {
+        // Partial is at/past EOF or the file changed upstream — restart clean.
+        res.resume();
+        fs.rmSync(tmp, { force: true });
+        done(() => downloadAttempt(url, dest, onProgress, signal, redirects + 1).then(resolve, reject));
+        return;
+      } else if (code !== 200 && code !== 206) {
+        res.resume();
+        done(() => { discardPart(); reject(new Error(`download failed: HTTP ${code}`)); });
         return;
       }
-      if (res.statusCode !== 200) {
-        signal?.removeEventListener("abort", onAbort);
-        cleanup();
-        reject(new Error(`download failed: HTTP ${res.statusCode}`));
-        return;
-      }
-      const total = Number(res.headers["content-length"] || 0);
-      let received = 0;
+      file = fs.createWriteStream(tmp, code === 206 ? { flags: "a" } : {});
+      const total = offset + Number(res.headers["content-length"] || 0);
+      let received = offset;
       let lastPct = -1;
       res.on("data", (chunk: Buffer) => {
         received += chunk.length;
@@ -528,22 +550,54 @@ function download(url: string, dest: string, onProgress: (pct: number) => void, 
           if (pct !== lastPct) { lastPct = pct; onProgress(pct); }
         }
       });
+      // A mid-body connection reset surfaces on the RESPONSE stream, not the
+      // request — without these handlers the promise hung forever and the
+      // partial was lost.
+      const midStreamFail = (err: Error) => done(() => {
+        keepPart(); // keep bytes for resume
+        if (!signal?.aborted) reject(new Error(`download interrupted at ${received} bytes: ${err.message}`));
+      });
+      res.on("error", midStreamFail);
+      res.on("aborted", () => midStreamFail(new Error("connection aborted by remote")));
       res.pipe(file);
-      file.on("finish", () => file.close(() => {
-        signal?.removeEventListener("abort", onAbort);
-        fs.renameSync(tmp, dest);
-        onProgress(100);
-        resolve();
-      }));
+      file.on("error", (err) => done(() => { keepPart(); if (!signal?.aborted) reject(err); }));
+      file.on("finish", () => {
+        if (total > 0 && received < total) return; // premature close; error path handles it
+        file!.close(() => done(() => {
+          fs.renameSync(tmp, dest);
+          onProgress(100);
+          resolve();
+        }));
+      });
     });
-    req.on("error", (err) => {
-      signal?.removeEventListener("abort", onAbort);
-      cleanup();
+    req.on("error", (err) => done(() => {
+      keepPart(); // network error — keep partial for resume
       // req.destroy() raises an ECONNRESET — don't double-reject with it when
       // we've already rejected with CancelledError from the abort listener.
       if (!signal?.aborted) reject(err);
-    });
+    }));
   });
+}
+
+// Retry wrapper: up to `attempts` tries with a short backoff, resuming the
+// .part file each time. Cancel always aborts immediately.
+async function download(url: string, dest: string, onProgress: (pct: number) => void, signal?: AbortSignal, attempts = 5): Promise<void> {
+  let lastErr: unknown = null;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      await downloadAttempt(url, dest, onProgress, signal);
+      return;
+    } catch (err) {
+      if (err instanceof CancelledError) throw err;
+      lastErr = err;
+      logger.warn({ err, url, dest, attempt: i, attempts }, "download attempt failed; will resume from partial");
+      if (i < attempts) await new Promise<void>((r, rej) => {
+        const t = setTimeout(r, 3000 * i);
+        signal?.addEventListener("abort", () => { clearTimeout(t); rej(new CancelledError()); }, { once: true });
+      });
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 function runQemuImg(args: string[]): Promise<void> {
