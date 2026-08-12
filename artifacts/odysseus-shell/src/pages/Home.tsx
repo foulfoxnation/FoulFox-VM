@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { SettingsModal } from "@/components/SettingsModal";
 import { DiskSetupModal } from "@/components/DiskSetupModal";
 import { PowerMenu } from "@/components/PowerMenu";
+import KeyboardShortcutsMenu from "@/components/KeyboardShortcutsMenu";
 import { SetupWizard } from "@/components/SetupWizard";
 import { ConnectLlamaModal } from "@/components/ConnectLlamaModal";
 import { SnapshotModal } from "@/components/SnapshotModal";
@@ -184,6 +185,7 @@ export default function Home() {
           <ConnectLlamaModal />
           <SnapshotModal />
           <DiskSetupModal />
+          <KeyboardShortcutsMenu />
           <PowerMenu />
           <SettingsModal />
         </div>
