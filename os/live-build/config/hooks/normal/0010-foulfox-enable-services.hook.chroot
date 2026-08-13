@@ -32,6 +32,9 @@ systemctl enable foulfox-gpu-fallback.service
 # Automatic app updates: periodic check + apply via foulfox-patcher.
 chmod 0755 /usr/local/sbin/foulfox-update-autocheck
 systemctl enable foulfox-update-check.timer
+# Boot health guard: after two consecutive unhealthy boots, auto-revert the
+# app stack to the previous release (ultimately the baked recovery image).
+systemctl enable foulfox-health-guard.service
 # First-boot hardware benchmark ("vibe check") — one-time, results feed the
 # Diagnostics tab via /api/system/benchmark.
 chmod 0755 /usr/local/bin/foulfox-benchmark

@@ -36,6 +36,13 @@ if [ "$quiet" -gt 0 ] && [ "$uptime_s" -lt "$quiet" ]; then
   exit 0
 fi
 
+# Finalize a stalled/frozen previous apply (freeze, OOM-kill, RuntimeMaxSec
+# expiry): if the transient unit died with the recovery marker still armed,
+# this reverts to the last known-good right now instead of waiting for a
+# reboot. No-op while an update is actually running or nothing is pending.
+/usr/local/sbin/foulfox-patcher recover \
+  || log "stalled-update recovery could not flip back; will retry (and boot recovery stays armed)"
+
 # Never race a manual/in-flight update. The patcher also guards this, but
 # checking here avoids clobbering the visible status.json mid-apply.
 if systemctl is-active --quiet foulfox-update.service 2>/dev/null; then

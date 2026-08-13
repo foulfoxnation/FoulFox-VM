@@ -1,0 +1,16 @@
+[Unit]
+Description=FoulFox boot health guard (auto-revert after repeated failed boots)
+# Ordering only (no Requires): this must run even when the app services failed
+# to start — that failing boot is exactly what it exists to detect.
+After=foulfox-prepare.service odysseus-service.service foulfox-api.service
+
+[Service]
+Type=oneshot
+# foulfox.env may not exist yet on a brand-new stick; '-' makes it optional.
+EnvironmentFile=-/etc/foulfox/foulfox.env
+ExecStart=/usr/local/sbin/foulfox-patcher boot-health
+# Health wait (FOULFOX_BOOT_HEALTH_TIMEOUT, default 5min) + revert + restart.
+TimeoutStartSec=12min
+
+[Install]
+WantedBy=multi-user.target

@@ -141,7 +141,8 @@ health_ok() {
 }
 
 wait_health() {
-  local deadline=$(( $(date +%s) + HEALTH_TIMEOUT ))
+  local budget="${1:-$HEALTH_TIMEOUT}"
+  local deadline=$(( $(date +%s) + budget ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
     health_ok && return 0
     sleep 3
@@ -154,6 +155,69 @@ restart_services() {
   # Odysseus first (foulfox-api orders After= it); restart never targets the
   # transient updater unit, so this cannot kill us.
   systemctl restart odysseus-service.service foulfox-api.service
+}
+
+# A candidate app dir is usable only if it actually contains the built services.
+# A recorded rollback target can itself be broken (pruned release, half-written
+# dir, lost persistence) — never flip to a target that would just fail again.
+release_valid() {
+  local t="$1"
+  [ -n "$t" ] || return 1
+  [ -f "$t/artifacts/api-server/dist/index.mjs" ] || return 1
+  [ -f "$t/artifacts/odysseus-shell/dist/public/index.html" ] || return 1
+  return 0
+}
+
+# Print every VALID recovery candidate in preference order: the armed pending
+# target, the recorded previous release, then the baked read-only app
+# ("release 0" — the recovery image that always exists on the ISO and can never
+# be corrupted by an update). $1 (optional) = resolved path to exclude (the
+# target that is currently failing — "reverting" to it would be a no-op).
+recovery_candidates() {
+  local avoid="${1:-}" c seen=""
+  for c in "$(cat "$PENDING_FILE" 2>/dev/null || true)" \
+           "$(cat "$PREVIOUS_FILE" 2>/dev/null || true)" \
+           "$BAKED_APP"; do
+    release_valid "$c" || continue
+    local r; r="$(readlink -f "$c" 2>/dev/null || printf '%s' "$c")"
+    [ -n "$avoid" ] && [ "$r" = "$avoid" ] && continue
+    case "$seen" in *"|$r|"*) continue;; esac
+    seen="$seen|$r|"
+    printf '%s\n' "$c"
+  done
+}
+
+# Best single candidate; FAILS (non-zero, empty output) when nothing — not even
+# the baked app — passes validation. Callers must fail closed on that, never
+# invent a target.
+pick_known_good() {
+  local c
+  c="$(recovery_candidates "" | head -n 1)"
+  [ -n "$c" ] || return 1
+  printf '%s\n' "$c"
+}
+
+# Health-verified revert: walk the candidates (excluding $1, the failing
+# target), flip + restart + health-gate each until one actually comes up.
+# Prints the verified target on success. On failure the LAST candidate tried
+# stays current (by construction that is the baked app when it validated) and
+# callers must keep their recovery marker armed / report degraded.
+revert_verified() {
+  local avoid="${1:-}" c
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    if ! set_current "$c"; then
+      log "revert: could not flip app-current to $c; trying next candidate"
+      continue
+    fi
+    restart_services || true
+    if wait_health; then
+      printf '%s\n' "$c"
+      return 0
+    fi
+    log "revert: $c restarted but did not become healthy; trying next candidate"
+  done < <(recovery_candidates "$avoid")
+  return 1
 }
 
 # Atomically point app-current at $1 (a release's app dir or the baked app).
@@ -581,11 +645,30 @@ do_rollback() {
 # never start — let alone boot-loop — on the next boot. No-op when no marker.
 do_boot_recover() {
   harden_update_dirs
-  [ -f "$PENDING_FILE" ] || return 0
+  local reason=""
+  if [ -f "$PENDING_FILE" ]; then
+    reason="interrupted update"
+  elif ! release_valid "$APP_CURRENT"; then
+    # No marker, but the active pointer is broken anyway (dangling symlink,
+    # pruned release, half-written dir — e.g. a freeze mid-install corrupted
+    # it). Without this the services would just fail with nothing to run.
+    reason="broken app-current"
+  else
+    return 0
+  fi
   local good
-  good="$(cat "$PENDING_FILE" 2>/dev/null || true)"
-  [ -n "$good" ] && [ -e "$good" ] || good="$BAKED_APP"
-  log "interrupted update detected at boot — reverting to last known-good: $good"
+  if ! good="$(pick_known_good)"; then
+    # Nothing — not even the baked app — passed validation. Never invent a
+    # target: fail closed (first-run exit-1 blocks the services) and keep any
+    # marker armed so a later boot (e.g. after persistence is fixed) retries.
+    log "boot-recover: NO valid recovery target exists (baked app failed validation too) — refusing to start the app stack"
+    return 1
+  fi
+  # Quarantine whatever was live so the auto-update timer can't immediately
+  # re-pull the same version that just got us here.
+  local cur; cur="$(current_version)"
+  [ -n "$cur" ] && mark_rejected "$cur"
+  log "$reason detected at boot — reverting to last known-good: $good"
   if ! set_current "$good"; then
     # Could not flip back at boot — keep the marker armed so the next boot retries
     # rather than silently dropping recovery and leaving the bad release live.
@@ -601,6 +684,96 @@ do_boot_recover() {
     "An update was interrupted before it finished (power loss?) and was reverted to the last working version." "interrupted"
   # Recovery (flip back + disarm) succeeded; a cosmetic status-write failure must
   # NOT make this return non-zero, or first-run would refuse to boot a good stack.
+  return 0
+}
+
+# ── recover (root; finalizes a stalled/frozen apply without waiting for reboot) ──
+# The transient update unit can die without cleaning up (hard freeze, OOM-kill,
+# RuntimeMaxSec expiry). If it's no longer running but the pending marker is
+# still armed, the flip happened and was never verified — revert NOW, exactly as
+# a reboot would, instead of leaving an unverified release live until the next
+# power cycle. Called by foulfox-update-autocheck on every timer tick.
+do_recover() {
+  harden_update_dirs
+  systemctl is-active --quiet "$TRANSIENT_UNIT.service" 2>/dev/null && return 0
+  if [ -f "$PENDING_FILE" ]; then
+    local cur; cur="$(current_version)"
+    [ -n "$cur" ] && mark_rejected "$cur"
+    local avoid; avoid="$(readlink -f "$APP_CURRENT" 2>/dev/null || true)"
+    log "stalled update with recovery armed — reverting (health-verified)"
+    local good
+    if good="$(revert_verified "$avoid")"; then
+      # Only a target that actually came up healthy disarms the marker.
+      clear_pending
+      TARGET_VER=""; PREV_VERSION=""
+      write_status "rolled-back" "failed" "An update stalled (the machine may have frozen) and was rolled back automatically." "stalled"
+      return 0
+    fi
+    # No candidate verified healthy: keep the marker armed (boot recovery
+    # retries) and say so. The last flip attempted was the baked app, so the
+    # device is at least pointed at the recovery image.
+    write_status "failed" "failed" "An update stalled and no rollback target came up healthy yet — recovery stays armed." "stalled"
+    return 1
+  fi
+  # No marker: the apply died BEFORE the flip, so nothing was changed. Just
+  # close out a status.json stuck on "running" so the UI stops showing progress.
+  local state
+  state="$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1])).get("state","") or "")
+except Exception: print("")' "$STATUS_FILE" 2>/dev/null || printf '')"
+  if [ "$state" = "running" ]; then
+    TARGET_VER=""; PREV_VERSION=""
+    write_status "failed" "failed" "The update stopped unexpectedly before switching versions — nothing was changed." "stalled"
+  fi
+  return 0
+}
+
+# ── boot-health (root; boot-loop guard run AFTER the app services each boot) ─────
+# Last line of defense: the update completed and no marker is armed, but the
+# stack still won't come up (e.g. the freeze corrupted something the shape check
+# can't see). Two consecutive unhealthy boots ⇒ revert to the previous release,
+# or ultimately the baked recovery image. Never flips away FROM the baked app —
+# that's the floor; below it only a reflash helps.
+do_boot_health() {
+  harden_update_dirs
+  local fails="$UPDATES_DIR/boot-failures"
+  if wait_health "${FOULFOX_BOOT_HEALTH_TIMEOUT:-300}"; then
+    rm -f "$fails" 2>/dev/null || true
+    return 0
+  fi
+  # Rule out a transient (slow first boot, crashed process): one in-place
+  # restart + shorter re-wait before touching any release pointers.
+  log "app stack unhealthy after initial wait — one in-place restart before escalating"
+  restart_services || true
+  if wait_health; then
+    rm -f "$fails" 2>/dev/null || true
+    return 0
+  fi
+  local n; n="$(cat "$fails" 2>/dev/null || echo 0)"
+  case "$n" in *[!0-9]*|"") n=0;; esac
+  n=$((n+1))
+  atomic_write "$fails" "$n" || true
+  local curtgt baked
+  curtgt="$(readlink -f "$APP_CURRENT" 2>/dev/null || true)"
+  baked="$(readlink -f "$BAKED_APP" 2>/dev/null || printf '%s' "$BAKED_APP")"
+  if [ "$curtgt" = "$baked" ]; then
+    log "running the baked recovery image and still unhealthy — not an update problem (reflash or hardware?)"
+    return 0
+  fi
+  local cur; cur="$(current_version)"
+  [ -n "$cur" ] && mark_rejected "$cur"
+  log "escalating in this boot: reverting after $n failed boot(s)"
+  local good
+  if good="$(revert_verified "$curtgt")"; then
+    rm -f "$fails" 2>/dev/null || true
+    TARGET_VER=""; PREV_VERSION=""
+    write_status "rolled-back" "failed" "FoulFox failed to start and was reverted to a known-good version automatically." "boot-health"
+  else
+    # Every candidate (down to the baked recovery image) was tried and none
+    # verified healthy — the device stays pointed at the last attempt (baked).
+    # Keep the failure counter so the operator can see how long this persisted.
+    log "boot-health: no recovery target came up healthy — device degraded (now pointed at the recovery image)"
+  fi
   return 0
 }
 
@@ -675,7 +848,11 @@ launch_detached() {
   mkdir -p "$UPDATES_DIR"
   write_status "checking" "running" "$startmsg"
   # --collect garbage-collects the unit after exit so the next run is clean.
+  # RuntimeMaxSec is the freeze guard: a hung apply (stuck download, wedged venv
+  # build, frozen restart) gets SIGKILLed instead of holding the device forever;
+  # `recover` (timer) or boot-recover (reboot) then finishes the rollback.
   systemd-run --collect --unit="$TRANSIENT_UNIT" \
+    --property="RuntimeMaxSec=${FOULFOX_UPDATE_MAX_SECONDS:-3600}" \
     /usr/local/sbin/foulfox-patcher "$runner" >/dev/null 2>&1 \
     || { write_status "failed" "failed" "Could not start the updater." "spawn"; echo '{"started":false,"reason":"systemd-run failed"}'; return 1; }
   echo '{"started":true}'
@@ -691,8 +868,10 @@ main() {
     check)        do_check ;;
     status)       do_status ;;
     boot-recover) do_boot_recover ;;
+    recover)      do_recover ;;
+    boot-health)  do_boot_health ;;
     *)
-      echo "usage: foulfox-patcher {check|status|apply|rollback|boot-recover}" >&2
+      echo "usage: foulfox-patcher {check|status|apply|rollback|boot-recover|recover|boot-health}" >&2
       exit 2
       ;;
   esac
